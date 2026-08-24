@@ -85,3 +85,21 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(player_id, season_id)
 );
+
+-- Completed match results, accumulated season by season as the calendar
+-- export syncs. Live Editor's export only ever contains the *current*
+-- season's fixtures, so this is the only place multi-season match
+-- history (needed for the Manager PPG-by-season widget) lives.
+CREATE TABLE IF NOT EXISTS matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    match_date TEXT,
+    competition TEXT,
+    opponent TEXT,
+    is_home INTEGER,
+    user_score INTEGER,
+    opponent_score INTEGER,
+    result TEXT, -- 'W' / 'D' / 'L'
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, match_date, opponent, competition)
+);
