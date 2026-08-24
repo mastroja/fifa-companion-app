@@ -1,0 +1,32 @@
+{
+  "name": "fifa-career-companion",
+  "version": "1.0.0",
+  "description": "Companion app for EA FC Career Mode",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.fifa.companion",
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "assets/**/*"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "sql.js": "^1.14.2"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
+  }
+}

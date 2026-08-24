@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EA FC Companion App</title>
+  <style>
+    :root {
+      --bg-color: #0e1117;
+      --card-bg: #161b22;
+      --accent-color: #00ff87;
+      --text-color: #f0f6fc;
+      --text-dim: #8b949e;
+      --border-color: #30363d;
+      --hover-color: #21262d;
+      --expand-bg: #0d1117;
+      
+      /* Attribute Colors */
+      --attr-red: #f85149;
+      --attr-orange: #db6d28;
+      --attr-yellow: #e3b341;
+      --attr-light-green: #56d364;
+      --attr-green: #2ea043;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { background-color: var(--bg-color); color: var(--text-color); padding: 24px; line-height: 1.5; }
+
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
+    h1 { font-size: 24px; font-weight: 700; cursor: pointer; }
+    
+    .header-controls { display: flex; gap: 12px; align-items: center; }
+    .badge {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      color: var(--text-color);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* Navigation Tabs */
+    .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab-btn { padding: 8px 16px; cursor: pointer; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-dim); font-weight: 600; border-radius: 6px; transition: 0.2s; }
+    .tab-btn.active { background: var(--accent-color); color: #000; border-color: var(--accent-color); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .table-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow-x: auto; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    thead { background-color: #1f242d; border-bottom: 1px solid var(--border-color); }
+    th { padding: 14px 16px; font-size: 12px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+    th:hover { color: var(--accent-color); background-color: var(--hover-color); }
+    td { padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; white-space: nowrap; }
+    
+    .player-row:hover, .transfer-row:hover { background-color: var(--hover-color); }
+    .player-row, .clickable-name { cursor: pointer; }
+    
+    .player-name-cell { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .player-name { font-weight: 600; color: #58a6ff; display: inline-flex; align-items: center; gap: 6px; }
+    .jersey-badge { background: var(--expand-bg); border: 1px solid var(--border-color); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+    .expand-icon { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; }
+    .player-row.expanded .expand-icon { transform: rotate(90deg); color: var(--accent-color); }
+
+    .loan-badge { font-size: 11px; padding: 2px 6px; background: #388bfd22; border: 1px solid #388bfd55; border-radius: 4px; color: #58a6ff; margin-left: 6px; }
+    .injury-badge { font-size: 11px; padding: 2px 6px; background: #da363322; border: 1px solid #da363355; border-radius: 4px; color: #f85149; margin-left: 6px; }
+
+    .rating-badge { padding: 2px 8px; border-radius: 4px; font-weight: 700; background-color: #238636; color: #fff; }
+    .pos-badge { padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; text-transform: uppercase; background-color: #21262d; border: 1px solid var(--border-color); }
+    .pos-ATT { color: #ff4d4d; } .pos-MID { color: #00ff87; } .pos-DEF { color: #38bdf8; } .pos-GK { color: #facc15; }
+
+    .empty-state { text-align: center; padding: 40px; color: var(--text-dim); }
+    .zero-stat { color: var(--text-dim); }
+    .stat-cs { color: #38bdf8; } .stat-yellow { color: #facc15; } .stat-red { color: #ff4d4d; }
+
+    /* Expandable Competition Sub-Row */
+    .detail-row { display: none; background-color: var(--expand-bg); }
+    .detail-row.open { display: table-row; }
+    .detail-wrapper { padding: 16px 24px; }
+    .sub-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
+    .sub-table th { background: #161b22; font-size: 11px; padding: 10px 14px; color: var(--text-dim); border-bottom: 1px solid var(--border-color); }
+    .sub-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border-color); }
+    .sub-table tr:last-child td { border-bottom: none; }
+
+    /* Filter Controls */
+    .filter-container { margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    select, .search-input { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--card-bg); color: var(--text-color); font-size: 14px; }
+    .search-input { flex-grow: 1; min-width: 220px; }
+    .search-input:focus { outline: none; border-color: var(--accent-color); }
+
+    /* Calendar Dashboard Styles */
+    .calendar-dashboard {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      display: grid;
+      grid-template-columns: 1.2fr 1.8fr;
+      gap: 20px;
+    }
+    @media (max-width: 900px) {
+      .calendar-dashboard { grid-template-columns: 1fr; }
+    }
+    .cal-stats-box h3, .cal-competitions-box h3 {
+      font-size: 13px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    .stats-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      background: var(--expand-bg);
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      text-align: center;
+    }
+    .stat-box-item span { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
+    .stat-box-item strong { font-size: 16px; color: var(--text-color); }
+
+    .competitions-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .competition-status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--expand-bg);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      font-size: 13px;
+    }
+    .comp-name { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
+    .comp-standing { font-weight: 700; color: var(--accent-color); background: #00ff8715; padding: 2px 8px; border-radius: 4px; border: 1px solid #00ff8733; }
+
+    /* Player Profile Page Styles */
+    .back-btn { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; margin-bottom: 20px; display: inline-flex; align-items: center; gap: 6px; }
+    .back-btn:hover { background: var(--hover-color); color: var(--accent-color); }
+
+    .refresh-btn { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-color); padding: 6px 14px; border-radius: 20px; cursor: pointer; font-weight: 600; font-size: 13px; }
+    .refresh-btn:hover { background: var(--hover-color); color: var(--accent-color); border-color: var(--accent-color); }
+    .refresh-btn:disabled { opacity: 0.6; cursor: default; }
+    .refresh-btn.spinning { color: var(--accent-color); }
+
+    .profile-header { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .profile-main-info h2 { font-size: 28px; margin-bottom: 8px; color: #58a6ff; display: flex; align-items: center; gap: 12px; }
+    .profile-meta { display: flex; gap: 12px; color: var(--text-dim); font-size: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+    .profile-ratings-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: var(--expand-bg); padding: 12px; border-radius: 6px; border: 1px solid var(--border-color); text-align: center; }
+    .rating-box span { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
+    .rating-box strong { font-size: 18px; }
+
+    /* Attribute Color Classes */
+    .attr-val-red { color: var(--attr-red); }
+    .attr-val-orange { color: var(--attr-orange); }
+    .attr-val-yellow { color: var(--attr-yellow); }
+    .attr-val-light-green { color: var(--attr-light-green); }
+    .attr-val-green { color: var(--attr-green); }
+
+    /* Expandable Attribute Breakdown Details */
+    .clickable-card-header { cursor: pointer; user-select: none; transition: color 0.2s; }
+    .clickable-card-header:hover { color: var(--accent-color); }
+    .expandable-attr-content { display: none; margin-top: 14px; border-top: 1px solid var(--border-color); padding-top: 14px; }
+    .expandable-attr-content.open { display: block; }
+    .sub-attr-category { margin-bottom: 12px; }
+    .sub-attr-category:last-child { margin-bottom: 0; }
+    .sub-attr-category h4 { font-size: 13px; color: var(--accent-color); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .sub-attr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 13px; background: var(--expand-bg); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); }
+    .sub-attr-item span { color: var(--text-dim); }
+    .sub-attr-item strong { float: right; }
+
+    .profile-sections-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .profile-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .profile-card h3 { font-size: 16px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-color); display: flex; justify-content: space-between; align-items: center; }
+    .attr-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+    .attr-item span { color: var(--text-dim); }
+    .attr-item strong { float: right; }
+    
+    .trait-badge { display: inline-block; background: #21262d; border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; color: var(--accent-color); }
+    .timeline-item { position: relative; padding-left: 20px; border-left: 2px solid var(--border-color); margin-bottom: 12px; }
+    .timeline-item:last-child { margin-bottom: 0; }
+    .timeline-item::before { content: ''; position: absolute; left: -5px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-color); }
+    .timeline-year { font-size: 12px; color: var(--text-dim); }
+    .timeline-title { font-weight: 600; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1 onclick="switchTab('squad')">EA FC Companion App</h1>
+    <div class="header-controls">
+      <span class="badge" id="current-ingame-date">N/A</span>
+      <span class="badge" id="status-badge">Awaiting Data...</span>
+      <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- Navigation Tabs -->
+  <div class="nav-tabs" id="main-nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('squad')" id="btn-squad">Squad Stats</button>
+    <button class="tab-btn" onclick="switchTab('transfers')" id="btn-transfers">Transfers Hub</button>
+    <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
+  </div>
+
+  <!-- Squad Stats Tab -->
+  <div id="squad-tab" class="tab-content active">
+    <div class="filter-container">
+      <input 
+        type="text" 
+        id="squad-search" 
+        class="search-input" 
+        placeholder="Search player name or position (e.g., ST, CM)..." 
+        oninput="renderTableRows()"
+      />
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortTable('name')">Player ↕</th>
+            <th onclick="sortTable('pos_label')">Pos ↕</th>
+            <th onclick="sortTable('overall')">OVR ↕</th>
+            <th onclick="sortTable('appearances')">Apps ↕</th>
+            <th onclick="sortTable('offensive_stat')">Goals ↕</th>
+            <th onclick="sortTable('assists')">Assists ↕</th>
+            <th onclick="sortTable('clean_sheets')">CS ↕</th>
+            <th onclick="sortTable('yellow_cards')">🟨 ↕</th>
+            <th onclick="sortTable('red_cards')">🟥 ↕</th>
+            <th onclick="sortTable('avg_rating')">Avg Rating ↕</th>
+          </tr>
+        </thead>
+        <tbody id="stats-body">
+          <tr><td colspan="10" class="empty-state">No squad data loaded.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Transfers Hub Tab -->
+  <div id="transfers-tab" class="tab-content">
+    <div class="filter-container">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <label for="transfer-filter" style="font-weight: bold; font-size: 14px;">Filter View:</label>
+        <select id="transfer-filter" onchange="filterAndRenderTransfers()">
+          <option value="my_team">My Team</option>
+          <option value="league">Around the League</option>
+          <option value="big_money">Big Money Moves (&gt;€60M)</option>
+        </select>
+      </div>
+      <input 
+        type="text" 
+        id="transfer-search" 
+        class="search-input" 
+        placeholder="Search player, from club, or to club..." 
+        oninput="filterAndRenderTransfers()"
+      />
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortTransfers('player_name')">Player ↕</th>
+            <th onclick="sortTransfers('from_team')">From ↕</th>
+            <th onclick="sortTransfers('to_team')">To ↕</th>
+            <th onclick="sortTransfers('fee')">Transfer Fee ↕</th>
+          </tr>
+        </thead>
+        <tbody id="transfers-tbody">
+          <tr><td colspan="4" class="empty-state">No transfer data loaded.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Calendar Tab -->
+  <div id="calendar-tab" class="tab-content">
+    
+    <!-- New Calendar Dashboard Header -->
+    <div class="calendar-dashboard">
+      <div class="cal-stats-box">
+        <h3>Match Performance Record</h3>
+        <div class="stats-summary-grid">
+          <div class="stat-box-item"><span>Played</span><strong id="stat-played">0</strong></div>
+          <div class="stat-box-item"><span>Record</span><strong id="stat-record">0-0-0</strong></div>
+          <div class="stat-box-item"><span>GF - GA</span><strong id="stat-goals">0 - 0</strong></div>
+          <div class="stat-box-item" style="grid-column: span 3; display: flex; justify-content: space-between; padding-top: 4px; border-top: 1px solid var(--border-color); margin-top: 4px;">
+            <span>Goal Difference: <strong id="stat-gd" style="color: var(--accent-color);">+0</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cal-competitions-box">
+        <h3>Competitions & Standings</h3>
+        <div class="competitions-grid" id="competitions-status-list">
+          <div class="competition-status-row">
+            <span class="comp-name">⚽ Premier League</span>
+            <span class="comp-standing">1st Place</span>
+          </div>
+          <div class="competition-status-row">
+            <span class="comp-name">🏆 UEFA Champions League</span>
+            <span class="comp-standing">Quarter-Finals</span>
+          </div>
+          <div class="competition-status-row">
+            <span class="comp-name">🛡️ Domestic Cup</span>
+            <span class="comp-standing">Semi-Finals</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="filter-container">
+      <select id="calendar-filter" onchange="filterAndRenderCalendar()">
+        <option value="all">All Fixtures & Results</option>
+        <option value="upcoming">Upcoming Fixtures</option>
+        <option value="completed">Completed Results</option>
+      </select>
+      <input 
+        type="text" 
+        id="calendar-search" 
+        class="search-input" 
+        placeholder="Search opponent or competition..." 
+        oninput="filterAndRenderCalendar()"
+      />
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="sortCalendar('date')" style="cursor: pointer;">Date <span id="sort-indicator-date">↕</span></th>
+            <th onclick="sortCalendar('competition')" style="cursor: pointer;">Competition <span id="sort-indicator-competition">↕</span></th>
+            <th>Opponent</th>
+            <th>Home / Away</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody id="calendar-tbody">
+          <tr><td colspan="5" class="empty-state">No calendar data loaded.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Player Profile Detailed Tab -->
+  <div id="profile-tab" class="tab-content">
+    <button class="back-btn" onclick="goBackFromProfile()">← Back to List</button>
+    <div id="profile-content-container"></div>
+  </div>
+
+  <script>
+    let currentCalendar = [];
+    let currentIngameDate = null;
+    let currentSortColumn1 = 'date';
+    let currentSortAscending1 = true;
+
+    function processIncomingCalendar(data) {
+      currentCalendar = Array.isArray(data) ? data : (data?.calendar || []);
+      const activeDate = data?.current_date || 'N/A';
+      currentIngameDate = data?.current_date || null;
+
+      document.getElementById('current-ingame-date').textContent = formatDateMMDDYYYY(activeDate);
+      
+      updateCalendarSummaryStats();
+      
+      if (data?.competitions && Array.isArray(data.competitions)) {
+        updateCompetitionsDisplay(data.competitions);
+      }
+
+      filterAndRenderCalendar();
+    }
+
+    function updateCalendarSummaryStats() {
+      let played = 0;
+      let wins = 0;
+      let draws = 0;
+      let losses = 0;
+      let goalsFor = 0;
+      let goalsAgainst = 0;
+
+      currentCalendar.forEach(match => {
+        if (match.played && match.score) {
+          const parts = match.score.split('-');
+          if (parts.length === 2) {
+            const homeScore = parseInt(parts[0].trim(), 10);
+            const awayScore = parseInt(parts[1].trim(), 10);
+            
+            const userTeamScore = match.is_home ? homeScore : awayScore;
+            const opponentScore = match.is_home ? awayScore : homeScore;
+
+            played++;
+            goalsFor += userTeamScore;
+            goalsAgainst += opponentScore;
+
+            if (userTeamScore > opponentScore) {
+              wins++;
+            } else if (userTeamScore === opponentScore) {
+              draws++;
+            } else {
+              losses++;
+            }
+          }
+        }
+      });
+
+      const goalDiff = goalsFor - goalsAgainst;
+      const gdString = goalDiff > 0 ? `+${goalDiff}` : `${goalDiff}`;
+
+      document.getElementById('stat-played').textContent = played;
+      document.getElementById('stat-record').textContent = `${wins}-${draws}-${losses}`;
+      document.getElementById('stat-goals').textContent = `${goalsFor} - ${goalsAgainst}`;
+      document.getElementById('stat-gd').textContent = gdString;
+    }
+
+    function updateCompetitionsDisplay(comps) {
+      const container = document.getElementById('competitions-status-list');
+      if (!container) return;
+      
+      container.innerHTML = '';
+      comps.forEach(comp => {
+        const row = document.createElement('div');
+        row.className = 'competition-status-row';
+        row.innerHTML = `
+          <span class="comp-name">${comp.icon || '⚽'} ${comp.name}</span>
+          <span class="comp-standing">${comp.standing}</span>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function sortCalendar(column) {
+      if (currentSortColumn1 === column) {
+        currentSortAscending1 = !currentSortAscending1;
+      } else {
+        currentSortColumn1 = column;
+        currentSortAscending1 = true;
+      }
+      filterAndRenderCalendar();
+    }
+
+    function filterAndRenderCalendar() {
+      const filterValue = document.getElementById('calendar-filter').value;
+      const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
+      const tbody = document.getElementById('calendar-tbody');
+      tbody.innerHTML = '';
+
+      let filtered = currentCalendar.filter(match => {
+        const isCompleted = match.played || match.score !== undefined;
+        if (filterValue === 'upcoming' && isCompleted) return false;
+        if (filterValue === 'completed' && !isCompleted) return false;
+
+        if (searchQuery) {
+          const opponent = (match.opponent || '').toLowerCase();
+          const comp = (match.competition || '').toLowerCase();
+          return opponent.includes(searchQuery) || comp.includes(searchQuery);
+        }
+        return true;
+      });
+
+      filtered.sort((a, b) => {
+        let valA = a[currentSortColumn1] || '';
+        let valB = b[currentSortColumn1] || '';
+        
+        if (currentSortColumn1 === 'date') {
+          valA = parseInt(valA, 10) || 0;
+          valB = parseInt(valB, 10) || 0;
+        } else {
+          valA = valA.toString().toLowerCase();
+          valB = valB.toString().toLowerCase();
+        }
+
+        if (valA < valB) return currentSortAscending1 ? -1 : 1;
+        if (valA > valB) return currentSortAscending1 ? 1 : -1;
+        return 0;
+      });
+
+      document.getElementById('sort-indicator-date').textContent = currentSortColumn1 === 'date' ? (currentSortAscending1 ? '▲' : '▼') : '↕';
+      document.getElementById('sort-indicator-competition').textContent = currentSortColumn1 === 'competition' ? (currentSortAscending1 ? '▲' : '▼') : '↕';
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No fixtures match your criteria.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach(match => {
+        const row = document.createElement('tr');
+        row.className = 'transfer-row';
+        
+        let resultDisplay = `<span style="color: var(--text-dim);">Scheduled</span>`;
+        
+        if (match.played && match.score) {
+          const parts = match.score.split('-');
+          if (parts.length === 2) {
+            const homeScore = parseInt(parts[0].trim(), 10);
+            const awayScore = parseInt(parts[1].trim(), 10);
+            
+            const userTeamScore = match.is_home ? homeScore : awayScore;
+            const opponentScore = match.is_home ? awayScore : homeScore;
+            
+            let color = 'var(--text-main)';
+            if (userTeamScore > opponentScore) {
+              color = '#3fb950';
+            } else if (userTeamScore < opponentScore) {
+              color = '#f85149';
+            }
+            
+            resultDisplay = `<strong style="color: ${color};">${match.score}</strong>`;
+          } else {
+            resultDisplay = `<strong>${match.score}</strong>`;
+          }
+        }
+
+        row.innerHTML = `
+          <td><strong>${formatDateMMDDYYYY(match.date)}</strong></td>          
+          <td>${match.competition || 'League Match'}</td>
+          <td>${match.opponent || 'TBD'}</td>
+          <td>${match.is_home ? 'Home' : 'Away'}</td>
+          <td>${resultDisplay}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    let currentPlayers = [];
+    let currentTransfers = [];
+    let currentSortColumn = 'pos_label';
+    let sortAscending = false;
+
+    // Club name -> badge image URL (or null if the lookup failed/found
+    // nothing), so we don't refetch the same club every time a profile
+    // opens. Badges come from TheSportsDB's free public API.
+    const clubBadgeCache = new Map();
+
+    async function fetchClubBadgeUrl(clubName) {
+      if (!clubName) return null;
+      if (clubBadgeCache.has(clubName)) return clubBadgeCache.get(clubName);
+
+      try {
+        const res = await fetch(`https://www.thesportsdb.com/api/v1/json/3/searchteams.php?t=${encodeURIComponent(clubName)}`);
+        const data = await res.json();
+        const badgeUrl = (data && Array.isArray(data.teams) && data.teams[0] && data.teams[0].strBadge) || null;
+        clubBadgeCache.set(clubName, badgeUrl);
+        return badgeUrl;
+      } catch (e) {
+        console.error('Failed to fetch club badge for', clubName, e);
+        clubBadgeCache.set(clubName, null);
+        return null;
+      }
+    }
+
+    // No real face-photo source exists for EA FC squad players (Live
+    // Editor doesn't export image files, and there's no reliable public
+    // API mapping arbitrary in-game player names to real photos) — this
+    // generates a deterministic colored initials avatar instead.
+    function buildInitialsAvatar(name, sizePx, borderRadius) {
+      const initials = String(name || '?').trim().split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase() || '?';
+      let hash = 0;
+      const str = String(name || '');
+      for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const hue = Math.abs(hash) % 360;
+      const bg = `hsl(${hue}, 45%, 32%)`;
+      const fontSize = Math.round(sizePx * 0.4);
+      return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: ${bg}; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; font-size: ${fontSize}px; font-weight: 700; color: #fff;">${initials}</div>`;
+    }
+
+    let currentTransferSortColumn = 'fee';
+    let transferSortAscending = false;
+    let previousActiveTab = 'squad';
+
+    const POSITION_SORT_ORDER = {
+      'GK': 1, 'SW': 2, 'LWB': 3, 'LB': 4, 'LCB': 5, 'CB': 6, 'RCB': 7, 'RB': 8, 'RWB': 9,
+      'LDM': 10, 'CDM': 11, 'RDM': 12, 'LM': 13, 'LCM': 14, 'CM': 15, 'RCM': 16, 'RM': 17, 
+      'LAM': 18, 'CAM': 19, 'RAM': 20, 'LW': 21, 'LF': 22, 'CF': 23, 'RF': 24, 'RW': 25, 
+      'LS': 26, 'ST': 27, 'RS': 28, 'SUB': 29
+    };
+
+    const POSITION_MAP = {
+        0: { label: 'GK', group: 'GK' }, 
+        1: { label: 'SW', group: 'DEF' }, 
+        2: { label: 'RB', group: 'DEF' }, 
+        3: { label: 'CB', group: 'DEF' }, 
+        4: { label: 'LCB', group: 'DEF' },
+        5: { label: 'RCB', group: 'DEF' },
+        6: { label: 'RWB', group: 'DEF' }, 
+        7: { label: 'LB', group: 'DEF' }, 
+        8: { label: 'LWB', group: 'DEF' },
+        9: { label: 'RDM', group: 'MID' }, 
+        10: { label: 'CDM', group: 'MID' }, 
+        11: { label: 'LDM', group: 'MID' },
+        12: { label: 'RM', group: 'MID' }, 
+        13: { label: 'RCM', group: 'MID' }, 
+        14: { label: 'CM', group: 'MID' },
+        15: { label: 'LCM', group: 'MID' }, 
+        16: { label: 'LM', group: 'MID' }, 
+        17: { label: 'RAM', group: 'MID' },
+        18: { label: 'CAM', group: 'MID' }, 
+        19: { label: 'LAM', group: 'MID' }, 
+        20: { label: 'RF', group: 'ATT' },
+        21: { label: 'CF', group: 'ATT' }, 
+        22: { label: 'LF', group: 'ATT' }, 
+        23: { label: 'RW', group: 'ATT' },
+        24: { label: 'RS', group: 'ATT' }, 
+        25: { label: 'ST', group: 'ATT' }, 
+        26: { label: 'LS', group: 'ATT' },
+        27: { label: 'LW', group: 'ATT' }
+    };
+
+    const NATIONALITY_MAP = {
+      1: "Albania", 2: "Andorra", 3: "Armenia", 4: "Austria", 5: "Azerbaijan",
+      6: "Belarus", 7: "Belgium", 8: "Bosnia-Herzegovina", 9: "Bulgaria", 10: "Croatia",
+      11: "Cyprus", 12: "Czech Republic", 13: "Denmark", 14: "England", 15: "Estonia",
+      16: "Faroe Islands", 17: "Finland", 18: "France", 19: "FYR Macedonia", 20: "Georgia",
+      21: "Germany", 22: "Greece", 23: "Hungary", 24: "Iceland", 25: "Ireland",
+      26: "Israel", 27: "Italy", 28: "Latvia", 29: "Liechtenstein", 30: "Lithuania",
+      31: "Luxembourg", 32: "Malta", 33: "Moldova", 34: "Netherlands", 35: "Northern Ireland",
+      36: "Norway", 37: "Poland", 38: "Portugal", 39: "Romania", 40: "Russia",
+      41: "San Marino", 42: "Scotland", 43: "Slovakia", 44: "Slovenia", 45: "Spain",
+      46: "Sweden", 47: "Switzerland", 48: "Turkey", 49: "Ukraine", 50: "Wales",
+      51: "Serbia", 52: "Argentina", 53: "Bolivia", 54: "Brazil", 55: "Chile",
+      56: "Colombia", 57: "Ecuador", 58: "Paraguay", 59: "Peru", 60: "Uruguay",
+      61: "Venezuela", 70: "Canada", 72: "Costa Rica", 82: "Jamaica", 83: "Mexico",
+      95: "United States", 97: "Algeria", 103: "Cameroon", 111: "Egypt", 117: "Ghana",
+      129: "Morocco", 133: "Nigeria", 136: "Senegal", 140: "South Africa", 145: "Tunisia",
+      155: "China PR", 159: "India", 161: "Iran", 163: "Japan", 167: "South Korea",
+      183: "Australia", 195: "New Zealand"
+    };
+
+    function getLastName(fullName) {
+      if (!fullName) return '';
+      const parts = String(fullName).trim().split(/\s+/);
+      return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+    }
+
+    function getNationalityName(nationality) {
+        if (!nationality) return 'N/A';
+        let id = Number(String(nationality).replace(/\D/g, ''));
+        if (id && NATIONALITY_MAP[id]) {
+            return NATIONALITY_MAP[id];
+        }
+        return typeof nationality === 'string' ? nationality : 'N/A';
+    }
+
+    // ISO 3166-1 alpha-2 codes for the nationality IDs above, used to build
+    // flag emoji. England/Scotland/Wales have no standard country code —
+    // those use the real subdivision-flag emoji sequences instead.
+    const NATIONALITY_ISO_MAP = {
+      1: "AL", 2: "AD", 3: "AM", 4: "AT", 5: "AZ", 6: "BY", 7: "BE", 8: "BA",
+      9: "BG", 10: "HR", 11: "CY", 12: "CZ", 13: "DK", 15: "EE", 16: "FO",
+      17: "FI", 18: "FR", 19: "MK", 20: "GE", 21: "DE", 22: "GR", 23: "HU",
+      24: "IS", 25: "IE", 26: "IL", 27: "IT", 28: "LV", 29: "LI", 30: "LT",
+      31: "LU", 32: "MT", 33: "MD", 34: "NL", 35: "GB", 36: "NO", 37: "PL",
+      38: "PT", 39: "RO", 40: "RU", 41: "SM", 43: "SK", 44: "SI", 45: "ES",
+      46: "SE", 47: "CH", 48: "TR", 49: "UA", 51: "RS", 52: "AR", 53: "BO",
+      54: "BR", 55: "CL", 56: "CO", 57: "EC", 58: "PY", 59: "PE", 60: "UY",
+      61: "VE", 70: "CA", 72: "CR", 82: "JM", 83: "MX", 95: "US", 97: "DZ",
+      103: "CM", 111: "EG", 117: "GH", 129: "MA", 133: "NG", 136: "SN",
+      140: "ZA", 145: "TN", 155: "CN", 159: "IN", 161: "IR", 163: "JP",
+      167: "KR", 183: "AU", 195: "NZ"
+    };
+
+    const NATIONALITY_FLAG_OVERRIDES = {
+      14: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', // England
+      42: '🏴󠁧󠁢󠁳󠁣󠁴󠁿', // Scotland
+      50: '🏴󠁧󠁢󠁷󠁬󠁳󠁿'  // Wales
+    };
+
+    function getFlagEmoji(nationality) {
+      if (!nationality) return '🏳️';
+      const id = Number(String(nationality).replace(/\D/g, ''));
+      if (NATIONALITY_FLAG_OVERRIDES[id]) return NATIONALITY_FLAG_OVERRIDES[id];
+      const iso = NATIONALITY_ISO_MAP[id];
+      if (!iso) return '🏳️';
+      return String.fromCodePoint(...iso.split('').map(c => 127397 + c.charCodeAt(0)));
+    }
+
+    function getAttributeColorClass(val) {
+      const num = Number(val || 0);
+      if (num < 50) return 'attr-val-red';
+      if (num <= 69) return 'attr-val-orange';
+      if (num <= 79) return 'attr-val-yellow';
+      if (num <= 89) return 'attr-val-light-green';
+      return 'attr-val-green';
+    }
+
+    function toggleAttributeBreakdown() {
+      const content = document.getElementById('expandable-attrs');
+      const icon = document.getElementById('attr-expand-icon');
+      if (content.classList.contains('open')) {
+        content.classList.remove('open');
+        icon.textContent = '▶';
+      } else {
+        content.classList.add('open');
+        icon.textContent = '▼';
+      }
+    }
+
+    function calculatePace(attrs = {}, baseOvr = 75) {
+      const sprint = attrs.sprint_speed ?? attrs.speed ?? baseOvr;
+      const accel = attrs.acceleration ?? baseOvr;
+      return Math.round((sprint * 0.55) + (accel * 0.45));
+    }
+
+    function calculateShooting(attrs = {}, baseOvr = 75) {
+      const finishing = attrs.finishing ?? baseOvr;
+      const longShots = attrs.long_shots ?? baseOvr;
+      const shotPower = attrs.shot_power ?? baseOvr;
+      const positioning = attrs.positioning ?? baseOvr;
+      const penalties = attrs.penalties ?? baseOvr;
+      const volleys = attrs.volleys ?? baseOvr;
+
+      return Math.round(
+        (finishing * 0.45) +
+        (longShots * 0.20) +
+        (shotPower * 0.20) +
+        (positioning * 0.05) +
+        (penalties * 0.05) +
+        (volleys * 0.05)
+      );
+    }
+
+    function calculatePassing(attrs = {}, baseOvr = 75) {
+      const shortPassing = attrs.short_passing ?? baseOvr;
+      const vision = attrs.vision ?? baseOvr;
+      const crossing = attrs.crossing ?? baseOvr;
+      const longPassing = attrs.long_passing ?? baseOvr;
+      const curve = attrs.curve ?? baseOvr;
+      const fkAccuracy = attrs.fk_accuracy ?? baseOvr;
+
+      return Math.round(
+        (shortPassing * 0.35) +
+        (vision * 0.20) +
+        (crossing * 0.20) +
+        (longPassing * 0.15) +
+        (curve * 0.05) +
+        (fkAccuracy * 0.05)
+      );
+    }
+
+    function calculateDribbling(attrs = {}, baseOvr = 75) {
+      const dribbling = attrs.dribbling ?? baseOvr;
+      const ballControl = attrs.ball_control ?? baseOvr;
+      const agility = attrs.agility ?? baseOvr;
+      const balance = attrs.balance ?? baseOvr;
+
+      return Math.round(
+        (dribbling * 0.50) +
+        (ballControl * 0.35) +
+        (agility * 0.10) +
+        (balance * 0.05)
+      );
+    }
+
+    function calculateDefending(attrs = {}, baseOvr = 75) {
+      const marking = attrs.marking ?? attrs.defensive_awareness ?? baseOvr;
+      const standingTackle = attrs.standing_tackle ?? baseOvr;
+      const interceptions = attrs.interceptions ?? baseOvr;
+      const headingAccuracy = attrs.heading_accuracy ?? baseOvr;
+      const slidingTackle = attrs.sliding_tackle ?? baseOvr;
+
+      return Math.round(
+        (marking * 0.30) +
+        (standingTackle * 0.30) +
+        (interceptions * 0.20) +
+        (headingAccuracy * 0.10) +
+        (slidingTackle * 0.10)
+      );
+    }
+
+    function calculatePhysical(attrs = {}, baseOvr = 75) {
+      const strength = attrs.strength ?? baseOvr;
+      const stamina = attrs.stamina ?? baseOvr;
+      const aggression = attrs.aggression ?? baseOvr;
+      const jumping = attrs.jumping ?? baseOvr;
+
+      return Math.round(
+        (strength * 0.50) +
+        (stamina * 0.25) +
+        (aggression * 0.20) +
+        (jumping * 0.05)
+      );
+    }
+
+    // No game field exposes a market value, so this is an estimate — a
+    // steep curve off overall (a 90 OVR is worth far more than 1.5x a 60
+    // OVR, same shape as real transfer fees), boosted for unrealized
+    // potential, shaped by an age curve peaking in the mid-20s, and floored
+    // by wage (clubs don't pay star wages to bench players).
+    function estimateMarketValue(overall, potential, age, wage) {
+      const ovr = Number(overall) || 65;
+      const pot = Number(potential) || ovr;
+      const ageNum = Number(age) || 25;
+      const wageNum = Number(wage) || 0;
+
+      const ratingFactor = Math.pow(Math.max(ovr - 40, 1), 6) / 160;
+
+      const potentialGap = Math.min(Math.max(pot - ovr, 0), 20);
+      const potentialMultiplier = 1 + potentialGap * 0.05;
+
+      let ageMultiplier;
+      if (ageNum <= 21) ageMultiplier = 1.15;
+      else if (ageNum <= 27) ageMultiplier = 1.3;
+      else if (ageNum <= 30) ageMultiplier = 1.0;
+      else if (ageNum <= 33) ageMultiplier = 0.6;
+      else ageMultiplier = 0.35;
+
+      const estimated = ratingFactor * potentialMultiplier * ageMultiplier;
+      const wageFloor = wageNum * 150;
+
+      return Math.round(Math.max(estimated, wageFloor) / 1000) * 1000;
+    }
+
+    function buildDeltaSuffix(curr, prev) {
+      if (prev === null || prev === undefined) return '';
+      const diff = curr - prev;
+      if (diff > 0) return ` <span style="color:#3fb950; font-size:11px;">▲${diff}</span>`;
+      if (diff < 0) return ` <span style="color:#f85149; font-size:11px;">▼${Math.abs(diff)}</span>`;
+      return ` <span style="color:var(--text-dim); font-size:11px;">–</span>`;
+    }
+
+    // Renders a per-season table of each attribute category so growth (or
+    // decline) across career mode seasons is visible at a glance.
+    function buildAttributeGrowthHtml(chronoSeasons, isGoalkeeper) {
+      if (!chronoSeasons || chronoSeasons.length === 0) {
+        return `<div style="color: var(--text-dim); font-size: 13px;">No season history recorded yet.</div>`;
+      }
+
+      const categories = isGoalkeeper
+        ? [
+            ['OVR', s => Number(s.overall || 0)],
+            ['DIV', s => Number((s.attributes || {}).diving ?? s.overall ?? 0)],
+            ['HAN', s => Number((s.attributes || {}).handling ?? s.overall ?? 0)],
+            ['KIC', s => Number((s.attributes || {}).kicking ?? s.overall ?? 0)],
+            ['REF', s => Number((s.attributes || {}).reflexes ?? s.overall ?? 0)],
+            ['SPE', s => calculatePace(s.attributes || {}, Number(s.overall || 75))],
+            ['POS', s => Number((s.attributes || {}).gk_positioning ?? s.overall ?? 0)]
+          ]
+        : [
+            ['OVR', s => Number(s.overall || 0)],
+            ['PAC', s => calculatePace(s.attributes || {}, Number(s.overall || 75))],
+            ['SHO', s => calculateShooting(s.attributes || {}, Number(s.overall || 75))],
+            ['PAS', s => calculatePassing(s.attributes || {}, Number(s.overall || 75))],
+            ['DRI', s => calculateDribbling(s.attributes || {}, Number(s.overall || 75))],
+            ['DEF', s => calculateDefending(s.attributes || {}, Number(s.overall || 75))],
+            ['PHY', s => calculatePhysical(s.attributes || {}, Number(s.overall || 75))]
+          ];
+
+      const headerCells = chronoSeasons.map(s => `<th>${s.season_name}</th>`).join('');
+
+      const bodyRows = categories.map(([label, getter]) => {
+        let prevVal = null;
+        const cells = chronoSeasons.map(s => {
+          const val = getter(s);
+          const delta = buildDeltaSuffix(val, prevVal);
+          prevVal = val;
+          return `<td><strong class="${getAttributeColorClass(val)}">${val}</strong>${delta}</td>`;
+        }).join('');
+        return `<tr><td style="color: var(--text-dim); font-weight: 600;">${label}</td>${cells}</tr>`;
+      }).join('');
+
+      return `
+        <div style="overflow-x: auto;">
+          <table class="sub-table" style="min-width: 100%;">
+            <thead><tr><th>Attribute</th>${headerCells}</tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function formatDateMMDDYYYY(dateInput) {
+      if (!dateInput) return 'N/A';
+      let dateStr = String(dateInput).trim();
+      
+      if (/^\d{8}$/.test(dateStr)) {
+        const year = dateStr.substring(0, 4);
+        const month = dateStr.substring(4, 6);
+        const day = dateStr.substring(6, 8);
+        return `${month}-${day}-${year}`;
+      }
+
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${month}-${day}-${year}`;
+    }
+
+    function formatDuration(totalMonths) {
+      const monthsNum = Number(totalMonths || 0);
+      if (monthsNum <= 0) return '0 mos';
+      const years = Math.floor(monthsNum / 12);
+      const remainingMonths = monthsNum % 12;
+      if (years === 0) return `${monthsNum} mos`;
+      if (remainingMonths === 0) return `${years} yr${years > 1 ? 's' : ''}`;
+      return `${years} yr${years > 1 ? 's' : ''} (${remainingMonths} mo${remainingMonths > 1 ? 's' : ''})`;
+    }
+
+    function switchTab(tabName) {
+      if (tabName !== 'profile') {
+        previousActiveTab = tabName;
+        document.getElementById('main-nav-tabs').style.display = 'flex';
+      }
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+      document.getElementById(`${tabName}-tab`).classList.add('active');
+      const btn = document.getElementById(`btn-${tabName}`);
+      if (btn) btn.classList.add('active');
+    }
+
+    function goBackFromProfile() {
+      switchTab(previousActiveTab);
+    }
+
+    function getPositionInfo(posId) {
+      return POSITION_MAP[Number(posId)] || { label: 'SUB', group: 'MID' };
+    }
+
+    function formatMoney(amount) {
+      if (!amount) return 'Free / Loan';
+      if (amount >= 1000000) {
+        return `€${(amount / 1000000).toFixed(1)}M`;
+      } else if (amount > 0) {
+        return `€${(amount / 1000).toFixed(0)}K`;
+      }
+      return 'Free / Loan';
+    }
+
+    function parseBirthDate(dobInput) {
+      if (!dobInput) return null;
+      let str = String(dobInput).trim();
+      if (/^\d{8}$/.test(str)) {
+        const y = parseInt(str.substring(0, 4), 10);
+        const m = parseInt(str.substring(4, 6), 10) - 1;
+        const d = parseInt(str.substring(6, 8), 10);
+        return new Date(y, m, d);
+      }
+      const parsed = new Date(str);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function changeProfileSeason(identifier, seasonIndex) {
+      openPlayerProfile(identifier, parseInt(seasonIndex, 10));
+    }
+
+    async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
+      let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+
+      if (!player) {
+        player = { name: identifier };
+      }
+
+      let realSeasonHistory = [];
+      if (player.player_id && window.api && window.api.getPlayerHistory) {
+        try {
+          realSeasonHistory = await window.api.getPlayerHistory(player.player_id);
+        } catch (e) {
+          console.error('Failed to load player season history:', e);
+        }
+      }
+
+      const displayClubName = player.on_loan ? (player.loan_club_name || player.club_name) : player.club_name;
+      const clubBadgeUrl = await fetchClubBadgeUrl(displayClubName);
+
+      const posInfo = getPositionInfo(player.position_id);
+      const isGoalkeeper = player.position_id === 0 || posInfo.label === "GK";
+      const baseOvr = Number(player.overall || 75);
+      const jerseyDisplay = player.jersey_number ? `<span class="jersey-badge">#${player.jersey_number}</span>` : '';
+
+      const attrs = player.attributes || {};
+
+      let ageDisplay = '';
+      let playerAge = null;
+      const dobRaw = player.dob || player.birthdate;
+      const birthDate = parseBirthDate(dobRaw);
+
+      if (birthDate) {
+        // Age should track the in-game career date, not the real-world date —
+        // fall back to today only if no calendar export has come in yet.
+        const referenceDate = parseBirthDate(currentIngameDate) || new Date();
+        let age = referenceDate.getFullYear() - birthDate.getFullYear();
+        const m = referenceDate.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && referenceDate.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        if (!isNaN(age)) {
+          ageDisplay = ` (${age} yrs)`;
+          playerAge = age;
+        }
+      }
+
+      const formattedDob = formatDateMMDDYYYY(dobRaw);
+
+      const paceVal = calculatePace(attrs, baseOvr);
+      const shootingVal = calculateShooting(attrs, baseOvr);
+      const passingVal = calculatePassing(attrs, baseOvr);
+      const dribblingVal = calculateDribbling(attrs, baseOvr);
+      const defendingVal = calculateDefending(attrs, baseOvr);
+      const physicalVal = calculatePhysical(attrs, baseOvr);
+
+      const divVal = attrs.diving ?? baseOvr;
+      const hanVal = attrs.handling ?? baseOvr;
+      const kicVal = attrs.kicking ?? baseOvr;
+      const posVal = attrs.gk_positioning ?? baseOvr;
+      const refVal = attrs.reflexes ?? baseOvr;
+
+      let normalizedSeasons;
+      if (realSeasonHistory.length > 0) {
+        normalizedSeasons = realSeasonHistory.map(s => ({
+          season_name: s.season,
+          appearances: s.appearances || 0,
+          goals: s.goals || 0,
+          assists: s.assists || 0,
+          clean_sheets: s.clean_sheets || 0,
+          avg_rating: s.avg_rating || 0,
+          overall: s.overall,
+          potential: s.potential,
+          attributes: s.attributes || {}
+        }));
+      } else {
+        normalizedSeasons = [
+          {
+            season_name: player.current_season_name || 'Current Season',
+            appearances: player.appearances || 0,
+            goals: player.goals || 0,
+            assists: player.assists || 0,
+            clean_sheets: player.clean_sheets || 0,
+            avg_rating: player.avg_rating || 0,
+            overall: player.overall,
+            potential: player.potential,
+            attributes: player.attributes || {}
+          }
+        ];
+      }
+
+      // DB history comes back oldest -> newest, which is exactly the order
+      // the growth chart wants. The season-picker dropdown wants the most
+      // recent season selected by default, so it gets the reversed copy.
+      const chronoSeasons = normalizedSeasons;
+      let seasonsList = normalizedSeasons.slice().reverse();
+
+      selectedSeasonIndex = Math.max(0, Math.min(selectedSeasonIndex, seasonsList.length - 1));
+      let activeSeason = seasonsList[selectedSeasonIndex] || seasonsList[0];
+
+      let careerApps = 0, careerGoals = 0, careerAssists = 0, careerCS = 0;
+      seasonsList.forEach(s => {
+        careerApps += Number(s.appearances || 0);
+        careerGoals += Number(s.goals || 0);
+        careerAssists += Number(s.assists || 0);
+        careerCS += Number(s.clean_sheets || 0);
+      });
+
+      if (careerApps === 0 && player.competitions && player.competitions.length > 0) {
+        careerApps = player.competitions.reduce((sum, c) => sum + (Number(c.appearances) || 0), 0);
+        careerGoals = player.competitions.reduce((sum, c) => sum + (Number(c.goals) || 0), 0);
+        careerAssists = player.competitions.reduce((sum, c) => sum + (Number(c.assists) || 0), 0);
+        careerCS = player.competitions.reduce((sum, c) => sum + (Number(c.clean_sheets) || 0), 0);
+      }
+
+      const playerTransfers = currentTransfers.filter(t =>
+        (t.player_name || '').toLowerCase() === (player.name || '').toLowerCase()
+      );
+      const transferHistoryHtml = playerTransfers.length > 0
+        ? playerTransfers.map(t => `
+            <div class="timeline-item">
+              <div class="timeline-title">${t.from_team || 'Unknown'} → ${t.to_team || 'Unknown'}</div>
+              <div style="font-size: 13px; color: var(--accent-color);">${formatMoney(t.fee)}</div>
+            </div>
+          `).join('')
+        : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
+
+      const traitsHtml = (player.traits && player.traits.length > 0)
+        ? player.traits.map(t => `<span class="trait-badge">${t}</span>`).join('')
+        : `<span style="color: var(--text-dim); font-size: 13px;">No traits recorded.</span>`;
+
+      const playStylesHtml = (player.play_styles && player.play_styles.length > 0)
+        ? player.play_styles.map(ps => `<span class="trait-badge" style="color: #58a6ff;">${ps}</span>`).join('')
+        : `<span style="color: var(--text-dim); font-size: 13px;">No PlayStyles recorded.</span>`;
+
+      const attributeGrowthHtml = buildAttributeGrowthHtml(chronoSeasons, isGoalkeeper);
+
+      const headAssetSrc = player.headasset || player.headasset_url || player.photo || '';
+      const headAssetDisplay = headAssetSrc
+        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border-color); background: #21262d;" />`
+        : buildInitialsAvatar(player.name, 48, '50%');
+
+      const clubBadgeDisplay = clubBadgeUrl
+        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 1px solid var(--border-color); border-radius: 50%;" />`
+        : buildInitialsAvatar(displayClubName || 'N/A', 40, '50%');
+
+      const container = document.getElementById('profile-content-container');
+      container.innerHTML = `
+        <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 50px; height: 35px; background: #21262d; border: 1px solid var(--border-color); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 22px;" title="${getNationalityName(player.nationality)}">${getFlagEmoji(player.nationality)}</div>
+            ${clubBadgeDisplay}
+            ${buildInitialsAvatar(player.name, 45, '6px')}
+          </div>
+          <div style="text-align: right;">
+            <span style="font-size: 12px; color: var(--text-dim);">Market Value: <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></span>
+          </div>
+        </div>
+
+        <div class="profile-header">
+          <div class="profile-main-info">
+            <h2>
+              ${headAssetDisplay}
+              <span>${player.name || 'Unknown Player'}</span> 
+              ${jerseyDisplay}
+            </h2>
+            <div class="profile-meta">
+              <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
+              <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
+              <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
+              <span>Nationality: <strong>${getNationalityName(player.nationality)}</strong></span>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <span class="badge">Height: ${player.height}</span>
+              <span class="badge">Weight: ${player.weight}</span>
+              ${player.on_loan ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.loan_club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
+              ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
+            </div>
+          </div>
+          <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+            <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
+            <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}</strong>
+            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${player.potential ?? (baseOvr + 4)}</strong></span>
+          </div>
+          <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+            <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Current Form</span>
+            <strong style="font-size: 20px; color: #58a6ff; display: block; margin-top: 10px;">${player.form ?? 0}</strong>
+            <span style="font-size: 12px; color: var(--text-dim); display: block; margin-top: 6px;">Role ID: ${player.player_role_ ?? 'N/A'}</span>
+          </div>
+        </div>
+
+        <div class="profile-sections-grid">
+          <div>
+            <div class="profile-card">
+              <h3 class="clickable-card-header" onclick="toggleAttributeBreakdown()">
+                <span>Attribute Breakdown</span>
+                <span id="attr-expand-icon" style="font-size: 12px;">▶</span>
+              </h3>
+              <div class="profile-ratings-grid">
+                ${isGoalkeeper ? `
+                  <div class="rating-box"><span>DIV</span><strong class="${getAttributeColorClass(divVal)}">${divVal}</strong></div>
+                  <div class="rating-box"><span>HAN</span><strong class="${getAttributeColorClass(hanVal)}">${hanVal}</strong></div>
+                  <div class="rating-box"><span>KIC</span><strong class="${getAttributeColorClass(kicVal)}">${kicVal}</strong></div>
+                  <div class="rating-box"><span>REF</span><strong class="${getAttributeColorClass(refVal)}">${refVal}</strong></div>
+                  <div class="rating-box"><span>SPE</span><strong class="${getAttributeColorClass(paceVal)}">${paceVal}</strong></div>
+                  <div class="rating-box"><span>POS</span><strong class="${getAttributeColorClass(posVal)}">${posVal}</strong></div>
+                ` : `
+                  <div class="rating-box"><span>PAC</span><strong class="${getAttributeColorClass(paceVal)}">${paceVal}</strong></div>
+                  <div class="rating-box"><span>SHO</span><strong class="${getAttributeColorClass(shootingVal)}">${shootingVal}</strong></div>
+                  <div class="rating-box"><span>PAS</span><strong class="${getAttributeColorClass(passingVal)}">${passingVal}</strong></div>
+                  <div class="rating-box"><span>DRI</span><strong class="${getAttributeColorClass(dribblingVal)}">${dribblingVal}</strong></div>
+                  <div class="rating-box"><span>DEF</span><strong class="${getAttributeColorClass(defendingVal)}">${defendingVal}</strong></div>
+                  <div class="rating-box"><span>PHY</span><strong class="${getAttributeColorClass(physicalVal)}">${physicalVal}</strong></div>
+                `}
+              </div>
+
+              <!-- Detailed Categorized Breakdown Expansion -->
+              <div id="expandable-attrs" class="expandable-attr-content">
+                ${isGoalkeeper ? `
+                  <div class="sub-attr-category">
+                    <h4>Goalkeeping Attributes</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Diving:</span> <strong class="${getAttributeColorClass(attrs.diving ?? baseOvr)}">${attrs.diving ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Handling:</span> <strong class="${getAttributeColorClass(attrs.handling ?? baseOvr)}">${attrs.handling ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Kicking:</span> <strong class="${getAttributeColorClass(attrs.kicking ?? baseOvr)}">${attrs.kicking ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Reflexes:</span> <strong class="${getAttributeColorClass(attrs.reflexes ?? baseOvr)}">${attrs.reflexes ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.gk_positioning ?? baseOvr)}">${attrs.gk_positioning ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+                ` : `
+                  <div class="sub-attr-category">
+                    <h4>Pace (PAC)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Acceleration:</span> <strong class="${getAttributeColorClass(attrs.acceleration ?? baseOvr)}">${attrs.acceleration ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Sprint Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="sub-attr-category" style="margin-top: 10px;">
+                    <h4>Shooting (SHO)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Finishing:</span> <strong class="${getAttributeColorClass(attrs.finishing ?? baseOvr)}">${attrs.finishing ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Long Shots:</span> <strong class="${getAttributeColorClass(attrs.long_shots ?? baseOvr)}">${attrs.long_shots ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Shot Power:</span> <strong class="${getAttributeColorClass(attrs.shot_power ?? baseOvr)}">${attrs.shot_power ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.positioning ?? baseOvr)}">${attrs.positioning ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Penalties:</span> <strong class="${getAttributeColorClass(attrs.penalties ?? baseOvr)}">${attrs.penalties ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Volleys:</span> <strong class="${getAttributeColorClass(attrs.volleys ?? baseOvr)}">${attrs.volleys ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="sub-attr-category" style="margin-top: 10px;">
+                    <h4>Passing (PAS)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Short Passing:</span> <strong class="${getAttributeColorClass(attrs.short_passing ?? baseOvr)}">${attrs.short_passing ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Vision:</span> <strong class="${getAttributeColorClass(attrs.vision ?? baseOvr)}">${attrs.vision ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Crossing:</span> <strong class="${getAttributeColorClass(attrs.crossing ?? baseOvr)}">${attrs.crossing ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Long Passing:</span> <strong class="${getAttributeColorClass(attrs.long_passing ?? baseOvr)}">${attrs.long_passing ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Curve:</span> <strong class="${getAttributeColorClass(attrs.curve ?? baseOvr)}">${attrs.curve ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>FK Accuracy:</span> <strong class="${getAttributeColorClass(attrs.fk_accuracy ?? baseOvr)}">${attrs.fk_accuracy ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="sub-attr-category" style="margin-top: 10px;">
+                    <h4>Dribbling (DRI)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Dribbling:</span> <strong class="${getAttributeColorClass(attrs.dribbling ?? baseOvr)}">${attrs.dribbling ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Ball Control:</span> <strong class="${getAttributeColorClass(attrs.ball_control ?? baseOvr)}">${attrs.ball_control ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Agility:</span> <strong class="${getAttributeColorClass(attrs.agility ?? baseOvr)}">${attrs.agility ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Balance:</span> <strong class="${getAttributeColorClass(attrs.balance ?? baseOvr)}">${attrs.balance ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="sub-attr-category" style="margin-top: 10px;">
+                    <h4>Defending (DEF)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Marking/Awareness:</span> <strong class="${getAttributeColorClass(attrs.marking ?? attrs.defensive_awareness ?? baseOvr)}">${attrs.marking ?? attrs.defensive_awareness ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Standing Tackle:</span> <strong class="${getAttributeColorClass(attrs.standing_tackle ?? baseOvr)}">${attrs.standing_tackle ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Interceptions:</span> <strong class="${getAttributeColorClass(attrs.interceptions ?? baseOvr)}">${attrs.interceptions ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Heading Accuracy:</span> <strong class="${getAttributeColorClass(attrs.heading_accuracy ?? baseOvr)}">${attrs.heading_accuracy ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Sliding Tackle:</span> <strong class="${getAttributeColorClass(attrs.sliding_tackle ?? baseOvr)}">${attrs.sliding_tackle ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+
+                  <div class="sub-attr-category" style="margin-top: 10px;">
+                    <h4>Physical (PHY)</h4>
+                    <div class="sub-attr-grid">
+                      <div class="sub-attr-item"><span>Strength:</span> <strong class="${getAttributeColorClass(attrs.strength ?? baseOvr)}">${attrs.strength ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Stamina:</span> <strong class="${getAttributeColorClass(attrs.stamina ?? baseOvr)}">${attrs.stamina ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Aggression:</span> <strong class="${getAttributeColorClass(attrs.aggression ?? baseOvr)}">${attrs.aggression ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Jumping:</span> <strong class="${getAttributeColorClass(attrs.jumping ?? baseOvr)}">${attrs.jumping ?? baseOvr}</strong></div>
+                    </div>
+                  </div>
+                `}
+              </div>
+
+              <div style="margin-top: 14px; display: flex; justify-content: space-between; font-size: 13px; flex-wrap: wrap; gap: 8px;">
+                <span>Preferred Foot: <strong>${player.preferred_foot}</strong></span>
+                <span>Skill Moves: <strong>${player.skill_moves}</strong></span>
+                <span>Weak Foot: <strong>${player.weak_foot}</strong></span>
+              </div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Contact & Financials</h3>
+              <div class="attr-list">
+                <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
+                <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
+                <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
+                <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
+                <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
+                <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
+              </div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Abilities & Traits</h3>
+              <div class="sub-attr-category">
+                <h4>Traits</h4>
+                <div>${traitsHtml}</div>
+              </div>
+              <div class="sub-attr-category" style="margin-top: 10px;">
+                <h4>PlayStyles</h4>
+                <div>${playStylesHtml}</div>
+              </div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Attribute Growth</h3>
+              ${attributeGrowthHtml}
+            </div>
+          </div>
+
+          <div>
+            <div class="profile-card">
+              <h3>
+                <span>Stats Breakdown</span>
+                <select id="season-select" onchange="changeProfileSeason('${player.player_id || player.name}', this.value)" style="font-size: 12px; padding: 3px 8px;">
+                  ${seasonsList.map((s, idx) => `<option value="${idx}" ${idx === selectedSeasonIndex ? 'selected' : ''}>${s.season_name || `Season ${idx + 1}`}</option>`).join('')}
+                </select>
+              </h3>
+              <div class="attr-list" style="margin-bottom: 16px;">
+                <div class="attr-item"><span>Selected Season Apps:</span> <strong>${activeSeason.appearances || player.appearances || 0}</strong></div>
+                <div class="attr-item"><span>Career Appearances:</span> <strong>${Math.max(careerApps, player.appearances || 0)}</strong></div>
+                <div class="attr-item"><span>Selected Season Goals:</span> <strong>${activeSeason.goals || player.goals || 0}</strong></div>
+                <div class="attr-item"><span>Career Goals:</span> <strong>${Math.max(careerGoals, player.goals || 0)}</strong></div>
+                <div class="attr-item"><span>Selected Season Assists:</span> <strong>${activeSeason.assists || player.assists || 0}</strong></div>
+                <div class="attr-item"><span>Career Assists:</span> <strong>${Math.max(careerAssists, player.assists || 0)}</strong></div>
+                <div class="attr-item"><span>Clean Sheets:</span> <strong>${activeSeason.clean_sheets || player.clean_sheets || 0}</strong></div>
+                <div class="attr-item"><span>Avg Rating:</span> <strong>${Number(activeSeason.avg_rating || player.avg_rating || 0).toFixed(2)}</strong></div>
+              </div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Transfer History</h3>
+              <div>
+                ${transferHistoryHtml}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('main-nav-tabs').style.display = 'none';
+      switchTab('profile');
+    }
+
+    function renderTableRows() {
+      const tbody = document.getElementById('stats-body');
+      tbody.innerHTML = '';
+
+      const query = document.getElementById('squad-search').value.toLowerCase().trim();
+      let filtered = currentPlayers.filter(p => {
+        if (!query) return true;
+        const nameMatch = (p.name || '').toLowerCase().includes(query);
+        const posMatch = (p.pos_label || '').toLowerCase().includes(query);
+        return nameMatch || posMatch;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-state">No players match your search criteria.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach((p, idx) => {
+        const row = document.createElement('tr');
+        row.className = 'player-row';
+        row.onclick = () => openPlayerProfile(p.player_id || p.name);
+
+        const posInfo = getPositionInfo(p.position_id);
+        const avgRatingVal = Number(p.avg_rating || 0) > 0 ? Number(p.avg_rating).toFixed(2) : '-';
+        const jerseyDisplay = p.jersey_number ? `<span class="jersey-badge">#${p.jersey_number}</span>` : '';
+
+        row.innerHTML = `
+          <td>
+            <div class="player-name-cell">
+              <span class="player-name">
+                <span class="expand-icon">▶</span>
+                ${p.name || 'Unknown'}
+                ${p.on_loan ? '<span class="loan-badge">ON LOAN</span>' : ''}
+                ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
+              </span>
+              ${jerseyDisplay}
+            </div>
+          </td>
+          <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+          <td><span class="rating-badge">${p.overall || 75}</span></td>
+          <td>${p.appearances || 0}</td>
+          <td>${p.goals || 0}</td>
+          <td>${p.assists || 0}</td>
+          <td><span class="${Number(p.clean_sheets) > 0 ? 'stat-cs' : 'zero-stat'}">${p.clean_sheets || 0}</span></td>
+          <td><span class="${Number(p.yellow_cards) > 0 ? 'stat-yellow' : 'zero-stat'}">${p.yellow_cards || 0}</span></td>
+          <td><span class="${Number(p.red_cards) > 0 ? 'stat-red' : 'zero-stat'}">${p.red_cards || 0}</span></td>
+          <td><strong>${avgRatingVal}</strong></td>
+        `;
+        tbody.appendChild(row);
+
+        if (p.competitions && p.competitions.length > 0) {
+          const detailRow = document.createElement('tr');
+          detailRow.className = 'detail-row';
+          detailRow.id = `detail-${idx}`;
+          
+          let subTableHTML = `
+            <div class="detail-wrapper">
+              <table class="sub-table">
+                <thead>
+                  <tr>
+                    <th>Competition</th>
+                    <th>Apps</th>
+                    <th>Goals</th>
+                    <th>Assists</th>
+                    <th>Clean Sheets</th>
+                    <th>Avg Rating</th>
+                  </tr>
+                </thead>
+                <tbody>
+          `;
+
+          p.competitions.forEach(c => {
+            subTableHTML += `
+              <tr>
+                <td>${c.comp_name || 'League/Cup'}</td>
+                <td>${c.appearances || 0}</td>
+                <td>${c.goals || 0}</td>
+                <td>${c.assists || 0}</td>
+                <td>${c.clean_sheets || 0}</td>
+                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+              </tr>
+            `;
+          });
+
+          subTableHTML += `</tbody></table></div>`;
+          detailRow.innerHTML = `<td colspan="10">${subTableHTML}</td>`;
+          
+          row.onclick = (e) => {
+            if (e.target.classList.contains('clickable-name') || e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
+              detailRow.classList.toggle('open');
+              row.classList.toggle('expanded');
+            } else {
+              openPlayerProfile(p.player_id || p.name);
+            }
+          };
+
+          tbody.appendChild(detailRow);
+        }
+      });
+    }
+
+    function sortTable(column) {
+      if (currentSortColumn === column) {
+        sortAscending = !sortAscending;
+      } else {
+        currentSortColumn = column;
+        sortAscending = column === 'name' || column === 'pos_label';
+      }
+
+      currentPlayers.sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+
+        if (column === 'name') {
+          valA = getLastName(a.name).toLowerCase();
+          valB = getLastName(b.name).toLowerCase();
+          return sortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else if (column === 'pos_label') {
+          valA = POSITION_SORT_ORDER[valA] || 99;
+          valB = POSITION_SORT_ORDER[valB] || 99;
+        } else if (typeof valA === 'string') {
+          valA = valA.toLowerCase();
+          valB = valB.toLowerCase();
+          return sortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+          valA = Number(valA || 0);
+          valB = Number(valB || 0);
+        }
+
+        return sortAscending ? valA - valB : valB - valA;
+      });
+
+      renderTableRows();
+    }
+
+    function sortTransfers(column) {
+      if (currentTransferSortColumn === column) {
+        transferSortAscending = !transferSortAscending;
+      } else {
+        currentTransferSortColumn = column;
+        transferSortAscending = column !== 'fee';
+      }
+
+      currentTransfers.sort((a, b) => {
+        let valA = a[column];
+        let valB = b[column];
+
+        if (typeof valA === 'string') {
+          return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+          valA = Number(valA || 0);
+          valB = Number(valB || 0);
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
+      });
+
+      filterAndRenderTransfers();
+    }
+
+    function filterAndRenderTransfers() {
+      const filterValue = document.getElementById('transfer-filter').value;
+      const searchQuery = document.getElementById('transfer-search').value.toLowerCase().trim();
+      const tbody = document.getElementById('transfers-tbody');
+      tbody.innerHTML = '';
+
+      let filtered = currentTransfers.filter(t => {
+        let matchesTab = true;
+        if (filterValue === 'my_team') matchesTab = t.is_user;
+        else if (filterValue === 'league') matchesTab = t.is_league;
+        else if (filterValue === 'big_money') matchesTab = t.is_big_money;
+
+        if (!matchesTab) return false;
+
+        if (searchQuery) {
+          const playerName = (t.player_name || '').toLowerCase();
+          const fromTeam = (t.from_team || '').toLowerCase();
+          const toTeam = (t.to_team || '').toLowerCase();
+          
+          return playerName.includes(searchQuery) || fromTeam.includes(searchQuery) || toTeam.includes(searchQuery);
+        }
+
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No transfers found matching your criteria.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach(t => {
+        const row = document.createElement('tr');
+        row.className = 'transfer-row';
+        row.innerHTML = `
+          <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_name}')">${t.player_name}</strong></td>
+          <td>${t.from_team}</td>
+          <td>${t.to_team}</td>
+          <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(t.fee)}</td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    function processIncomingPlayers(data) {
+      let rawList = Array.isArray(data) ? data : (data?.players || []);
+      currentPlayers = rawList.map(p => {
+        const posInfo = getPositionInfo(p.position_id);
+        
+        let computedAvgRating = Number(p.avg_rating ?? 0);
+        if (computedAvgRating === 0 && p.competitions && p.competitions.length > 0) {
+          let totalRatingSum = 0;
+          let validCompCount = 0;
+          p.competitions.forEach(c => {
+            const r = Number(c.avg_rating || 0);
+            const apps = Number(c.appearances || 0);
+            if (r > 0 && apps > 0) {
+              totalRatingSum += (r * apps);
+              validCompCount += apps;
+            }
+          });
+          if (validCompCount > 0) {
+            computedAvgRating = totalRatingSum / validCompCount;
+          }
+        }
+
+        return {
+          ...p,
+          pos_label: posInfo.label,
+          offensive_stat: p.goals || 0,
+          avg_rating: computedAvgRating
+        };
+      });
+      document.getElementById('status-badge').textContent = `Loaded ${currentPlayers.length} Players`;
+      sortTable(currentSortColumn);
+    }
+
+    function processIncomingTransfers(data) {
+      currentTransfers = Array.isArray(data) ? data : (data?.transfers || []);
+      sortTransfers(currentTransferSortColumn);
+    }
+
+    let refreshTimeoutHandle = null;
+
+    function setRefreshButtonState(isRefreshing) {
+      const btn = document.getElementById('refresh-btn');
+      if (!btn) return;
+      btn.disabled = isRefreshing;
+      btn.classList.toggle('spinning', isRefreshing);
+      btn.textContent = isRefreshing ? '↻ Refreshing…' : '↻ Refresh';
+    }
+
+    async function triggerRefresh() {
+      if (!window.api || !window.api.triggerRefresh) return;
+
+      setRefreshButtonState(true);
+      clearTimeout(refreshTimeoutHandle);
+      // Live Editor needs a moment to run the script and write the export
+      // files, and there's no signal back when it's done — fall back to
+      // clearing the "refreshing" state after a few seconds regardless,
+      // so the button never gets stuck if Live Editor / the game isn't
+      // actually running to receive the F10 press.
+      refreshTimeoutHandle = setTimeout(() => setRefreshButtonState(false), 5000);
+
+      const sent = await window.api.triggerRefresh();
+      if (!sent) {
+        clearTimeout(refreshTimeoutHandle);
+        setRefreshButtonState(false);
+      }
+    }
+
+    if (window.api) {
+      window.api.onSquadUpdated((data) => {
+        clearTimeout(refreshTimeoutHandle);
+        setRefreshButtonState(false);
+        processIncomingPlayers(data);
+      });
+      window.api.onCareerStatsUpdated((data) => processIncomingPlayers(data));
+      window.api.onTransfersUpdated((data) => processIncomingTransfers(data));
+      window.api.onCalendarUpdated((data) => processIncomingCalendar(data));
+
+      // Also pull whatever's already in the DB on startup, in case the
+      // window opens after a sync already happened (e.g. app restart).
+      window.api.getSquadData().then((data) => {
+        if (data && data.length) processIncomingPlayers(data);
+      });
+    } else {
+      console.error('window.api is not available — check that preload.js is wired up in main.js (webPreferences.preload).');
+    }
+  </script>
+</body>
+</html>
