@@ -91,6 +91,11 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     traits_json TEXT,
     play_styles_json TEXT,
 
+    -- change since the previous sync (not cumulative for the season) —
+    -- see computeAttributeDeltas in main.js
+    overall_delta INTEGER DEFAULT 0,
+    attribute_deltas_json TEXT,
+
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY(player_id) REFERENCES players(player_id),

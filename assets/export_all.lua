@@ -1123,6 +1123,14 @@ do
                 else
                     standing_text = string.format("%d%s", user_rank, ordinal_suffix(user_rank))
                 end
+            else
+                -- No completed fixtures yet this season (brand new save/
+                -- season) — team_stats2 never gets populated, so there's
+                -- no ranking to read a position from. Without this, the
+                -- competition was silently dropped from the list entirely
+                -- (standing_text stayed "" and the insert below is guarded
+                -- on it being non-empty) instead of showing up at all.
+                standing_text = "Not Started"
             end
         else
             -- Round-by-round progress instead of a W-L record: the

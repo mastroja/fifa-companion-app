@@ -935,6 +935,16 @@
       return String.fromCodePoint(...iso.split('').map(c => 127397 + c.charCodeAt(0)));
     }
 
+    // Small +N/-N badge for the attribute/overall watcher — the change
+    // since the player's previous sync (see overall_delta/attribute_deltas
+    // from main.js's computeAttributeDeltas), not a season-long total.
+    function deltaBadge(delta, fontSize = 11) {
+      const d = Number(delta || 0);
+      if (!d) return '';
+      const color = d > 0 ? '#3fb950' : '#f85149';
+      return `<span style="color:${color}; font-weight:700; font-size:${fontSize}px; margin-left:4px;">${d > 0 ? '+' : ''}${d}</span>`;
+    }
+
     function getAttributeColorClass(val) {
       const num = Number(val || 0);
       if (num < 50) return 'attr-val-red';
@@ -1262,6 +1272,7 @@
       const captainDisplay = isCaptain ? `<span class="captain-badge" title="Club Captain">Ⓒ</span>` : '';
 
       const attrs = player.attributes || {};
+      const attrDeltas = player.attribute_deltas || {};
 
       const dobRaw = player.dob || player.birthdate;
       const playerAge = computeAge(dobRaw);
@@ -1506,7 +1517,7 @@
           </div>
           <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
             <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
-            <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}</strong>
+            <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}${deltaBadge(player.overall_delta, 16)}</strong>
             <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${player.potential ?? (baseOvr + 4)}</strong></span>
           </div>
           <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
@@ -1547,75 +1558,75 @@
                   <div class="sub-attr-category">
                     <h4>Goalkeeping Attributes</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Diving:</span> <strong class="${getAttributeColorClass(attrs.diving ?? baseOvr)}">${attrs.diving ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Handling:</span> <strong class="${getAttributeColorClass(attrs.handling ?? baseOvr)}">${attrs.handling ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Kicking:</span> <strong class="${getAttributeColorClass(attrs.kicking ?? baseOvr)}">${attrs.kicking ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Reflexes:</span> <strong class="${getAttributeColorClass(attrs.reflexes ?? baseOvr)}">${attrs.reflexes ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.gk_positioning ?? baseOvr)}">${attrs.gk_positioning ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Diving:</span> <strong class="${getAttributeColorClass(attrs.diving ?? baseOvr)}">${attrs.diving ?? baseOvr}</strong>${deltaBadge(attrDeltas.diving)}</div>
+                      <div class="sub-attr-item"><span>Handling:</span> <strong class="${getAttributeColorClass(attrs.handling ?? baseOvr)}">${attrs.handling ?? baseOvr}</strong>${deltaBadge(attrDeltas.handling)}</div>
+                      <div class="sub-attr-item"><span>Kicking:</span> <strong class="${getAttributeColorClass(attrs.kicking ?? baseOvr)}">${attrs.kicking ?? baseOvr}</strong>${deltaBadge(attrDeltas.kicking)}</div>
+                      <div class="sub-attr-item"><span>Reflexes:</span> <strong class="${getAttributeColorClass(attrs.reflexes ?? baseOvr)}">${attrs.reflexes ?? baseOvr}</strong>${deltaBadge(attrDeltas.reflexes)}</div>
+                      <div class="sub-attr-item"><span>Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong>${deltaBadge(attrDeltas.sprint_speed)}</div>
+                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.gk_positioning ?? baseOvr)}">${attrs.gk_positioning ?? baseOvr}</strong>${deltaBadge(attrDeltas.gk_positioning)}</div>
                     </div>
                   </div>
                 ` : `
                   <div class="sub-attr-category">
                     <h4>Pace (PAC)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Acceleration:</span> <strong class="${getAttributeColorClass(attrs.acceleration ?? baseOvr)}">${attrs.acceleration ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Sprint Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Acceleration:</span> <strong class="${getAttributeColorClass(attrs.acceleration ?? baseOvr)}">${attrs.acceleration ?? baseOvr}</strong>${deltaBadge(attrDeltas.acceleration)}</div>
+                      <div class="sub-attr-item"><span>Sprint Speed:</span> <strong class="${getAttributeColorClass(attrs.sprint_speed ?? attrs.speed ?? baseOvr)}">${attrs.sprint_speed ?? attrs.speed ?? baseOvr}</strong>${deltaBadge(attrDeltas.sprint_speed)}</div>
                     </div>
                   </div>
 
                   <div class="sub-attr-category" style="margin-top: 10px;">
                     <h4>Shooting (SHO)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Finishing:</span> <strong class="${getAttributeColorClass(attrs.finishing ?? baseOvr)}">${attrs.finishing ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Long Shots:</span> <strong class="${getAttributeColorClass(attrs.long_shots ?? baseOvr)}">${attrs.long_shots ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Shot Power:</span> <strong class="${getAttributeColorClass(attrs.shot_power ?? baseOvr)}">${attrs.shot_power ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.positioning ?? baseOvr)}">${attrs.positioning ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Penalties:</span> <strong class="${getAttributeColorClass(attrs.penalties ?? baseOvr)}">${attrs.penalties ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Volleys:</span> <strong class="${getAttributeColorClass(attrs.volleys ?? baseOvr)}">${attrs.volleys ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Finishing:</span> <strong class="${getAttributeColorClass(attrs.finishing ?? baseOvr)}">${attrs.finishing ?? baseOvr}</strong>${deltaBadge(attrDeltas.finishing)}</div>
+                      <div class="sub-attr-item"><span>Long Shots:</span> <strong class="${getAttributeColorClass(attrs.long_shots ?? baseOvr)}">${attrs.long_shots ?? baseOvr}</strong>${deltaBadge(attrDeltas.long_shots)}</div>
+                      <div class="sub-attr-item"><span>Shot Power:</span> <strong class="${getAttributeColorClass(attrs.shot_power ?? baseOvr)}">${attrs.shot_power ?? baseOvr}</strong>${deltaBadge(attrDeltas.shot_power)}</div>
+                      <div class="sub-attr-item"><span>Positioning:</span> <strong class="${getAttributeColorClass(attrs.positioning ?? baseOvr)}">${attrs.positioning ?? baseOvr}</strong>${deltaBadge(attrDeltas.positioning)}</div>
+                      <div class="sub-attr-item"><span>Penalties:</span> <strong class="${getAttributeColorClass(attrs.penalties ?? baseOvr)}">${attrs.penalties ?? baseOvr}</strong>${deltaBadge(attrDeltas.penalties)}</div>
+                      <div class="sub-attr-item"><span>Volleys:</span> <strong class="${getAttributeColorClass(attrs.volleys ?? baseOvr)}">${attrs.volleys ?? baseOvr}</strong>${deltaBadge(attrDeltas.volleys)}</div>
                     </div>
                   </div>
 
                   <div class="sub-attr-category" style="margin-top: 10px;">
                     <h4>Passing (PAS)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Short Passing:</span> <strong class="${getAttributeColorClass(attrs.short_passing ?? baseOvr)}">${attrs.short_passing ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Vision:</span> <strong class="${getAttributeColorClass(attrs.vision ?? baseOvr)}">${attrs.vision ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Crossing:</span> <strong class="${getAttributeColorClass(attrs.crossing ?? baseOvr)}">${attrs.crossing ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Long Passing:</span> <strong class="${getAttributeColorClass(attrs.long_passing ?? baseOvr)}">${attrs.long_passing ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Curve:</span> <strong class="${getAttributeColorClass(attrs.curve ?? baseOvr)}">${attrs.curve ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>FK Accuracy:</span> <strong class="${getAttributeColorClass(attrs.fk_accuracy ?? baseOvr)}">${attrs.fk_accuracy ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Short Passing:</span> <strong class="${getAttributeColorClass(attrs.short_passing ?? baseOvr)}">${attrs.short_passing ?? baseOvr}</strong>${deltaBadge(attrDeltas.short_passing)}</div>
+                      <div class="sub-attr-item"><span>Vision:</span> <strong class="${getAttributeColorClass(attrs.vision ?? baseOvr)}">${attrs.vision ?? baseOvr}</strong>${deltaBadge(attrDeltas.vision)}</div>
+                      <div class="sub-attr-item"><span>Crossing:</span> <strong class="${getAttributeColorClass(attrs.crossing ?? baseOvr)}">${attrs.crossing ?? baseOvr}</strong>${deltaBadge(attrDeltas.crossing)}</div>
+                      <div class="sub-attr-item"><span>Long Passing:</span> <strong class="${getAttributeColorClass(attrs.long_passing ?? baseOvr)}">${attrs.long_passing ?? baseOvr}</strong>${deltaBadge(attrDeltas.long_passing)}</div>
+                      <div class="sub-attr-item"><span>Curve:</span> <strong class="${getAttributeColorClass(attrs.curve ?? baseOvr)}">${attrs.curve ?? baseOvr}</strong>${deltaBadge(attrDeltas.curve)}</div>
+                      <div class="sub-attr-item"><span>FK Accuracy:</span> <strong class="${getAttributeColorClass(attrs.fk_accuracy ?? baseOvr)}">${attrs.fk_accuracy ?? baseOvr}</strong>${deltaBadge(attrDeltas.fk_accuracy)}</div>
                     </div>
                   </div>
 
                   <div class="sub-attr-category" style="margin-top: 10px;">
                     <h4>Dribbling (DRI)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Dribbling:</span> <strong class="${getAttributeColorClass(attrs.dribbling ?? baseOvr)}">${attrs.dribbling ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Ball Control:</span> <strong class="${getAttributeColorClass(attrs.ball_control ?? baseOvr)}">${attrs.ball_control ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Agility:</span> <strong class="${getAttributeColorClass(attrs.agility ?? baseOvr)}">${attrs.agility ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Balance:</span> <strong class="${getAttributeColorClass(attrs.balance ?? baseOvr)}">${attrs.balance ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Dribbling:</span> <strong class="${getAttributeColorClass(attrs.dribbling ?? baseOvr)}">${attrs.dribbling ?? baseOvr}</strong>${deltaBadge(attrDeltas.dribbling)}</div>
+                      <div class="sub-attr-item"><span>Ball Control:</span> <strong class="${getAttributeColorClass(attrs.ball_control ?? baseOvr)}">${attrs.ball_control ?? baseOvr}</strong>${deltaBadge(attrDeltas.ball_control)}</div>
+                      <div class="sub-attr-item"><span>Agility:</span> <strong class="${getAttributeColorClass(attrs.agility ?? baseOvr)}">${attrs.agility ?? baseOvr}</strong>${deltaBadge(attrDeltas.agility)}</div>
+                      <div class="sub-attr-item"><span>Balance:</span> <strong class="${getAttributeColorClass(attrs.balance ?? baseOvr)}">${attrs.balance ?? baseOvr}</strong>${deltaBadge(attrDeltas.balance)}</div>
                     </div>
                   </div>
 
                   <div class="sub-attr-category" style="margin-top: 10px;">
                     <h4>Defending (DEF)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Marking/Awareness:</span> <strong class="${getAttributeColorClass(attrs.marking ?? attrs.defensive_awareness ?? baseOvr)}">${attrs.marking ?? attrs.defensive_awareness ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Standing Tackle:</span> <strong class="${getAttributeColorClass(attrs.standing_tackle ?? baseOvr)}">${attrs.standing_tackle ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Interceptions:</span> <strong class="${getAttributeColorClass(attrs.interceptions ?? baseOvr)}">${attrs.interceptions ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Heading Accuracy:</span> <strong class="${getAttributeColorClass(attrs.heading_accuracy ?? baseOvr)}">${attrs.heading_accuracy ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Sliding Tackle:</span> <strong class="${getAttributeColorClass(attrs.sliding_tackle ?? baseOvr)}">${attrs.sliding_tackle ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Marking/Awareness:</span> <strong class="${getAttributeColorClass(attrs.marking ?? attrs.defensive_awareness ?? baseOvr)}">${attrs.marking ?? attrs.defensive_awareness ?? baseOvr}</strong>${deltaBadge(attrDeltas.marking)}</div>
+                      <div class="sub-attr-item"><span>Standing Tackle:</span> <strong class="${getAttributeColorClass(attrs.standing_tackle ?? baseOvr)}">${attrs.standing_tackle ?? baseOvr}</strong>${deltaBadge(attrDeltas.standing_tackle)}</div>
+                      <div class="sub-attr-item"><span>Interceptions:</span> <strong class="${getAttributeColorClass(attrs.interceptions ?? baseOvr)}">${attrs.interceptions ?? baseOvr}</strong>${deltaBadge(attrDeltas.interceptions)}</div>
+                      <div class="sub-attr-item"><span>Heading Accuracy:</span> <strong class="${getAttributeColorClass(attrs.heading_accuracy ?? baseOvr)}">${attrs.heading_accuracy ?? baseOvr}</strong>${deltaBadge(attrDeltas.heading_accuracy)}</div>
+                      <div class="sub-attr-item"><span>Sliding Tackle:</span> <strong class="${getAttributeColorClass(attrs.sliding_tackle ?? baseOvr)}">${attrs.sliding_tackle ?? baseOvr}</strong>${deltaBadge(attrDeltas.sliding_tackle)}</div>
                     </div>
                   </div>
 
                   <div class="sub-attr-category" style="margin-top: 10px;">
                     <h4>Physical (PHY)</h4>
                     <div class="sub-attr-grid">
-                      <div class="sub-attr-item"><span>Strength:</span> <strong class="${getAttributeColorClass(attrs.strength ?? baseOvr)}">${attrs.strength ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Stamina:</span> <strong class="${getAttributeColorClass(attrs.stamina ?? baseOvr)}">${attrs.stamina ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Aggression:</span> <strong class="${getAttributeColorClass(attrs.aggression ?? baseOvr)}">${attrs.aggression ?? baseOvr}</strong></div>
-                      <div class="sub-attr-item"><span>Jumping:</span> <strong class="${getAttributeColorClass(attrs.jumping ?? baseOvr)}">${attrs.jumping ?? baseOvr}</strong></div>
+                      <div class="sub-attr-item"><span>Strength:</span> <strong class="${getAttributeColorClass(attrs.strength ?? baseOvr)}">${attrs.strength ?? baseOvr}</strong>${deltaBadge(attrDeltas.strength)}</div>
+                      <div class="sub-attr-item"><span>Stamina:</span> <strong class="${getAttributeColorClass(attrs.stamina ?? baseOvr)}">${attrs.stamina ?? baseOvr}</strong>${deltaBadge(attrDeltas.stamina)}</div>
+                      <div class="sub-attr-item"><span>Aggression:</span> <strong class="${getAttributeColorClass(attrs.aggression ?? baseOvr)}">${attrs.aggression ?? baseOvr}</strong>${deltaBadge(attrDeltas.aggression)}</div>
+                      <div class="sub-attr-item"><span>Jumping:</span> <strong class="${getAttributeColorClass(attrs.jumping ?? baseOvr)}">${attrs.jumping ?? baseOvr}</strong>${deltaBadge(attrDeltas.jumping)}</div>
                     </div>
                   </div>
                 `}
@@ -1785,7 +1796,7 @@
           </td>
           <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
           <td>${computeAge(p.dob) ?? '-'}</td>
-          <td><span class="rating-badge">${p.overall || 75}</span></td>
+          <td><span class="rating-badge">${p.overall || 75}</span>${deltaBadge(p.overall_delta)}</td>
           <td>${p.appearances || 0}</td>
           <td>${p.goals || 0}</td>
           <td>${p.assists || 0}</td>
@@ -2663,10 +2674,14 @@
       { tier: 4, name: 'League Two', teams: 24 }
     ];
 
+    // Substring match, not exact equality — the game's real competition
+    // names carry a sponsor prefix ("EFL League Two", "Sky Bet
+    // Championship" depending on game version), so an exact match against
+    // the bare pyramid name never fires below the Premier League.
     function findPyramidTier(compName) {
       if (!compName) return null;
       const lname = compName.toLowerCase();
-      return ENGLAND_PYRAMID.find(t => t.name.toLowerCase() === lname) || null;
+      return ENGLAND_PYRAMID.find(t => lname.includes(t.name.toLowerCase())) || null;
     }
 
     // Parses the leading number out of standings text like "5th" (see
@@ -2705,7 +2720,11 @@
 
       const points = trace.map((t, i) => {
         const tierInfo = ENGLAND_PYRAMID.find(p => p.tier === t.tier) || ENGLAND_PYRAMID[0];
-        const pos = t.position || tierInfo.teams;
+        // Null position only happens for a season that hasn't kicked off
+        // yet ("Not Started" — see export_all.lua). Mid-band with a
+        // neutral "—" label, not tierInfo.teams, which would misleadingly
+        // plot a not-yet-played season as having finished dead last.
+        const pos = t.position || (tierInfo.teams + 1) / 2;
         const wasRelegated = i < n - 1 && trace[i + 1].tier > t.tier;
         return {
           x: pointX(i),
@@ -2791,7 +2810,7 @@
           if (trace[i + 1].tier < t.tier) suffix = ' (Promoted)';
           else if (trace[i + 1].tier > t.tier) suffix = ' (Relegated)';
         }
-        const posLabel = t.position ? ordinal(t.position) : '—';
+        const posLabel = t.position ? ordinal(t.position) : 'Not started yet';
         return `<div style="font-size: 12px; padding: 2px 0;">${t.season} - ${t.tier_name} ${posLabel}${suffix}</div>`;
       }).join('');
 
@@ -3001,9 +3020,21 @@
         const wage = Number(p.wage || 0);
         const reasons = [];
 
+        // Potential Reached / Regression are about growth trajectory, not
+        // being surplus to the current squad — evaluated for every age,
+        // including the under-24s the squad-gap reasons below skip.
+        const potential = Number(p.potential || 0);
+        if (age !== null && age < 25 && potential > 0 && (p.overall || 0) >= potential) {
+          reasons.push('Potential Reached');
+        }
+        if (Number(p.overall_delta || 0) <= -2) reasons.push('Regression');
+
         // Under-24s are young players still developing, not squad gaps
-        // that need replacing — skip them entirely regardless of reason.
-        if (age === null || age < 24) return null;
+        // that need replacing — skip the reasons below for them (the
+        // growth-trajectory reasons above still apply).
+        if (age === null || age < 24) {
+          return reasons.length > 0 ? { ...p, __age: age, __reasons: reasons } : null;
+        }
 
         if (age >= 28 && apps < avgSquadAppearances / 2 && wage >= medianSquadWage) reasons.push('Limited Minutes');
         if (rating > 0 && rating < 6.0) reasons.push('Underperforming');
@@ -3044,10 +3075,24 @@
       `;
     }
 
+    // A "promising" potential varies by division — an 81-potential player
+    // is a rare gem in the Championship but unremarkable in the Premier
+    // League, so flagging everyone against a flat 87 buries the lower-
+    // league signal entirely. Keyed by ENGLAND_PYRAMID tier; falls back
+    // to the Premier League threshold for non-English saves (no pyramid
+    // match) since that's the only bar we can vouch for universally.
+    const YOUTH_POTENTIAL_THRESHOLD_BY_TIER = { 1: 87, 2: 81, 3: 77, 4: 72 };
+
+    function getPromisingYouthThreshold() {
+      const tier = findPyramidTier(getPrimaryLeagueName());
+      return tier ? (YOUTH_POTENTIAL_THRESHOLD_BY_TIER[tier.tier] ?? 87) : 87;
+    }
+
     // This is first-team-squad players who happen to be young/high-
-    // potential (age under 22, 87+), not the actual academy roster —
-    // see renderYouthAcademyTable below for that, which is a genuinely
-    // separate roster ("career_youthplayers") with its own real
+    // potential (age under 22, threshold set by the team's current
+    // division — see getPromisingYouthThreshold), not the actual academy
+    // roster — see renderYouthAcademyTable below for that, which is a
+    // genuinely separate roster ("career_youthplayers") with its own real
     // potential_low/potential_high range from the game (potentialvariance).
     // This table only ever gets one exact potential number since these
     // are already-promoted players, not academy prospects.
@@ -3055,18 +3100,21 @@
       const container = document.getElementById('home-youth-body');
       if (!container) return;
 
+      const potentialThreshold = getPromisingYouthThreshold();
+
       const prospects = currentPlayers
         .map(p => ({ ...p, __age: computeAge(p.dob || p.birthdate) }))
-        .filter(p => p.__age !== null && p.__age < 22 && Number(p.potential || 0) >= 87)
+        .filter(p => p.__age !== null && p.__age < 22 && Number(p.potential || 0) >= potentialThreshold)
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }))
         .sort((a, b) => Number(b.potential || 0) - Number(a.potential || 0));
 
       if (prospects.length === 0) {
-        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No academy prospects (under 22, 87+ potential) in the current squad.</div>`;
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No academy prospects (under 22, ${potentialThreshold}+ potential) in the current squad.</div>`;
         return;
       }
 
       container.innerHTML = `
+        <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">Threshold: under 22, ${potentialThreshold}+ potential (${getPrimaryLeagueName() || 'league'})</div>
         <table class="sub-table">
           <thead><tr><th>Player</th><th>Age</th><th>OVR</th><th>Potential</th><th>Value</th></tr></thead>
           <tbody>
