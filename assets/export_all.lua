@@ -19,6 +19,14 @@
 
 assert(IsInCM(), "Script must be executed in career mode")
 
+-- Persistent per-career identifier (documented Live Editor function,
+-- generates one on first call if the save doesn't have one yet) — lets
+-- the companion app tell different saves apart instead of assuming
+-- there's only ever one. Included in all three JSON exports below.
+-- Declared here (outside every do...end block) so each block's nested
+-- scope can read it via closure.
+local save_uid = GetSaveUID() or ""
+
 -- ================= SQUAD EXPORT =================
 do
     require 'imports/other/helpers'
@@ -147,10 +155,27 @@ do
                         injury = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "injury") or 0,
                         league_goals_prev_three_matches = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "leaguegoalsprevthreematches") or 0,
                         is_among_top_scorers_in_team = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "isamongtopscorersinteam") or 0,
-                        form = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "form") or 0
+                        form = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "form") or 0,
+                        team_id = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "teamid") or 0
                     }
                 end
                 tpl_record = teamplayerlinks_table:GetNextValidRecord()
+            end
+        end
+
+        -- Players WE'VE loaned OUT (playerloans.teamidloanedfrom == our
+        -- team) need their real current club resolved via teamplayerlinks
+        -- — GetTeamIdFromPlayerId keeps returning their contract/parent
+        -- club (us) even while out on loan, which was showing as "Loaned
+        -- to Arsenal" in the UI. teamplayerlinks.teamid reflects who
+        -- they're actually registered to play for right now.
+        local loaned_out_destination = {}
+        for pid, info in pairs(loan_lookup) do
+            if info.team_loaned_from == user_team_id then
+                local tpl_info_for_loan = tpl_lookup[pid]
+                if tpl_info_for_loan and tpl_info_for_loan.team_id and tpl_info_for_loan.team_id > 0 then
+                    loaned_out_destination[pid] = tpl_info_for_loan.team_id
+                end
             end
         end
 
@@ -234,8 +259,9 @@ do
                     player.overall = overall
                     player.potential = potential
                     player.nationality = nationality_id
-                    player.club_id = team_id
-                    player.club_name = (team_id and team_id > 0) and (GetTeamName(team_id) or "") or ""
+                    local resolved_team_id = loaned_out_destination[playerid] or team_id
+                    player.club_id = resolved_team_id
+                    player.club_name = (resolved_team_id and resolved_team_id > 0) and (GetTeamName(resolved_team_id) or "") or ""
                     player.photo_id = photo_id
                     player.dob = convertFifaDate(raw_birthdate)
                     player.height = tostring(height) .. " cm"
@@ -254,7 +280,7 @@ do
                     player.on_loan = (loan_info ~= nil)
                     player.loan_team_from = loan_info and loan_info.team_loaned_from or 0
                     player.loan_club_name = loan_club_name
-                    player.loan_date_end = loan_info and tostring(loan_info.loan_date_end) or ""
+                    player.loan_date_end = loan_info and convertFifaDate(loan_info.loan_date_end) or ""
                     player.is_loan_to_buy = loan_info and (loan_info.is_loan_to_buy == 1) or false
 
                     player.wage = contract_info and contract_info.wage or 0
@@ -316,7 +342,11 @@ do
             local playerid = stat.playerid
             local app = stat.app or 0
 
-            if result[playerid] ~= nil then
+            -- "World's Game" is a generic/unlicensed exhibition bucket,
+            -- not a real competition — excluded from every player's
+            -- stats entirely (both totals and the per-competition
+            -- breakdown) per user request.
+            if result[playerid] ~= nil and stat.compname ~= "World's Game" then
                 local player = result[playerid]
                 if player.name == "" then player.name = GetPlayerName(playerid) end
 
@@ -330,7 +360,6 @@ do
                 player.saves = player.saves + (stat.saves or 5)
                 player.yellow_cards = player.yellow_cards + (stat.yellow or 0)
                 player.red_cards = player.red_cards + (stat.red or 0)
-                player.avg_rating = avg
 
                 table.insert(player.competitions, {
                     comp_name = stat.compname or "Unknown Competition",
@@ -339,6 +368,20 @@ do
                     yellow_cards = stat.yellow or 0, red_cards = stat.red or 0, avg_rating = avg
                 })
             end
+        end
+
+        -- avg_rating was previously just whatever competition happened to
+        -- be processed last (a plain overwrite, not an average at all) —
+        -- now a proper appearances-weighted average across every
+        -- competition, so e.g. 7.1 over 30 games outweighs 9.0 over 3.
+        for _, player in pairs(result) do
+            local weighted_sum = 0
+            local total_apps = 0
+            for _, comp in ipairs(player.competitions) do
+                weighted_sum = weighted_sum + (comp.avg_rating * comp.appearances)
+                total_apps = total_apps + comp.appearances
+            end
+            player.avg_rating = (total_apps > 0) and (weighted_sum / total_apps) or 0
         end
 
         local squad_array = {}
@@ -354,8 +397,8 @@ do
         return '[' .. table.concat(parts, ",") .. ']'
     end
 
-    local function serialize_to_json(tbl)
-        local json = '{"players":['
+    local function serialize_to_json(tbl, current_date)
+        local json = string.format('{"save_uid":"%s","current_date":"%s","players":[', save_uid:gsub('"', '\\"'), current_date)
         for i, p in ipairs(tbl) do
             local attr = p.attributes or {}
             json = json .. string.format(
@@ -396,10 +439,19 @@ do
         return json
     end
 
+    -- Carrying the in-game date here (not just in the calendar export)
+    -- lets main.js resolve the correct season independently of whether
+    -- the calendar file has synced yet this run — squad writes first
+    -- (see this file's block order), so without its own date it was
+    -- trusting a possibly-stale "current season" flag and silently
+    -- overwriting the previous season's stats on every season rollover.
+    local current_date_tbl = GetCurrentDate()
+    local current_date_str = string.format("%04d-%02d-%02d", current_date_tbl.year, current_date_tbl.month, current_date_tbl.day)
+
     local squad_array = get_squad_data()
     local file = io.open(json_path, "w+")
     if file then
-        file:write(serialize_to_json(squad_array))
+        file:write(serialize_to_json(squad_array, current_date_str))
         file:close()
         LOGGER:LogInfo("EA FC Companion: Squad export with headassetid and badges successful!")
     else
@@ -407,16 +459,152 @@ do
     end
 end
 
+-- ================= PAST PLAYERS WATCHLIST LOOKUP =================
+-- Looks up current overall/potential/club for specific former-squad
+-- player IDs the companion app asks about (written to
+-- ea_fc_watchlist_input.json each time the app syncs). Deliberately uses
+-- the same "players" table export_squad.lua already iterates safely
+-- every refresh — NOT the "transfers" table, which is a confirmed,
+-- permanent crash (see feedback_live_editor_data_safety memory). If the
+-- watchlist file doesn't exist yet, this is a no-op.
+do
+    require 'imports/other/helpers'
+    local JSON = require 'imports/external/json'
+
+    local watchlist_path = "C:\\Users\\Public\\ea_fc_watchlist_input.json"
+    local status_path = "C:\\Users\\Public\\ea_fc_watchlist_status.json"
+
+    local watch_ids = {}
+    local watch_count = 0
+    local wf = io.open(watchlist_path, "r")
+    if wf then
+        local content = wf:read("*a")
+        wf:close()
+        local ok, parsed = pcall(JSON.decode, content)
+        if ok and parsed and parsed.player_ids then
+            for _, pid in ipairs(parsed.player_ids) do
+                watch_ids[pid] = true
+                watch_count = watch_count + 1
+            end
+        end
+    end
+
+    if watch_count > 0 then
+        local results = {}
+        local players_table = LE.db:GetTable("players")
+        local record = players_table:GetFirstRecord()
+        while record > 0 do
+            local playerid = players_table:GetRecordFieldValue(record, "playerid")
+            if playerid and watch_ids[playerid] then
+                local overall = players_table:GetRecordFieldValue(record, "overallrating") or 0
+                local potential = players_table:GetRecordFieldValue(record, "potential") or 0
+                local team_id = GetTeamIdFromPlayerId(playerid)
+                local club_name = (team_id and team_id > 0) and (GetTeamName(team_id) or "") or ""
+
+                table.insert(results, {
+                    player_id = playerid,
+                    overall = overall,
+                    potential = potential,
+                    club_id = team_id or 0,
+                    club_name = club_name
+                })
+            end
+            record = players_table:GetNextValidRecord()
+        end
+
+        local ok, encoded = pcall(JSON.encode, { players = results })
+        if ok then
+            local sfile = io.open(status_path, "w+")
+            if sfile then
+                sfile:write(encoded)
+                sfile:close()
+                print(string.format("[CompanionApp] Past-players watchlist: found %d/%d.", #results, watch_count))
+            end
+        end
+    end
+end
+
+-- ================= YOUTH ACADEMY EXPORT =================
+-- "career_youthplayers" confirmed safe via a standalone probe
+-- (2026-08-26 — only ~2 rows found, not the whole game's academies,
+-- so it already appears scoped to the user's own save). Cross-
+-- referenced against the global "players" table for bio/rating data,
+-- same pattern as the past-players watchlist above. potentialvariance
+-- gives a real uncertainty range around their true potential —
+-- deliberately exported as potential_low/potential_high rather than
+-- the exact number, so scouting a prospect isn't a guaranteed thing.
+do
+    require 'imports/other/helpers'
+
+    local function convertFifaDate(dayOffset)
+        if not dayOffset or dayOffset <= 0 then return "" end
+        local baseEpochSeconds = -12219292800
+        local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
+        return os.date("%m-%d-%Y", targetSeconds) or tostring(dayOffset)
+    end
+
+    local youth_json_list = {}
+    local youth_table = LE.db:GetTable("career_youthplayers")
+    if youth_table then
+        local youth_lookup = {}
+        local y_record = youth_table:GetFirstRecord()
+        while y_record > 0 do
+            local pid = youth_table:GetRecordFieldValue(y_record, "playerid")
+            if pid and pid > 0 then
+                youth_lookup[pid] = {
+                    tier = youth_table:GetRecordFieldValue(y_record, "playertier") or 0,
+                    months_in_squad = youth_table:GetRecordFieldValue(y_record, "monthsinsquad") or 0,
+                    variance = youth_table:GetRecordFieldValue(y_record, "potentialvariance") or 0
+                }
+            end
+            y_record = youth_table:GetNextValidRecord()
+        end
+
+        if next(youth_lookup) ~= nil then
+            local players_table = LE.db:GetTable("players")
+            local yp_record = players_table:GetFirstRecord()
+            while yp_record > 0 do
+                local yp_id = players_table:GetRecordFieldValue(yp_record, "playerid")
+                if yp_id and youth_lookup[yp_id] then
+                    local info = youth_lookup[yp_id]
+                    local potential = players_table:GetRecordFieldValue(yp_record, "potential") or 0
+                    local overall = players_table:GetRecordFieldValue(yp_record, "overallrating") or 0
+                    local pos = players_table:GetRecordFieldValue(yp_record, "preferredposition1") or 0
+                    local raw_dob = players_table:GetRecordFieldValue(yp_record, "birthdate") or 0
+
+                    local potential_low = math.max(potential - info.variance, 1)
+                    local potential_high = math.min(potential + info.variance, 99)
+
+                    table.insert(youth_json_list, string.format(
+                        '{"player_id":%d,"name":"%s","position_id":%d,"overall":%d,"potential_low":%d,"potential_high":%d,"dob":"%s","tier":%d,"months_in_squad":%d}',
+                        yp_id, (GetPlayerName(yp_id) or ""):gsub('"', '\\"'), pos, overall, potential_low, potential_high,
+                        convertFifaDate(raw_dob), info.tier, info.months_in_squad
+                    ))
+                end
+                yp_record = players_table:GetNextValidRecord()
+            end
+        end
+    end
+
+    local json_output = string.format(
+        '{"save_uid":"%s","youth_academy":[%s]}',
+        save_uid:gsub('"', '\\"'), table.concat(youth_json_list, ",")
+    )
+    local file = io.open("C:\\Users\\Public\\ea_fc_youth_export.json", "w+")
+    if file then
+        file:write(json_output)
+        file:close()
+        print(string.format("[CompanionApp] Exported %d youth academy players.", #youth_json_list))
+    end
+end
+
 -- ================= TRANSFERS EXPORT =================
 do
     require 'imports/other/helpers'
 
-    -- BEST-EFFORT NOTE: "transferhistory" below is our best guess at
-    -- the Live Editor table name for transfer records — it hasn't
-    -- been confirmed against Live Editor's own table browser. If this
-    -- section produces 0 transfers (see the log line it prints),
-    -- open Live Editor's database table list, find the real
-    -- transfer-history table, and swap the table/field names below.
+    -- Uses the "transfers" DB table (playerid/sellingteamid/buyingteamid/
+    -- transferamount), confirmed via schema dump 2026-08-25 — the earlier
+    -- "transferhistory" guess doesn't exist in this game version.
 
     local json_path = "C:\\Users\\Public\\ea_fc_transfers_export.json"
     local BIG_MONEY_THRESHOLD = 60000000
@@ -438,16 +626,23 @@ do
         local result = {}
         local user_team_id = GetUserTeamID()
 
-        -- TODO verify table name: "transferhistory" is unconfirmed.
+        -- REVERTED 2026-08-25: switching this to the real "transfers" table
+        -- crashed the game the first time F10 ran against it — the log shows
+        -- the squad export completing fine, then nothing, then a full game
+        -- restart. Likely that table is a whole-game-world transfer ledger
+        -- (not scoped to this save), and resolving a name for every row
+        -- timed out or hit a bad record. Back to the safe no-op ("transferhistory"
+        -- doesn't exist, so this just returns empty) until a bounded/pcall'd
+        -- probe of "transfers" confirms it's safe to iterate — see
+        -- inspect_transfers_table.lua, run manually, NOT via F10.
         local transfers_table = LE.db:GetTable("transferhistory")
         if not transfers_table then
-            print("[CompanionApp] WARNING: 'transferhistory' table not found — check the real table name in Live Editor's database browser and update this section.")
+            print("[CompanionApp] WARNING: 'transferhistory' table not found — transfers export disabled pending a safe fix, see comment above.")
             return result
         end
 
         local record = transfers_table:GetFirstRecord()
         while record > 0 do
-            -- TODO verify field names: playerid/fromteamid/toteamid/value are unconfirmed.
             local playerid = transfers_table:GetRecordFieldValue(record, "playerid")
             local from_team_id = transfers_table:GetRecordFieldValue(record, "fromteamid") or 0
             local to_team_id = transfers_table:GetRecordFieldValue(record, "toteamid") or 0
@@ -486,7 +681,7 @@ do
                 tostring(t.is_big_money)
             )
         end
-        return '{"transfers":[' .. table.concat(parts, ",") .. ']}'
+        return string.format('{"save_uid":"%s","transfers":[', save_uid:gsub('"', '\\"')) .. table.concat(parts, ",") .. ']}'
     end
 
     local transfers = get_transfer_data()
@@ -644,12 +839,344 @@ do
         end
     end
 
+    -- ============================================================
+    -- MANAGER SEASON HISTORY / PPG — "career_managerhistory" DB table
+    -- (confirmed via GetDBTableFields/GetDBTableRows schema dump), one
+    -- row per team per season: games_played/points/wins/draws/losses/
+    -- tableposition. Real DB table, not a memory read.
+    -- ============================================================
+    local manager_history_json_list = {}
+    local managerhistory_table = LE.db:GetTable("career_managerhistory")
+    if managerhistory_table then
+        local mh_record = managerhistory_table:GetFirstRecord()
+        while mh_record > 0 do
+            local mh_teamid = managerhistory_table:GetRecordFieldValue(mh_record, "teamid")
+            if mh_teamid and mh_teamid == user_team_id then
+                local season = managerhistory_table:GetRecordFieldValue(mh_record, "season") or 0
+                local games_played = managerhistory_table:GetRecordFieldValue(mh_record, "games_played") or 0
+                local points = managerhistory_table:GetRecordFieldValue(mh_record, "points") or 0
+                local wins = managerhistory_table:GetRecordFieldValue(mh_record, "wins") or 0
+                local draws = managerhistory_table:GetRecordFieldValue(mh_record, "draws") or 0
+                local losses = managerhistory_table:GetRecordFieldValue(mh_record, "losses") or 0
+                local table_position = managerhistory_table:GetRecordFieldValue(mh_record, "tableposition") or 0
+                local ppg = (games_played > 0) and (points / games_played) or 0
+
+                table.insert(manager_history_json_list, string.format(
+                    '{"season":%d,"games_played":%d,"points":%d,"wins":%d,"draws":%d,"losses":%d,"table_position":%d,"ppg":%.2f}',
+                    season, games_played, points, wins, draws, losses, table_position, ppg
+                ))
+            end
+            mh_record = managerhistory_table:GetNextValidRecord()
+        end
+    end
+
     -- Fetch exact in-game calendar date from career state
     local current_date_tbl = GetCurrentDate()
     local formatted_date = string.format("%04d-%02d-%02d", current_date_tbl.year, current_date_tbl.month, current_date_tbl.day)
 
     local valid_fixtures = GetActiveCareerFixtures()
     local fixtures_json_list = {}
+
+    -- ============================================================
+    -- STANDINGS — built from fixture RESULTS rather than the separate
+    -- StandingsData memory struct (Live Editor's own bundled
+    -- lua/scripts/export_fixtures.lua has a GetValidStandings() that
+    -- reads that struct, but its "is_used" flag proved unreliable in
+    -- testing — it only matched 2 rows out of a ~20-team league, and
+    -- tellingly the bundled script computes that result and never
+    -- actually uses it anywhere, so it was likely never verified by
+    -- its own author). Instead, aggregate every completed fixture in
+    -- the user's primary competition using GetStandingsByIndex(), which
+    -- is already proven correct — it's what resolves every opponent
+    -- name in the calendar export below.
+    --
+    -- The fixture list covers EVERY competition the engine is tracking,
+    -- not just the user's own (confirmed: a first attempt at this that
+    -- picked "whichever comp_obj_id has the most fixtures overall"
+    -- returned a full La Liga table Arsenal isn't even in). So the
+    -- competition itself must be picked from fixtures that actually
+    -- involve the user's team — resolve each fixture's teams once, use
+    -- that to find the comp_obj_id with the most USER fixtures (the
+    -- domestic league, ~38 games, vs a handful for cups/groups), then
+    -- aggregate every team's record from all fixtures in that same
+    -- competition.
+    -- ============================================================
+    local resolved_fixtures = {}
+    for i = 1, #valid_fixtures do
+        local f = valid_fixtures[i]
+        local hs = GetStandingsByIndex(f["mHomeStandingId"])
+        local as = GetStandingsByIndex(f["mAwayStandingId"])
+        table.insert(resolved_fixtures, {
+            comp_obj_id = f["mCompObjId"],
+            date = f["mDate"] or 0,
+            home_id = hs["mTeamId"] or 0,
+            away_id = as["mTeamId"] or 0,
+            home_score = f["mHomeScore"] or 0,
+            away_score = f["mAwayScore"] or 0,
+            completed = f["mGameCompletion"]
+        })
+    end
+
+    local comp_fixture_counts = {}
+    for i = 1, #resolved_fixtures do
+        local rf = resolved_fixtures[i]
+        if rf.home_id == user_team_id or rf.away_id == user_team_id then
+            comp_fixture_counts[rf.comp_obj_id] = (comp_fixture_counts[rf.comp_obj_id] or 0) + 1
+        end
+    end
+
+    local primary_comp_obj_id = nil
+    local most_fixtures = 0
+    for cid, count in pairs(comp_fixture_counts) do
+        if count > most_fixtures then
+            most_fixtures = count
+            primary_comp_obj_id = cid
+        end
+    end
+
+    local standings_json_list = {}
+    if primary_comp_obj_id ~= nil then
+        -- Chronological order matters here (unlike the season totals below)
+        -- because we track each team's last-5-results form as we go.
+        local comp_fixtures = {}
+        for i = 1, #resolved_fixtures do
+            local rf = resolved_fixtures[i]
+            if rf.comp_obj_id == primary_comp_obj_id and rf.completed and rf.home_id > 0 and rf.away_id > 0 then
+                table.insert(comp_fixtures, rf)
+            end
+        end
+        table.sort(comp_fixtures, function(a, b) return a.date < b.date end)
+
+        local team_stats = {}
+        local function ensure_team(tid)
+            if not team_stats[tid] then
+                team_stats[tid] = { wins = 0, draws = 0, losses = 0, gf = 0, ga = 0, played = 0, form = {} }
+            end
+            return team_stats[tid]
+        end
+
+        for i = 1, #comp_fixtures do
+            local rf = comp_fixtures[i]
+            local home = ensure_team(rf.home_id)
+            local away = ensure_team(rf.away_id)
+            home.played = home.played + 1
+            away.played = away.played + 1
+            home.gf = home.gf + rf.home_score
+            home.ga = home.ga + rf.away_score
+            away.gf = away.gf + rf.away_score
+            away.ga = away.ga + rf.home_score
+
+            if rf.home_score > rf.away_score then
+                home.wins = home.wins + 1
+                away.losses = away.losses + 1
+                table.insert(home.form, "W")
+                table.insert(away.form, "L")
+            elseif rf.home_score < rf.away_score then
+                away.wins = away.wins + 1
+                home.losses = home.losses + 1
+                table.insert(home.form, "L")
+                table.insert(away.form, "W")
+            else
+                home.draws = home.draws + 1
+                away.draws = away.draws + 1
+                table.insert(home.form, "D")
+                table.insert(away.form, "D")
+            end
+        end
+
+        for tid, s in pairs(team_stats) do
+            local points = (s.wins * 3) + s.draws
+            local last5 = {}
+            for i = math.max(1, #s.form - 4), #s.form do
+                table.insert(last5, '"' .. s.form[i] .. '"')
+            end
+            table.insert(standings_json_list, string.format(
+                '{"team_id":%d,"team_name":"%s","played":%d,"wins":%d,"draws":%d,"losses":%d,"gf":%d,"ga":%d,"gd":%d,"points":%d,"form":[%s]}',
+                tid, (GetTeamName(tid) or ""):gsub('"', '\\"'), s.played, s.wins, s.draws, s.losses, s.gf, s.ga, s.gf - s.ga, points,
+                table.concat(last5, ",")
+            ))
+        end
+    end
+
+    -- ============================================================
+    -- ALL-COMPETITIONS STANDINGS/PROGRESS — same fixture-aggregation
+    -- technique as the primary-league standings above, generalized to
+    -- EVERY competition the user's team has fixtures in (comp_fixture_
+    -- counts already has exactly that set of comp_obj_ids). Feeds the
+    -- Calendar tab's "Competitions & Standings" widget, which
+    -- previously only ever showed hardcoded placeholder text baked
+    -- into the HTML. Round-robin-shaped competitions (an opponent
+    -- repeats — league or group stage) get a table position; anything
+    -- else (knockout cups, opponents don't repeat) gets a W-L record
+    -- plus next opponent instead, since no table makes sense there.
+    -- No stageid/round-name decoding attempted — we don't have a
+    -- verified ID-to-round-name mapping for that.
+    -- ============================================================
+    local function ordinal_suffix(n)
+        local mod100 = n % 100
+        if mod100 >= 11 and mod100 <= 13 then return "th" end
+        local mod10 = n % 10
+        if mod10 == 1 then return "st"
+        elseif mod10 == 2 then return "nd"
+        elseif mod10 == 3 then return "rd"
+        else return "th" end
+    end
+
+    local function comp_icon(name)
+        local lname = name:lower()
+        if lname:find("champions") or lname:find("europa") or lname:find("conference") then return "🏆" end
+        if lname:find("cup") or lname:find("shield") then return "🛡️" end
+        return "⚽"
+    end
+
+    local competitions_json_list = {}
+    for comp_obj_id, _ in pairs(comp_fixture_counts) do
+        local comp_fixtures_all = {}
+        for i = 1, #resolved_fixtures do
+            if resolved_fixtures[i].comp_obj_id == comp_obj_id then
+                table.insert(comp_fixtures_all, resolved_fixtures[i])
+            end
+        end
+
+        -- Round-robin shape: does any opponent of the user's team repeat?
+        local opponent_counts = {}
+        for i = 1, #comp_fixtures_all do
+            local rf = comp_fixtures_all[i]
+            if rf.home_id == user_team_id or rf.away_id == user_team_id then
+                local opp = (rf.home_id == user_team_id) and rf.away_id or rf.home_id
+                if opp > 0 then opponent_counts[opp] = (opponent_counts[opp] or 0) + 1 end
+            end
+        end
+        local is_round_robin = false
+        for _, count in pairs(opponent_counts) do
+            if count > 1 then is_round_robin = true end
+        end
+
+        local comp_name = GetCompetitionNameByObjID(comp_obj_id) or "Competition"
+        local standing_text = ""
+
+        if is_round_robin then
+            local team_stats2 = {}
+            local function ensure_team2(tid)
+                if not team_stats2[tid] then
+                    team_stats2[tid] = { wins = 0, draws = 0, losses = 0, gf = 0, ga = 0, played = 0 }
+                end
+                return team_stats2[tid]
+            end
+            for i = 1, #comp_fixtures_all do
+                local rf = comp_fixtures_all[i]
+                if rf.completed and rf.home_id > 0 and rf.away_id > 0 then
+                    local home = ensure_team2(rf.home_id)
+                    local away = ensure_team2(rf.away_id)
+                    home.played = home.played + 1
+                    away.played = away.played + 1
+                    home.gf = home.gf + rf.home_score
+                    home.ga = home.ga + rf.away_score
+                    away.gf = away.gf + rf.away_score
+                    away.ga = away.ga + rf.home_score
+                    if rf.home_score > rf.away_score then
+                        home.wins = home.wins + 1
+                        away.losses = away.losses + 1
+                    elseif rf.home_score < rf.away_score then
+                        away.wins = away.wins + 1
+                        home.losses = home.losses + 1
+                    else
+                        home.draws = home.draws + 1
+                        away.draws = away.draws + 1
+                    end
+                end
+            end
+
+            local ranking = {}
+            for tid, s in pairs(team_stats2) do
+                table.insert(ranking, { team_id = tid, points = (s.wins * 3) + s.draws, gd = s.gf - s.ga })
+            end
+            table.sort(ranking, function(a, b)
+                if a.points ~= b.points then return a.points > b.points end
+                return a.gd > b.gd
+            end)
+
+            local user_rank = nil
+            for idx, r in ipairs(ranking) do
+                if r.team_id == user_team_id then user_rank = idx break end
+            end
+
+            -- A team sitting 1st mid-season hasn't won the league yet —
+            -- only report "Winner" (the same word cups use, and the only
+            -- text getTrophiesWon in main.js treats as an actual title)
+            -- once every one of the user's team's scheduled fixtures in
+            -- this competition has been played (38 for a 20-team double
+            -- round-robin, fewer for a smaller league/group).
+            local user_total_fixtures = comp_fixture_counts[comp_obj_id] or 0
+            local user_completed_fixtures = 0
+            for i = 1, #comp_fixtures_all do
+                local rf = comp_fixtures_all[i]
+                if (rf.home_id == user_team_id or rf.away_id == user_team_id) and rf.completed then
+                    user_completed_fixtures = user_completed_fixtures + 1
+                end
+            end
+            local season_complete = user_total_fixtures > 0 and user_completed_fixtures >= user_total_fixtures
+
+            if user_rank then
+                if user_rank == 1 and season_complete then
+                    standing_text = "Winner"
+                else
+                    standing_text = string.format("%d%s", user_rank, ordinal_suffix(user_rank))
+                end
+            end
+        else
+            -- Round-by-round progress instead of a W-L record: the
+            -- standing is the last round played in, or "Winner" if they
+            -- won the final. No verified round-NAME mapping exists
+            -- (would need stageid decoding, which we don't have), so
+            -- this counts fixtures sequentially ("4th Round") rather
+            -- than using real round names. A draw is treated as still
+            -- alive/advancing (assumed won on penalties) since penalty-
+            -- shootout results aren't captured anywhere in our fixture
+            -- data, only the regular-time score.
+            local user_fixtures = {}
+            for i = 1, #comp_fixtures_all do
+                local rf = comp_fixtures_all[i]
+                if rf.home_id == user_team_id or rf.away_id == user_team_id then
+                    table.insert(user_fixtures, rf)
+                end
+            end
+            table.sort(user_fixtures, function(a, b) return a.date < b.date end)
+
+            local completed_count = 0
+            local last_completed_won = true
+            local has_upcoming = false
+            for i = 1, #user_fixtures do
+                local rf = user_fixtures[i]
+                if rf.completed then
+                    completed_count = completed_count + 1
+                    local user_score = (rf.home_id == user_team_id) and rf.home_score or rf.away_score
+                    local opp_score = (rf.home_id == user_team_id) and rf.away_score or rf.home_score
+                    last_completed_won = (user_score >= opp_score)
+                else
+                    has_upcoming = true
+                end
+            end
+
+            if completed_count == 0 then
+                standing_text = "Not Started"
+            elseif not last_completed_won then
+                standing_text = string.format("%d%s Round", completed_count, ordinal_suffix(completed_count))
+            elseif has_upcoming then
+                local next_round = completed_count + 1
+                standing_text = string.format("%d%s Round", next_round, ordinal_suffix(next_round))
+            else
+                standing_text = "Winner"
+            end
+        end
+
+        if standing_text ~= "" then
+            table.insert(competitions_json_list, string.format(
+                '{"name":"%s","icon":"%s","standing":"%s"}',
+                comp_name:gsub('"', '\\"'), comp_icon(comp_name), standing_text:gsub('"', '\\"')
+            ))
+        end
+    end
 
     for i = 1, #valid_fixtures do
         local f = valid_fixtures[i]
@@ -691,9 +1218,13 @@ do
     end
 
     local manager_name_escaped = manager_name:gsub('"', '\\"')
+    local club_name_escaped = (GetTeamName(user_team_id) or ""):gsub('"', '\\"')
+    local save_uid_escaped = save_uid:gsub('"', '\\"')
 
     local json_output = string.format(
-        '{\n  "current_date": "%s",\n  "captain_id": %d,\n  "team_colors": {"primary":{"r":%d,"g":%d,"b":%d},"secondary":{"r":%d,"g":%d,"b":%d},"tertiary":{"r":%d,"g":%d,"b":%d}},\n  "trophies": {"league_titles":%d,"domestic_cups":%d,"uefa_cl_wins":%d,"uefa_el_wins":%d,"uefa_uecl_wins":%d},\n  "manager": {"name":"%s","join_date":"%s"},\n  "calendar": [\n    %s\n  ]\n}',
+        '{\n  "save_uid": "%s",\n  "club_name": "%s",\n  "current_date": "%s",\n  "captain_id": %d,\n  "team_colors": {"primary":{"r":%d,"g":%d,"b":%d},"secondary":{"r":%d,"g":%d,"b":%d},"tertiary":{"r":%d,"g":%d,"b":%d}},\n  "trophies": {"league_titles":%d,"domestic_cups":%d,"uefa_cl_wins":%d,"uefa_el_wins":%d,"uefa_uecl_wins":%d},\n  "manager": {"name":"%s","join_date":"%s"},\n  "standings": [\n    %s\n  ],\n  "manager_history": [\n    %s\n  ],\n  "competitions": [\n    %s\n  ],\n  "calendar": [\n    %s\n  ]\n}',
+        save_uid_escaped,
+        club_name_escaped,
         formatted_date,
         captain_id,
         team_colors.r1, team_colors.g1, team_colors.b1,
@@ -701,6 +1232,9 @@ do
         team_colors.r3, team_colors.g3, team_colors.b3,
         trophies.league_titles, trophies.domestic_cups, trophies.uefa_cl_wins, trophies.uefa_el_wins, trophies.uefa_uecl_wins,
         manager_name_escaped, manager_join_date,
+        table.concat(standings_json_list, ",\n    "),
+        table.concat(manager_history_json_list, ",\n    "),
+        table.concat(competitions_json_list, ",\n    "),
         table.concat(fixtures_json_list, ",\n    ")
     )
 

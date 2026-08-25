@@ -23,6 +23,18 @@ CREATE TABLE IF NOT EXISTS seasons (
     UNIQUE(save_id, year_label)
 );
 
+-- One row per save, upserted on every calendar sync. Backs the Home
+-- dashboard's "live" widgets (standings, upcoming match, captain,
+-- manager, trophies) when browsing a save that isn't the one currently
+-- loaded in Live Editor — that data only ever exists live, so this is
+-- the last-known snapshot instead of nothing.
+CREATE TABLE IF NOT EXISTS save_snapshots (
+    save_id INTEGER PRIMARY KEY,
+    raw_calendar_json TEXT,
+    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(save_id) REFERENCES saves(id)
+);
+
 -- Master players table — bio / static info that rarely changes
 CREATE TABLE IF NOT EXISTS players (
     player_id INTEGER PRIMARY KEY,  -- matches EA FC internal playerid
@@ -102,4 +114,40 @@ CREATE TABLE IF NOT EXISTS matches (
     result TEXT, -- 'W' / 'D' / 'L'
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(season_id, match_date, opponent, competition)
+);
+
+-- Per-competition standing/progress, upserted every calendar sync from
+-- the same fixture-aggregation the calendar export's "competitions"
+-- array already computes (see export_all.lua). Never overwritten across
+-- seasons (only within the current one), same accumulation pattern as
+-- player_season_stats/matches — this is what lets Team Record show
+-- "place finished" for past seasons, not just the live one.
+-- Youth academy roster, upserted per season like player_season_stats.
+-- Never deleted once a player_id has appeared here for a save — this is
+-- what lets us detect "Academy Graduate" in getInferredTransfers (a
+-- player who newly appears on the senior squad and was previously seen
+-- here, rather than a real signing).
+CREATE TABLE IF NOT EXISTS youth_academy_snapshot (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL,
+    tier INTEGER,
+    months_in_squad INTEGER,
+    overall INTEGER,
+    potential_low INTEGER,
+    potential_high INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(player_id, season_id)
+);
+
+CREATE TABLE IF NOT EXISTS season_competition_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    comp_name TEXT NOT NULL,
+    standing TEXT,          -- e.g. "5th of 20 — 62 pts" or "W3 D1 L2"
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, comp_name)
 );

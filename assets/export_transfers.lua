@@ -7,13 +7,10 @@ require 'imports/other/helpers'
 -- why the Transfers Hub / player profile transfer history never
 -- updated with fresh data.
 --
--- BEST-EFFORT NOTE: "transferhistory" below is our best guess at
--- the Live Editor table name for transfer records — it hasn't
--- been confirmed against Live Editor's own table browser. If this
--- script runs and ea_fc_transfers_export.json ends up empty (or
--- the log below reports 0 transfers), open Live Editor's database
--- table list, find the real transfer-history table, and swap the
--- table/field names marked below.
+-- Uses the "transfers" DB table (playerid/sellingteamid/buyingteamid/
+-- transferamount), confirmed via GetDBTablesNames()/GetDBTableFields()
+-- schema dump 2026-08-25 — the earlier "transferhistory" guess doesn't
+-- exist in this game version. No date field on this table.
 -- ============================================================
 
 local json_path = "C:\\Users\\Public\\ea_fc_transfers_export.json"
@@ -36,16 +33,20 @@ function get_transfer_data()
     local result = {}
     local user_team_id = GetUserTeamID()
 
-    -- TODO verify table name: "transferhistory" is unconfirmed.
+    -- REVERTED 2026-08-25: the real "transfers" table crashed the game on
+    -- first use via F10 (log shows squad export completing, then nothing,
+    -- then a full game restart) — likely a whole-game-world ledger, not
+    -- scoped to this save. Back to the safe no-op until a bounded/pcall'd
+    -- probe confirms it's safe — see inspect_transfers_table.lua, run
+    -- manually, NOT via F10.
     local transfers_table = LE.db:GetTable("transferhistory")
     if not transfers_table then
-        print("[CompanionApp] WARNING: 'transferhistory' table not found — check the real table name in Live Editor's database browser and update export_transfers.lua.")
+        print("[CompanionApp] WARNING: 'transferhistory' table not found — transfers export disabled pending a safe fix, see comment above.")
         return result
     end
 
     local record = transfers_table:GetFirstRecord()
     while record > 0 do
-        -- TODO verify field names: playerid/fromteamid/toteamid/value are unconfirmed.
         local playerid = transfers_table:GetRecordFieldValue(record, "playerid")
         local from_team_id = transfers_table:GetRecordFieldValue(record, "fromteamid") or 0
         local to_team_id = transfers_table:GetRecordFieldValue(record, "toteamid") or 0
@@ -71,7 +72,7 @@ function get_transfer_data()
     return result
 end
 
-local function serialize_to_json(transfers)
+local function serialize_to_json(transfers, save_uid)
     local parts = {}
     for i, t in ipairs(transfers) do
         parts[i] = string.format(
@@ -84,15 +85,16 @@ local function serialize_to_json(transfers)
             tostring(t.is_big_money)
         )
     end
-    return '{"transfers":[' .. table.concat(parts, ",") .. ']}'
+    return string.format('{"save_uid":"%s","transfers":[', save_uid:gsub('"', '\\"')) .. table.concat(parts, ",") .. ']}'
 end
 
 assert(IsInCM(), "Script must be executed in career mode")
 
+local save_uid = GetSaveUID() or ""
 local transfers = get_transfer_data()
 local file = io.open(json_path, "w+")
 if file then
-    file:write(serialize_to_json(transfers))
+    file:write(serialize_to_json(transfers, save_uid))
     file:close()
     print(string.format("[CompanionApp] Exported %d transfers to %s", #transfers, json_path))
 else
