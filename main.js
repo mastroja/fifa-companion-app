@@ -150,6 +150,53 @@ function refreshLeagueTeamsFromCalendar(calendarPayload) {
   console.log(`[League] Resolved "${primaryLeague}" as primary league with ${leagueTeamNames.size} known clubs.`);
 }
 
+// Persists completed fixtures from the calendar export into `matches`,
+// tied to the currently-resolved season. The export only ever contains
+// the *current* season's fixtures, so this is what makes multi-season
+// match history (Manager PPG) possible — INSERT OR IGNORE plus the
+// table's UNIQUE key means re-syncing the same season's export never
+// duplicates a row.
+function importCalendarMatches(calendarPayload) {
+  if (!db || !currentSeasonId || !calendarPayload || !Array.isArray(calendarPayload.calendar)) return;
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO matches
+      (season_id, match_date, competition, opponent, is_home, user_score, opponent_score, result)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+  `);
+
+  try {
+    calendarPayload.calendar.forEach(match => {
+      if (!match.played || !match.score) return;
+      const parts = String(match.score).split('-');
+      if (parts.length !== 2) return;
+
+      const homeScore = parseInt(parts[0].trim(), 10);
+      const awayScore = parseInt(parts[1].trim(), 10);
+      if (isNaN(homeScore) || isNaN(awayScore)) return;
+
+      const userScore = match.is_home ? homeScore : awayScore;
+      const opponentScore = match.is_home ? awayScore : homeScore;
+      const result = userScore > opponentScore ? 'W' : (userScore === opponentScore ? 'D' : 'L');
+
+      stmt.run([
+        currentSeasonId,
+        match.date || '',
+        match.competition || '',
+        match.opponent || '',
+        match.is_home ? 1 : 0,
+        userScore,
+        opponentScore,
+        result
+      ]);
+    });
+  } finally {
+    stmt.free();
+  }
+
+  saveDatabaseToDisk();
+}
+
 function correctTransferFlags(transferPayload) {
   if (!transferPayload || !Array.isArray(transferPayload.transfers)) return transferPayload;
 
@@ -427,6 +474,85 @@ function getPlayerHistory(playerId) {
   }));
 }
 
+// Career (all-season) totals per player, for the Home page's All-Time
+// top scorers/assists/appearances toggle.
+function getCareerTotalsForSquad() {
+  if (!db) return [];
+  const res = db.exec(`
+    SELECT p.player_id, p.name, p.position_id,
+           SUM(s.goals) AS goals, SUM(s.assists) AS assists,
+           SUM(s.appearances) AS appearances, SUM(s.clean_sheets) AS clean_sheets
+    FROM player_season_stats s
+    JOIN players p ON p.player_id = s.player_id
+    GROUP BY s.player_id
+    ORDER BY goals DESC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(row => ({
+    player_id: row[0],
+    name: row[1],
+    position_id: row[2],
+    goals: row[3],
+    assists: row[4],
+    appearances: row[5],
+    clean_sheets: row[6]
+  }));
+}
+
+// Points-per-game per season, chronological, for the Manager PPG widget.
+function getManagerSeasonPPG() {
+  if (!db) return [];
+  const res = db.exec(`
+    SELECT se.year_label,
+           COUNT(*) AS played,
+           SUM(CASE WHEN m.result = 'W' THEN 3 WHEN m.result = 'D' THEN 1 ELSE 0 END) AS points
+    FROM matches m
+    JOIN seasons se ON se.id = m.season_id
+    GROUP BY m.season_id
+    ORDER BY se.id ASC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(row => {
+    const played = row[1];
+    const points = row[2];
+    return {
+      season: row[0],
+      played,
+      points,
+      ppg: played > 0 ? points / played : 0
+    };
+  });
+}
+
+// Per-season W/D/L/GF/GA, chronological, for the Team Record widget's
+// season selector (an "All Time" total is summed client-side from these).
+function getTeamRecordSeasons() {
+  if (!db) return [];
+  const res = db.exec(`
+    SELECT se.year_label,
+           COUNT(*) AS played,
+           SUM(CASE WHEN m.result = 'W' THEN 1 ELSE 0 END) AS wins,
+           SUM(CASE WHEN m.result = 'D' THEN 1 ELSE 0 END) AS draws,
+           SUM(CASE WHEN m.result = 'L' THEN 1 ELSE 0 END) AS losses,
+           SUM(m.user_score) AS goals_for,
+           SUM(m.opponent_score) AS goals_against
+    FROM matches m
+    JOIN seasons se ON se.id = m.season_id
+    GROUP BY m.season_id
+    ORDER BY se.id ASC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(row => ({
+    season: row[0],
+    played: row[1],
+    wins: row[2],
+    draws: row[3],
+    losses: row[4],
+    goals_for: row[5],
+    goals_against: row[6]
+  }));
+}
+
 // ------------------------------------------------------------------
 // Refresh trigger
 // ------------------------------------------------------------------
@@ -475,6 +601,9 @@ function createWindow() {
 ipcMain.handle('get-squad-data', () => getSquadFromDB());
 ipcMain.handle('get-player-history', (_event, playerId) => getPlayerHistory(playerId));
 ipcMain.handle('trigger-refresh', () => triggerLiveEditorRefresh());
+ipcMain.handle('get-career-totals', () => getCareerTotalsForSquad());
+ipcMain.handle('get-manager-ppg', () => getManagerSeasonPPG());
+ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
 
 app.whenReady().then(async () => {
   await initDatabase();
@@ -487,6 +616,7 @@ app.whenReady().then(async () => {
         const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
         const startupCalendarPayload = JSON.parse(rawCalendar);
         refreshLeagueTeamsFromCalendar(startupCalendarPayload);
+        importCalendarMatches(startupCalendarPayload);
         mainWindow.webContents.send('calendar-updated', startupCalendarPayload);
       } catch (err) {
         console.error('[Startup] Failed to load existing calendar export:', err);
@@ -511,6 +641,7 @@ app.whenReady().then(async () => {
           const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
           const calendarPayload = JSON.parse(rawCalendar);
           refreshLeagueTeamsFromCalendar(calendarPayload);
+          importCalendarMatches(calendarPayload);
 
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('calendar-updated', calendarPayload);

@@ -511,6 +511,15 @@ do
         return MEMORY:ReadMultilevelPointer(IFCEInterface, {0x18, 0x10, 0x08, 0x00})
     end
 
+    -- Same day-offset encoding as the squad export's convertFifaDate —
+    -- duplicated locally since each do...end block keeps its own copies.
+    local function convertFifaDate(dayOffset)
+        if not dayOffset or dayOffset <= 0 then return "" end
+        local baseEpochSeconds = -12219292800
+        local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
+        return os.date("%Y-%m-%d", targetSeconds) or tostring(dayOffset)
+    end
+
     local function GetStandingsByIndex(idx)
         local StandingsData = {}
         local FCEDataManager = GetFCEDataManager()
@@ -568,6 +577,73 @@ do
         end
     end
 
+    -- "teams" is a static team-profile table (colors, captain, ratings,
+    -- stadium/history info) — confirmed via Live Editor's DB browser to
+    -- have NO live standings fields (no wins/losses/points/rank), so this
+    -- only pulls captain + kit colors for the user's own team.
+    local captain_id = 0
+    local team_colors = { r1 = 0, g1 = 0, b1 = 0, r2 = 0, g2 = 0, b2 = 0, r3 = 0, g3 = 0, b3 = 0 }
+    local trophies = { league_titles = 0, domestic_cups = 0, uefa_cl_wins = 0, uefa_el_wins = 0, uefa_uecl_wins = 0 }
+
+    local teams_table = LE.db:GetTable("teams")
+    if teams_table then
+        local team_record = teams_table:GetFirstRecord()
+        while team_record > 0 do
+            local tid = teams_table:GetRecordFieldValue(team_record, "teamid")
+            if tid and tid == user_team_id then
+                captain_id = teams_table:GetRecordFieldValue(team_record, "captainid") or 0
+                team_colors.r1 = teams_table:GetRecordFieldValue(team_record, "teamcolor1r") or 0
+                team_colors.g1 = teams_table:GetRecordFieldValue(team_record, "teamcolor1g") or 0
+                team_colors.b1 = teams_table:GetRecordFieldValue(team_record, "teamcolor1b") or 0
+                team_colors.r2 = teams_table:GetRecordFieldValue(team_record, "teamcolor2r") or 0
+                team_colors.g2 = teams_table:GetRecordFieldValue(team_record, "teamcolor2g") or 0
+                team_colors.b2 = teams_table:GetRecordFieldValue(team_record, "teamcolor2b") or 0
+                team_colors.r3 = teams_table:GetRecordFieldValue(team_record, "teamcolor3r") or 0
+                team_colors.g3 = teams_table:GetRecordFieldValue(team_record, "teamcolor3g") or 0
+                team_colors.b3 = teams_table:GetRecordFieldValue(team_record, "teamcolor3b") or 0
+                trophies.league_titles = teams_table:GetRecordFieldValue(team_record, "leaguetitles") or 0
+                trophies.domestic_cups = teams_table:GetRecordFieldValue(team_record, "domesticcups") or 0
+                trophies.uefa_cl_wins = teams_table:GetRecordFieldValue(team_record, "uefa_cl_wins") or 0
+                trophies.uefa_el_wins = teams_table:GetRecordFieldValue(team_record, "uefa_el_wins") or 0
+                trophies.uefa_uecl_wins = teams_table:GetRecordFieldValue(team_record, "uefa_uecl_wins") or 0
+                break
+            end
+            team_record = teams_table:GetNextValidRecord()
+        end
+    end
+
+    -- "manager" is one row per manager across the whole game world (like
+    -- "teams"), matched here by teamid. Confirmed fields: firstname,
+    -- surname, commonname, managerjointeamdate. No manager-of-the-
+    -- year/month award tally exists anywhere in this table — scrolled
+    -- its full field list and found nothing award-related, so that part
+    -- of the Home page's Manager widget stays unbuilt until a real
+    -- source turns up.
+    local manager_name = ""
+    local manager_join_date = ""
+
+    local manager_table = LE.db:GetTable("manager")
+    if manager_table then
+        local mgr_record = manager_table:GetFirstRecord()
+        while mgr_record > 0 do
+            local mtid = manager_table:GetRecordFieldValue(mgr_record, "teamid")
+            if mtid and mtid == user_team_id then
+                local common_name = manager_table:GetRecordFieldValue(mgr_record, "commonname") or ""
+                if common_name ~= "" then
+                    manager_name = common_name
+                else
+                    local first_name = manager_table:GetRecordFieldValue(mgr_record, "firstname") or ""
+                    local surname = manager_table:GetRecordFieldValue(mgr_record, "surname") or ""
+                    manager_name = (first_name .. " " .. surname):gsub("^%s+", ""):gsub("%s+$", "")
+                end
+                local raw_join_date = manager_table:GetRecordFieldValue(mgr_record, "managerjointeamdate") or 0
+                manager_join_date = convertFifaDate(raw_join_date)
+                break
+            end
+            mgr_record = manager_table:GetNextValidRecord()
+        end
+    end
+
     -- Fetch exact in-game calendar date from career state
     local current_date_tbl = GetCurrentDate()
     local formatted_date = string.format("%04d-%02d-%02d", current_date_tbl.year, current_date_tbl.month, current_date_tbl.day)
@@ -614,9 +690,17 @@ do
         end
     end
 
+    local manager_name_escaped = manager_name:gsub('"', '\\"')
+
     local json_output = string.format(
-        '{\n  "current_date": "%s",\n  "calendar": [\n    %s\n  ]\n}',
+        '{\n  "current_date": "%s",\n  "captain_id": %d,\n  "team_colors": {"primary":{"r":%d,"g":%d,"b":%d},"secondary":{"r":%d,"g":%d,"b":%d},"tertiary":{"r":%d,"g":%d,"b":%d}},\n  "trophies": {"league_titles":%d,"domestic_cups":%d,"uefa_cl_wins":%d,"uefa_el_wins":%d,"uefa_uecl_wins":%d},\n  "manager": {"name":"%s","join_date":"%s"},\n  "calendar": [\n    %s\n  ]\n}',
         formatted_date,
+        captain_id,
+        team_colors.r1, team_colors.g1, team_colors.b1,
+        team_colors.r2, team_colors.g2, team_colors.b2,
+        team_colors.r3, team_colors.g3, team_colors.b3,
+        trophies.league_titles, trophies.domestic_cups, trophies.uefa_cl_wins, trophies.uefa_el_wins, trophies.uefa_uecl_wins,
+        manager_name_escaped, manager_join_date,
         table.concat(fixtures_json_list, ",\n    ")
     )
 
