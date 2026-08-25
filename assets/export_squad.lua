@@ -124,10 +124,28 @@ function get_squad_data()
                     injury = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "injury") or 0,
                     league_goals_prev_three_matches = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "leaguegoalsprevthreematches") or 0,
                     is_among_top_scorers_in_team = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "isamongtopscorersinteam") or 0,
-                    form = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "form") or 0
+                    form = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "form") or 0,
+                    team_id = teamplayerlinks_table:GetRecordFieldValue(tpl_record, "teamid") or 0
                 }
             end
             tpl_record = teamplayerlinks_table:GetNextValidRecord()
+        end
+    end
+
+    -- Players WE'VE loaned OUT (playerloans.teamidloanedfrom == our team)
+    -- need their real current club resolved via teamplayerlinks —
+    -- GetTeamIdFromPlayerId keeps returning their contract/parent club
+    -- (us) even while they're out on loan elsewhere, which was showing
+    -- as "Loaned to Arsenal" in the UI (nonsensical — you can't be loaned
+    -- to your own parent club). teamplayerlinks.teamid reflects who
+    -- they're actually registered to play for right now.
+    local loaned_out_destination = {}
+    for pid, info in pairs(loan_lookup) do
+        if info.team_loaned_from == user_team_id then
+            local tpl_info_for_loan = tpl_lookup[pid]
+            if tpl_info_for_loan and tpl_info_for_loan.team_id and tpl_info_for_loan.team_id > 0 then
+                loaned_out_destination[pid] = tpl_info_for_loan.team_id
+            end
         end
     end
 
@@ -211,8 +229,9 @@ function get_squad_data()
                 player.overall = overall
                 player.potential = potential
                 player.nationality = nationality_id
-                player.club_id = team_id
-                player.club_name = (team_id and team_id > 0) and (GetTeamName(team_id) or "") or ""
+                local resolved_team_id = loaned_out_destination[playerid] or team_id
+                player.club_id = resolved_team_id
+                player.club_name = (resolved_team_id and resolved_team_id > 0) and (GetTeamName(resolved_team_id) or "") or ""
                 player.photo_id = photo_id
                 player.dob = convertFifaDate(raw_birthdate)
                 player.height = tostring(height) .. " cm"
@@ -231,7 +250,7 @@ function get_squad_data()
                 player.on_loan = (loan_info ~= nil)
                 player.loan_team_from = loan_info and loan_info.team_loaned_from or 0
                 player.loan_club_name = loan_club_name
-                player.loan_date_end = loan_info and tostring(loan_info.loan_date_end) or ""
+                player.loan_date_end = loan_info and convertFifaDate(loan_info.loan_date_end) or ""
                 player.is_loan_to_buy = loan_info and (loan_info.is_loan_to_buy == 1) or false
 
                 player.wage = contract_info and contract_info.wage or 0
@@ -293,7 +312,11 @@ function get_squad_data()
         local playerid = stat.playerid
         local app = stat.app or 0
 
-        if result[playerid] ~= nil then
+        -- "World's Game" is a generic/unlicensed exhibition bucket, not
+        -- a real competition — excluded from every player's stats
+        -- entirely (both the totals and the per-competition breakdown)
+        -- per user request.
+        if result[playerid] ~= nil and stat.compname ~= "World's Game" then
             local player = result[playerid]
             if player.name == "" then player.name = GetPlayerName(playerid) end
             
@@ -307,7 +330,6 @@ function get_squad_data()
             player.saves = player.saves + (stat.saves or 5)
             player.yellow_cards = player.yellow_cards + (stat.yellow or 0)
             player.red_cards = player.red_cards + (stat.red or 0)
-            player.avg_rating = avg
 
             table.insert(player.competitions, {
                 comp_name = stat.compname or "Unknown Competition",
@@ -316,6 +338,20 @@ function get_squad_data()
                 yellow_cards = stat.yellow or 0, red_cards = stat.red or 0, avg_rating = avg
             })
         end
+    end
+
+    -- avg_rating was previously just whatever competition happened to be
+    -- processed last (a plain overwrite, not an average at all) — now a
+    -- proper appearances-weighted average across every competition, so
+    -- e.g. 7.1 over 30 games outweighs 9.0 over 3.
+    for _, player in pairs(result) do
+        local weighted_sum = 0
+        local total_apps = 0
+        for _, comp in ipairs(player.competitions) do
+            weighted_sum = weighted_sum + (comp.avg_rating * comp.appearances)
+            total_apps = total_apps + comp.appearances
+        end
+        player.avg_rating = (total_apps > 0) and (weighted_sum / total_apps) or 0
     end
 
     local squad_array = {}
@@ -331,8 +367,8 @@ local function serialize_string_array(arr)
     return '[' .. table.concat(parts, ",") .. ']'
 end
 
-local function serialize_to_json(tbl)
-    local json = '{"players":['
+local function serialize_to_json(tbl, save_uid, current_date)
+    local json = string.format('{"save_uid":"%s","current_date":"%s","players":[', save_uid:gsub('"', '\\"'), current_date)
     for i, p in ipairs(tbl) do
         local attr = p.attributes or {}
         json = json .. string.format(
@@ -374,10 +410,13 @@ local function serialize_to_json(tbl)
 end
 
 assert(IsInCM(), "Script must be executed in career mode")
+local save_uid = GetSaveUID() or ""
+local current_date_tbl = GetCurrentDate()
+local current_date_str = string.format("%04d-%02d-%02d", current_date_tbl.year, current_date_tbl.month, current_date_tbl.day)
 local squad_array = get_squad_data()
 local file = io.open(json_path, "w+")
 if file then
-    file:write(serialize_to_json(squad_array))
+    file:write(serialize_to_json(squad_array, save_uid, current_date_str))
     file:close()
     LOGGER:LogInfo("EA FC Companion: Squad export with headassetid and badges successful!")
 else

@@ -65,6 +65,7 @@
 
     .loan-badge { font-size: 11px; padding: 2px 6px; background: #388bfd22; border: 1px solid #388bfd55; border-radius: 4px; color: #58a6ff; margin-left: 6px; }
     .injury-badge { font-size: 11px; padding: 2px 6px; background: #da363322; border: 1px solid #da363355; border-radius: 4px; color: #f85149; margin-left: 6px; }
+    .captain-badge { font-size: 14px; padding: 1px 6px; background: #e3b34122; border: 1px solid #e3b34155; border-radius: 4px; color: #e3b341; margin-left: 6px; font-weight: 700; }
 
     .rating-badge { padding: 2px 8px; border-radius: 4px; font-weight: 700; background-color: #238636; color: #fff; }
     .pos-badge { padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; text-transform: uppercase; background-color: #21262d; border: 1px solid var(--border-color); }
@@ -170,11 +171,9 @@
 
     .home-dashboard-grid { display: grid; gap: 20px; margin-bottom: 20px; }
     .home-grid-top { grid-template-columns: 1fr 1fr; }
-    .home-grid-mid { grid-template-columns: repeat(4, 1fr); }
+    .home-grid-mid { grid-template-columns: 1fr 1fr; }
+    .home-widget-stack { display: flex; flex-direction: column; gap: 20px; }
     .home-grid-stats { grid-template-columns: 1fr 1fr 1fr; }
-    @media (max-width: 1300px) {
-      .home-grid-mid { grid-template-columns: 1fr 1fr; }
-    }
     @media (max-width: 1100px) {
       .home-grid-stats { grid-template-columns: 1fr; }
     }
@@ -250,6 +249,8 @@
   <header>
     <h1 onclick="switchTab('home')">EA FC Companion App</h1>
     <div class="header-controls">
+      <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
+      <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <span class="badge" id="current-ingame-date">N/A</span>
       <span class="badge" id="status-badge">Awaiting Data...</span>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
@@ -260,6 +261,7 @@
   <div class="nav-tabs" id="main-nav-tabs">
     <button class="tab-btn active" onclick="switchTab('home')" id="btn-home">Home</button>
     <button class="tab-btn" onclick="switchTab('squad')" id="btn-squad">Squad Stats</button>
+    <button class="tab-btn" onclick="switchTab('past-players')" id="btn-past-players">Past Players</button>
     <button class="tab-btn" onclick="switchTab('transfers')" id="btn-transfers">Transfers Hub</button>
     <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
   </div>
@@ -267,7 +269,10 @@
   <!-- Home Tab -->
   <div id="home-tab" class="tab-content active">
     <div class="home-header-strip">
-      <h2 id="home-team-title">My Club</h2>
+      <div>
+        <h2 id="home-team-title">My Club</h2>
+        <div id="home-snapshot-note" style="font-size: 12px; opacity: 0.85; display: none;"></div>
+      </div>
       <div class="home-form-strip" id="home-form-strip"></div>
     </div>
 
@@ -277,15 +282,23 @@
         <div id="home-upcoming-match-body"></div>
       </div>
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
-        <h3><span>League Table (Top 5)</span></h3>
+        <h3><span>League Table</span></h3>
         <div id="home-league-table-body"></div>
       </div>
     </div>
 
     <div class="home-dashboard-grid home-grid-mid">
-      <div class="profile-card home-widget">
-        <h3><span>Captain</span></h3>
-        <div id="home-captain-body"></div>
+      <div class="home-widget-stack">
+        <div class="profile-card home-widget">
+          <h3><span>Captain</span></h3>
+          <div id="home-captain-body"></div>
+        </div>
+        <div class="profile-card home-widget">
+          <h3><span>Manager</span></h3>
+          <div id="home-manager-body"></div>
+          <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 6px;">Points Per Game</div>
+          <div id="home-ppg-body"></div>
+        </div>
       </div>
       <div class="profile-card home-widget">
         <h3>
@@ -296,14 +309,8 @@
           </select>
         </h3>
         <div class="stats-summary-grid" id="home-team-record-body"></div>
-      </div>
-      <div class="profile-card home-widget">
-        <h3><span>Manager</span></h3>
-        <div id="home-manager-body"></div>
-      </div>
-      <div class="profile-card home-widget">
-        <h3><span>Manager PPG</span></h3>
-        <div id="home-ppg-body"></div>
+        <div id="home-team-record-competitions" style="margin-top: 8px;"></div>
+        <button class="home-toggle-btn" style="margin-top: 10px;" onclick="openLeagueHierarchyModal()">View League History</button>
       </div>
     </div>
 
@@ -356,6 +363,11 @@
     </div>
 
     <div class="profile-card home-widget">
+      <h3><span>Youth Academy</span></h3>
+      <div id="home-youth-academy-body"></div>
+    </div>
+
+    <div class="profile-card home-widget">
       <h3><span>Team Needs / Future Transfers</span></h3>
       <div id="home-needs-watchlist-body"></div>
     </div>
@@ -364,13 +376,31 @@
   <!-- Squad Stats Tab -->
   <div id="squad-tab" class="tab-content">
     <div class="filter-container">
-      <input 
-        type="text" 
-        id="squad-search" 
-        class="search-input" 
-        placeholder="Search player name or position (e.g., ST, CM)..." 
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <label for="squad-season-select" style="font-weight: bold; font-size: 14px;">Season:</label>
+        <select id="squad-season-select" onchange="changeSquadSeason(this.value)">
+          <option value="current">Current Season</option>
+        </select>
+      </div>
+      <input
+        type="text"
+        id="squad-search"
+        class="search-input"
+        placeholder="Search player name or position (e.g., ST, CM)..."
         oninput="renderTableRows()"
       />
+    </div>
+
+    <div class="filter-container" style="padding-top: 0;">
+      <div style="display: flex; align-items: center; gap: 16px; font-size: 13px;">
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" id="squad-include-loaned" checked onchange="renderTableRows()" /> Include Loaned Players
+        </label>
+        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+          <input type="checkbox" id="squad-include-transferred" checked onchange="renderTableRows()" /> Include Transferred Players
+        </label>
+      </div>
+      <button class="home-toggle-btn" onclick="sortTable('club_status')">Sort by Club Status</button>
     </div>
 
     <div class="table-container">
@@ -379,6 +409,7 @@
           <tr>
             <th onclick="sortTable('name')">Player ↕</th>
             <th onclick="sortTable('pos_label')">Pos ↕</th>
+            <th onclick="sortTable('age')">Age ↕</th>
             <th onclick="sortTable('overall')">OVR ↕</th>
             <th onclick="sortTable('appearances')">Apps ↕</th>
             <th onclick="sortTable('offensive_stat')">Goals ↕</th>
@@ -390,7 +421,34 @@
           </tr>
         </thead>
         <tbody id="stats-body">
-          <tr><td colspan="10" class="empty-state">No squad data loaded.</td></tr>
+          <tr><td colspan="11" class="empty-state">No squad data loaded.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- Past Players Tab -->
+  <div id="past-players-tab" class="tab-content">
+    <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 14px;">
+      Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For has no data source since the game's transfer-history table crashes when read — see the "Departed" column for when they left instead.
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Player</th>
+            <th>Pos</th>
+            <th>Age</th>
+            <th>Current OVR</th>
+            <th>Current Club</th>
+            <th>Sold For</th>
+            <th>Current Value</th>
+            <th>Departed</th>
+          </tr>
+        </thead>
+        <tbody id="past-players-body">
+          <tr><td colspan="8" class="empty-state">No past players tracked yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -453,18 +511,7 @@
       <div class="cal-competitions-box">
         <h3>Competitions & Standings</h3>
         <div class="competitions-grid" id="competitions-status-list">
-          <div class="competition-status-row">
-            <span class="comp-name">⚽ Premier League</span>
-            <span class="comp-standing">1st Place</span>
-          </div>
-          <div class="competition-status-row">
-            <span class="comp-name">🏆 UEFA Champions League</span>
-            <span class="comp-standing">Quarter-Finals</span>
-          </div>
-          <div class="competition-status-row">
-            <span class="comp-name">🛡️ Domestic Cup</span>
-            <span class="comp-standing">Semi-Finals</span>
-          </div>
+          <div class="empty-state" style="padding: 12px;">No competition data loaded.</div>
         </div>
       </div>
     </div>
@@ -508,6 +555,15 @@
     <div id="profile-content-container"></div>
   </div>
 
+  <!-- League Hierarchy Pop-out -->
+  <dialog id="league-hierarchy-dialog" style="background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; max-width: 660px; width: 90%;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+      <h3 style="margin: 0;">League History</h3>
+      <button class="back-btn" style="margin: 0;" onclick="document.getElementById('league-hierarchy-dialog').close()">✕</button>
+    </div>
+    <div id="league-hierarchy-body"></div>
+  </dialog>
+
   <script>
     let currentCalendar = [];
     let currentIngameDate = null;
@@ -522,6 +578,23 @@
       currentTeamColors = (data && data.team_colors) || null;
       currentTrophies = (data && data.trophies) || null;
       currentManager = (data && data.manager) || null;
+      leagueStandings = (Array.isArray(data?.standings) && data.standings.length > 0)
+        ? [...data.standings]
+            .sort((a, b) => (b.points - a.points) || (b.gd - a.gd) || (b.gf - a.gf))
+            .map((t, i) => ({
+              rank: i + 1,
+              team_id: t.team_id,
+              team_name: t.team_name,
+              played: t.played,
+              wins: t.wins,
+              draws: t.draws,
+              losses: t.losses,
+              goals_for: t.gf,
+              goals_against: t.ga,
+              points: t.points,
+              form: Array.isArray(t.form) ? t.form : []
+            }))
+        : null;
 
       document.getElementById('current-ingame-date').textContent = formatDateMMDDYYYY(activeDate);
       
@@ -580,7 +653,12 @@
     function updateCompetitionsDisplay(comps) {
       const container = document.getElementById('competitions-status-list');
       if (!container) return;
-      
+
+      if (!comps || comps.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No competition data loaded.</div>`;
+        return;
+      }
+
       container.innerHTML = '';
       comps.forEach(comp => {
         const row = document.createElement('div');
@@ -687,7 +765,24 @@
     }
 
     let currentPlayers = [];
+    // Separate from currentPlayers (which always tracks the live current
+    // season and feeds the Home dashboard) so browsing a past season or
+    // "All Time" in the Squad Stats selector can't corrupt Home widgets
+    // like Captain/Top Scorers that read currentPlayers directly.
+    let squadTableRows = [];
+    let squadSeasonSelection = 'current';
+    // True when the currently-viewed save isn't the one Live Editor has
+    // loaded right now — the Home dashboard's "live" widgets are then
+    // showing a stored snapshot instead of current data (see changeSave).
+    let currentSaveIsSnapshot = false;
+    let currentSnapshotSyncedAt = null;
     let currentTransfers = [];
+    let currentYouthAcademy = [];
+    // Populated fresh each time a player profile opens (see
+    // openPlayerProfile) — backs the profile's "Stats" card's Season/
+    // All Time toggle without needing a full profile re-render.
+    let currentProfileStatsData = null;
+    let profileStatsViewMode = 'season';
     let currentSortColumn = 'pos_label';
     let sortAscending = false;
 
@@ -742,14 +837,14 @@
     };
 
     const POSITION_MAP = {
-        0: { label: 'GK', group: 'GK' }, 
-        1: { label: 'SW', group: 'DEF' }, 
-        2: { label: 'RB', group: 'DEF' }, 
-        3: { label: 'CB', group: 'DEF' }, 
-        4: { label: 'LCB', group: 'DEF' },
-        5: { label: 'RCB', group: 'DEF' },
-        6: { label: 'RWB', group: 'DEF' }, 
-        7: { label: 'LB', group: 'DEF' }, 
+        0: { label: 'GK', group: 'GK' },
+        1: { label: 'SW', group: 'DEF' },
+        2: { label: 'RWB', group: 'DEF' },
+        3: { label: 'RB', group: 'DEF' },
+        4: { label: 'RCB', group: 'DEF' },
+        5: { label: 'CB', group: 'DEF' },
+        6: { label: 'LCB', group: 'DEF' },
+        7: { label: 'LB', group: 'DEF' },
         8: { label: 'LWB', group: 'DEF' },
         9: { label: 'RDM', group: 'MID' }, 
         10: { label: 'CDM', group: 'MID' }, 
@@ -1121,12 +1216,24 @@
       return isNaN(age) ? null : age;
     }
 
-    function changeProfileSeason(identifier, seasonIndex) {
-      openPlayerProfile(identifier, parseInt(seasonIndex, 10));
-    }
-
     async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+
+      // Not on the senior squad — check the youth academy roster before
+      // giving up. potential becomes a display string (the real range,
+      // not a fabricated one) rather than a number, which the profile
+      // header renders as-is either way.
+      if (!player) {
+        const academyPlayer = (currentYouthAcademy || []).find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+        if (academyPlayer) {
+          player = {
+            ...academyPlayer,
+            potential: `${academyPlayer.potential_low}-${academyPlayer.potential_high}`,
+            club_name: 'Youth Academy',
+            wage: 0
+          };
+        }
+      }
 
       if (!player) {
         player = { name: identifier };
@@ -1141,13 +1248,18 @@
         }
       }
 
-      const displayClubName = player.on_loan ? (player.loan_club_name || player.club_name) : player.club_name;
+      // club_name is always the player's actual current club now (see
+      // export_squad.lua's loaned_out_destination resolution) — no need
+      // to prefer loan_club_name (that's their contract/parent club).
+      const displayClubName = player.club_name;
       const clubBadgeUrl = await fetchClubBadgeUrl(displayClubName);
 
       const posInfo = getPositionInfo(player.position_id);
       const isGoalkeeper = player.position_id === 0 || posInfo.label === "GK";
       const baseOvr = Number(player.overall || 75);
       const jerseyDisplay = player.jersey_number ? `<span class="jersey-badge">#${player.jersey_number}</span>` : '';
+      const isCaptain = player.player_id != null && gameCaptainId != null && player.player_id == gameCaptainId;
+      const captainDisplay = isCaptain ? `<span class="captain-badge" title="Club Captain">Ⓒ</span>` : '';
 
       const attrs = player.attributes || {};
 
@@ -1170,31 +1282,74 @@
       const posVal = attrs.gk_positioning ?? baseOvr;
       const refVal = attrs.reflexes ?? baseOvr;
 
+      // "World's Game" is a generic/unlicensed exhibition bucket, not a
+      // real competition — excluded at export time going forward, but
+      // seasons synced before that fix still have it baked into both the
+      // stored totals and the competitions breakdown. Strip it and, when
+      // found, recompute the season's stats from the filtered breakdown
+      // instead of trusting the (possibly contaminated) raw columns.
+      function cleanSeasonStats(raw) {
+        const rawCompetitions = raw.competitions || [];
+        const competitions = rawCompetitions.filter(c => c.comp_name !== "World's Game");
+        const contaminated = competitions.length !== rawCompetitions.length;
+        if (!contaminated) {
+          return {
+            appearances: raw.appearances || 0,
+            goals: raw.goals || 0,
+            assists: raw.assists || 0,
+            clean_sheets: raw.clean_sheets || 0,
+            avg_rating: raw.avg_rating || 0,
+            competitions
+          };
+        }
+        const sumField = field => competitions.reduce((s, c) => s + (c[field] || 0), 0);
+        let weightedSum = 0, totalApps = 0;
+        competitions.forEach(c => {
+          const r = Number(c.avg_rating || 0);
+          const apps = Number(c.appearances || 0);
+          if (r > 0 && apps > 0) { weightedSum += r * apps; totalApps += apps; }
+        });
+        return {
+          appearances: sumField('appearances'),
+          goals: sumField('goals'),
+          assists: sumField('assists'),
+          clean_sheets: sumField('clean_sheets'),
+          avg_rating: totalApps > 0 ? weightedSum / totalApps : 0,
+          competitions
+        };
+      }
+
       let normalizedSeasons;
       if (realSeasonHistory.length > 0) {
-        normalizedSeasons = realSeasonHistory.map(s => ({
-          season_name: s.season,
-          appearances: s.appearances || 0,
-          goals: s.goals || 0,
-          assists: s.assists || 0,
-          clean_sheets: s.clean_sheets || 0,
-          avg_rating: s.avg_rating || 0,
-          overall: s.overall,
-          potential: s.potential,
-          attributes: s.attributes || {}
-        }));
+        normalizedSeasons = realSeasonHistory.map(s => {
+          const cleaned = cleanSeasonStats(s);
+          return {
+            season_name: s.season,
+            appearances: cleaned.appearances,
+            goals: cleaned.goals,
+            assists: cleaned.assists,
+            clean_sheets: cleaned.clean_sheets,
+            avg_rating: cleaned.avg_rating,
+            overall: s.overall,
+            potential: s.potential,
+            attributes: s.attributes || {},
+            competitions: cleaned.competitions
+          };
+        });
       } else {
+        const cleaned = cleanSeasonStats(player);
         normalizedSeasons = [
           {
             season_name: player.current_season_name || 'Current Season',
-            appearances: player.appearances || 0,
-            goals: player.goals || 0,
-            assists: player.assists || 0,
-            clean_sheets: player.clean_sheets || 0,
-            avg_rating: player.avg_rating || 0,
+            appearances: cleaned.appearances,
+            goals: cleaned.goals,
+            assists: cleaned.assists,
+            clean_sheets: cleaned.clean_sheets,
+            avg_rating: cleaned.avg_rating,
             overall: player.overall,
             potential: player.potential,
-            attributes: player.attributes || {}
+            attributes: player.attributes || {},
+            competitions: cleaned.competitions
           }
         ];
       }
@@ -1208,31 +1363,92 @@
       selectedSeasonIndex = Math.max(0, Math.min(selectedSeasonIndex, seasonsList.length - 1));
       let activeSeason = seasonsList[selectedSeasonIndex] || seasonsList[0];
 
-      let careerApps = 0, careerGoals = 0, careerAssists = 0, careerCS = 0;
+      let careerApps = 0, careerGoals = 0, careerAssists = 0, careerCS = 0, careerRatingWeightedSum = 0;
       seasonsList.forEach(s => {
-        careerApps += Number(s.appearances || 0);
+        const apps = Number(s.appearances || 0);
+        careerApps += apps;
         careerGoals += Number(s.goals || 0);
         careerAssists += Number(s.assists || 0);
         careerCS += Number(s.clean_sheets || 0);
+        careerRatingWeightedSum += Number(s.avg_rating || 0) * apps;
       });
+      const careerAvgRating = careerApps > 0 ? careerRatingWeightedSum / careerApps : 0;
+
+      // All-time per-competition breakdown (appearances-weighted avg
+      // rating, same convention as everywhere else) for the Stats card's
+      // "All Time" view — summed across every season already loaded above.
+      const allTimeCompetitionsMap = new Map();
+      seasonsList.forEach(s => {
+        (s.competitions || []).forEach(c => {
+          const key = c.comp_name || 'League/Cup';
+          if (!allTimeCompetitionsMap.has(key)) {
+            allTimeCompetitionsMap.set(key, { comp_name: key, appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
+          }
+          const entry = allTimeCompetitionsMap.get(key);
+          const apps = Number(c.appearances || 0);
+          entry.appearances += apps;
+          entry.goals += Number(c.goals || 0);
+          entry.assists += Number(c.assists || 0);
+          entry.clean_sheets += Number(c.clean_sheets || 0);
+          entry.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
+        });
+      });
+      const allTimeCompetitions = Array.from(allTimeCompetitionsMap.values()).map(e => ({
+        comp_name: e.comp_name,
+        appearances: e.appearances,
+        goals: e.goals,
+        assists: e.assists,
+        clean_sheets: e.clean_sheets,
+        avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
+      }));
+
+      profileStatsViewMode = 'season';
+      currentProfileStatsData = {
+        season: {
+          label: activeSeason.season_name || 'This Season',
+          competitions: activeSeason.competitions || [],
+          totals: {
+            appearances: activeSeason.appearances || 0,
+            goals: activeSeason.goals || 0,
+            assists: activeSeason.assists || 0,
+            clean_sheets: activeSeason.clean_sheets || 0,
+            avg_rating: activeSeason.avg_rating || 0
+          }
+        },
+        allTime: {
+          label: 'All Time',
+          competitions: allTimeCompetitions,
+          totals: { appearances: careerApps, goals: careerGoals, assists: careerAssists, clean_sheets: careerCS, avg_rating: careerAvgRating }
+        }
+      };
 
       if (careerApps === 0 && player.competitions && player.competitions.length > 0) {
-        careerApps = player.competitions.reduce((sum, c) => sum + (Number(c.appearances) || 0), 0);
-        careerGoals = player.competitions.reduce((sum, c) => sum + (Number(c.goals) || 0), 0);
-        careerAssists = player.competitions.reduce((sum, c) => sum + (Number(c.assists) || 0), 0);
-        careerCS = player.competitions.reduce((sum, c) => sum + (Number(c.clean_sheets) || 0), 0);
+        const fallbackComps = player.competitions.filter(c => c.comp_name !== "World's Game");
+        careerApps = fallbackComps.reduce((sum, c) => sum + (Number(c.appearances) || 0), 0);
+        careerGoals = fallbackComps.reduce((sum, c) => sum + (Number(c.goals) || 0), 0);
+        careerAssists = fallbackComps.reduce((sum, c) => sum + (Number(c.assists) || 0), 0);
+        careerCS = fallbackComps.reduce((sum, c) => sum + (Number(c.clean_sheets) || 0), 0);
       }
 
       const playerTransfers = currentTransfers.filter(t =>
         (t.player_name || '').toLowerCase() === (player.name || '').toLowerCase()
       );
       const transferHistoryHtml = playerTransfers.length > 0
-        ? playerTransfers.map(t => `
-            <div class="timeline-item">
-              <div class="timeline-title">${t.from_team || 'Unknown'} → ${t.to_team || 'Unknown'}</div>
-              <div style="font-size: 13px; color: var(--accent-color);">${formatMoney(t.fee)}</div>
-            </div>
-          `).join('')
+        ? playerTransfers.map(t => {
+            if (t.transfer_type === 'Academy Graduate') {
+              return `
+                <div class="timeline-item">
+                  <div class="timeline-title">${t.to_team || 'Unknown'} Academy Graduate</div>
+                </div>
+              `;
+            }
+            return `
+              <div class="timeline-item">
+                <div class="timeline-title">${t.from_team || 'Unknown'} → ${t.to_team || 'Unknown'}</div>
+                <div style="font-size: 13px; color: var(--accent-color);">${t.transfer_type || formatMoney(t.fee)}</div>
+              </div>
+            `;
+          }).join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
 
       const traitsHtml = (player.traits && player.traits.length > 0)
@@ -1271,8 +1487,9 @@
           <div class="profile-main-info">
             <h2>
               ${headAssetDisplay}
-              <span>${player.name || 'Unknown Player'}</span> 
+              <span>${player.name || 'Unknown Player'}</span>
               ${jerseyDisplay}
+              ${captainDisplay}
             </h2>
             <div class="profile-meta">
               <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
@@ -1283,7 +1500,7 @@
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
               <span class="badge">Height: ${player.height}</span>
               <span class="badge">Weight: ${player.weight}</span>
-              ${player.on_loan ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.loan_club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
+              ${player.on_loan ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
               ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
             </div>
           </div>
@@ -1412,18 +1629,6 @@
             </div>
 
             <div class="profile-card">
-              <h3>Contact & Financials</h3>
-              <div class="attr-list">
-                <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
-                <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
-                <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
-                <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
-                <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
-                <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
-              </div>
-            </div>
-
-            <div class="profile-card">
               <h3>Abilities & Traits</h3>
               <div class="sub-attr-category">
                 <h4>Traits</h4>
@@ -1444,20 +1649,24 @@
           <div>
             <div class="profile-card">
               <h3>
-                <span>Stats Breakdown</span>
-                <select id="season-select" onchange="changeProfileSeason('${player.player_id || player.name}', this.value)" style="font-size: 12px; padding: 3px 8px;">
-                  ${seasonsList.map((s, idx) => `<option value="${idx}" ${idx === selectedSeasonIndex ? 'selected' : ''}>${s.season_name || `Season ${idx + 1}`}</option>`).join('')}
+                <span>Stats</span>
+                <select onchange="changeStatsViewMode(this.value)" style="font-size: 12px; padding: 3px 8px;">
+                  <option value="season" ${profileStatsViewMode === 'season' ? 'selected' : ''}>Season</option>
+                  <option value="allTime" ${profileStatsViewMode === 'allTime' ? 'selected' : ''}>All Time</option>
                 </select>
               </h3>
-              <div class="attr-list" style="margin-bottom: 16px;">
-                <div class="attr-item"><span>Selected Season Apps:</span> <strong>${activeSeason.appearances || player.appearances || 0}</strong></div>
-                <div class="attr-item"><span>Career Appearances:</span> <strong>${Math.max(careerApps, player.appearances || 0)}</strong></div>
-                <div class="attr-item"><span>Selected Season Goals:</span> <strong>${activeSeason.goals || player.goals || 0}</strong></div>
-                <div class="attr-item"><span>Career Goals:</span> <strong>${Math.max(careerGoals, player.goals || 0)}</strong></div>
-                <div class="attr-item"><span>Selected Season Assists:</span> <strong>${activeSeason.assists || player.assists || 0}</strong></div>
-                <div class="attr-item"><span>Career Assists:</span> <strong>${Math.max(careerAssists, player.assists || 0)}</strong></div>
-                <div class="attr-item"><span>Clean Sheets:</span> <strong>${activeSeason.clean_sheets || player.clean_sheets || 0}</strong></div>
-                <div class="attr-item"><span>Avg Rating:</span> <strong>${Number(activeSeason.avg_rating || player.avg_rating || 0).toFixed(2)}</strong></div>
+              <div id="profile-stats-body"></div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Contact & Financials</h3>
+              <div class="attr-list">
+                <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
+                <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
+                <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
+                <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
+                <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
+                <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
               </div>
             </div>
 
@@ -1473,6 +1682,61 @@
 
       document.getElementById('main-nav-tabs').style.display = 'none';
       switchTab('profile');
+      renderProfileStatsTable(profileStatsViewMode);
+    }
+
+    // Updates just the Stats card's inner table (no full profile
+    // re-render — keeps scroll position, avoids re-fetching season
+    // history) using whichever of season/all-time was already computed
+    // in openPlayerProfile and stashed on currentProfileStatsData.
+    function changeStatsViewMode(mode) {
+      profileStatsViewMode = mode;
+      renderProfileStatsTable(mode);
+    }
+
+    function renderProfileStatsTable(mode) {
+      const container = document.getElementById('profile-stats-body');
+      if (!container || !currentProfileStatsData) return;
+
+      const data = currentProfileStatsData[mode] || currentProfileStatsData.season;
+
+      container.innerHTML = `
+        <div class="table-container">
+          <table class="sub-table">
+            <thead>
+              <tr>
+                <th>Competition</th>
+                <th>Apps</th>
+                <th>Goals</th>
+                <th>Assists</th>
+                <th>Clean Sheets</th>
+                <th>Avg Rating</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${data.competitions.map(c => `
+                <tr>
+                  <td>${c.comp_name || 'League/Cup'}</td>
+                  <td>${c.appearances || 0}</td>
+                  <td>${c.goals || 0}</td>
+                  <td>${c.assists || 0}</td>
+                  <td>${c.clean_sheets || 0}</td>
+                  <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+                </tr>
+              `).join('')}
+              <tr style="font-weight: 700; border-top: 2px solid var(--border-color);">
+                <td>All Competitions</td>
+                <td>${data.totals.appearances}</td>
+                <td>${data.totals.goals}</td>
+                <td>${data.totals.assists}</td>
+                <td>${data.totals.clean_sheets}</td>
+                <td>${Number(data.totals.avg_rating).toFixed(2)}</td>
+              </tr>
+            </tbody>
+          </table>
+          ${data.competitions.length === 0 ? `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded for ${data.label}.</div>` : ''}
+        </div>
+      `;
     }
 
     function renderTableRows() {
@@ -1480,7 +1744,12 @@
       tbody.innerHTML = '';
 
       const query = document.getElementById('squad-search').value.toLowerCase().trim();
-      let filtered = currentPlayers.filter(p => {
+      const includeLoaned = document.getElementById('squad-include-loaned')?.checked ?? true;
+      const includeTransferred = document.getElementById('squad-include-transferred')?.checked ?? true;
+
+      let filtered = squadTableRows.filter(p => {
+        if (!includeLoaned && p.__clubStatus === 'loan') return false;
+        if (!includeTransferred && p.__clubStatus === 'transferred') return false;
         if (!query) return true;
         const nameMatch = (p.name || '').toLowerCase().includes(query);
         const posMatch = (p.pos_label || '').toLowerCase().includes(query);
@@ -1488,7 +1757,7 @@
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="10" class="empty-state">No players match your search criteria.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="11" class="empty-state">No players match your search criteria.</td></tr>`;
         return;
       }
 
@@ -1508,12 +1777,14 @@
                 <span class="expand-icon">▶</span>
                 ${p.name || 'Unknown'}
                 ${p.on_loan ? '<span class="loan-badge">ON LOAN</span>' : ''}
+                ${p.__clubStatus === 'transferred' ? '<span class="loan-badge">TRANSFERRED</span>' : ''}
                 ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
               </span>
               ${jerseyDisplay}
             </div>
           </td>
           <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+          <td>${computeAge(p.dob) ?? '-'}</td>
           <td><span class="rating-badge">${p.overall || 75}</span></td>
           <td>${p.appearances || 0}</td>
           <td>${p.goals || 0}</td>
@@ -1560,7 +1831,7 @@
           });
 
           subTableHTML += `</tbody></table></div>`;
-          detailRow.innerHTML = `<td colspan="10">${subTableHTML}</td>`;
+          detailRow.innerHTML = `<td colspan="11">${subTableHTML}</td>`;
           
           row.onclick = (e) => {
             if (e.target.classList.contains('clickable-name') || e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
@@ -1584,7 +1855,7 @@
         sortAscending = column === 'name' || column === 'pos_label';
       }
 
-      currentPlayers.sort((a, b) => {
+      squadTableRows.sort((a, b) => {
         let valA = a[column];
         let valB = b[column];
 
@@ -1595,6 +1866,15 @@
         } else if (column === 'pos_label') {
           valA = POSITION_SORT_ORDER[valA] || 99;
           valB = POSITION_SORT_ORDER[valB] || 99;
+        } else if (column === 'club_status') {
+          valA = a.__statusRank || 0;
+          valB = b.__statusRank || 0;
+        } else if (column === 'age') {
+          // Computed fresh here (not read off a stored field) so it can
+          // never drift from what the cell itself displays — it also
+          // calls computeAge(p.dob) at render time.
+          valA = computeAge(a.dob) ?? -1;
+          valB = computeAge(b.dob) ?? -1;
         } else if (typeof valA === 'string') {
           valA = valA.toLowerCase();
           valB = valB.toLowerCase();
@@ -1671,22 +1951,40 @@
           <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_name}')">${t.player_name}</strong></td>
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
-          <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(t.fee)}</td>
+          <td style="color: var(--accent-color); font-weight: 600;">${t.transfer_type || formatMoney(t.fee)}</td>
         `;
         tbody.appendChild(row);
       });
     }
 
-    function processIncomingPlayers(data) {
-      let rawList = Array.isArray(data) ? data : (data?.players || []);
-      currentPlayers = rawList.map(p => {
+    function transformPlayersForTable(rawList) {
+      const mapped = (rawList || []).map(p => {
         const posInfo = getPositionInfo(p.position_id);
-        
+
+        // "World's Game" is a generic/unlicensed exhibition bucket, not a
+        // real competition — excluded at export time going forward, but
+        // seasons synced before that fix still have it baked into both the
+        // stored totals and the competitions breakdown. Strip it here and,
+        // when it's found, recompute every stat from the filtered
+        // breakdown instead of trusting the (possibly contaminated) raw
+        // columns.
+        const rawCompetitions = p.competitions || [];
+        const filteredCompetitions = rawCompetitions.filter(c => c.comp_name !== "World's Game");
+        const wasContaminated = filteredCompetitions.length !== rawCompetitions.length;
+
+        const sumField = field => filteredCompetitions.reduce((s, c) => s + (c[field] || 0), 0);
+        const goals = wasContaminated ? sumField('goals') : (p.goals || 0);
+        const assists = wasContaminated ? sumField('assists') : (p.assists || 0);
+        const appearances = wasContaminated ? sumField('appearances') : (p.appearances || 0);
+        const clean_sheets = wasContaminated ? sumField('clean_sheets') : (p.clean_sheets || 0);
+        const yellow_cards = wasContaminated ? sumField('yellow_cards') : (p.yellow_cards || 0);
+        const red_cards = wasContaminated ? sumField('red_cards') : (p.red_cards || 0);
+
         let computedAvgRating = Number(p.avg_rating ?? 0);
-        if (computedAvgRating === 0 && p.competitions && p.competitions.length > 0) {
+        if (wasContaminated || computedAvgRating === 0) {
           let totalRatingSum = 0;
           let validCompCount = 0;
-          p.competitions.forEach(c => {
+          filteredCompetitions.forEach(c => {
             const r = Number(c.avg_rating || 0);
             const apps = Number(c.appearances || 0);
             if (r > 0 && apps > 0) {
@@ -1694,29 +1992,239 @@
               validCompCount += apps;
             }
           });
-          if (validCompCount > 0) {
-            computedAvgRating = totalRatingSum / validCompCount;
-          }
+          computedAvgRating = validCompCount > 0 ? totalRatingSum / validCompCount : (wasContaminated ? 0 : computedAvgRating);
         }
 
         return {
           ...p,
           pos_label: posInfo.label,
-          offensive_stat: p.goals || 0,
+          competitions: filteredCompetitions,
+          goals, assists, appearances, clean_sheets, yellow_cards, red_cards,
+          offensive_stat: goals,
           avg_rating: computedAvgRating
         };
       });
+
+      // Club status: 'loan' (still synced every refresh, but currently
+      // out on loan elsewhere), 'transferred' (was on this season's
+      // roster earlier but hasn't appeared in the most recent sync —
+      // moved on mid-season), or 'normal'. Detected by comparing each
+      // row's updated_at against the newest one in this set, since a
+      // departed player's row simply stops being touched once they're
+      // no longer exported — no new Live Editor data needed for this.
+      let maxUpdatedAt = null;
+      mapped.forEach(p => {
+        if (p.updated_at && (!maxUpdatedAt || p.updated_at > maxUpdatedAt)) maxUpdatedAt = p.updated_at;
+      });
+      mapped.forEach(p => {
+        if (p.on_loan) {
+          p.__clubStatus = 'loan';
+          p.__statusRank = 1;
+        } else if (maxUpdatedAt && p.updated_at && p.updated_at < maxUpdatedAt) {
+          p.__clubStatus = 'transferred';
+          p.__statusRank = 2;
+        } else {
+          p.__clubStatus = 'normal';
+          p.__statusRank = 0;
+        }
+      });
+
+      return mapped;
+    }
+
+    function processIncomingPlayers(data) {
+      let rawList = Array.isArray(data) ? data : (data?.players || []);
+      currentPlayers = transformPlayersForTable(rawList);
       document.getElementById('status-badge').textContent = `Loaded ${currentPlayers.length} Players`;
-      sortTable(currentSortColumn);
+
+      if (squadSeasonSelection === 'current') {
+        squadTableRows = currentPlayers;
+        sortTable(currentSortColumn);
+      }
 
       careerTotalsCache = null;
       renderHomeDashboard();
+    }
+
+    // Squad Stats season selector — 'current' mirrors the live squad
+    // (currentPlayers), a numeric season id shows that season's roster as
+    // it was then, 'all_time' shows the current roster with career totals
+    // across every season they've been with the club. Deliberately keeps
+    // currentPlayers untouched so Home dashboard widgets never see a past
+    // season's data.
+    async function changeSquadSeason(value) {
+      squadSeasonSelection = value;
+
+      if (value === 'current') {
+        squadTableRows = currentPlayers;
+        sortTable(currentSortColumn);
+        return;
+      }
+
+      if (!window.api) return;
+      let raw;
+      if (value === 'all_time') {
+        raw = await window.api.getAllTimeSquad();
+      } else {
+        raw = await window.api.getSquadData(parseInt(value, 10));
+      }
+      squadTableRows = transformPlayersForTable(raw);
+      sortTable(currentSortColumn);
+    }
+
+    async function populateSquadSeasonSelector() {
+      if (!window.api || !window.api.getSeasonsList) return;
+      const seasons = await window.api.getSeasonsList();
+      const select = document.getElementById('squad-season-select');
+      if (!select) return;
+
+      const pastOptions = seasons
+        .filter(s => !s.is_current)
+        .map(s => `<option value="${s.id}">${s.year_label}</option>`)
+        .join('');
+
+      select.innerHTML = `
+        <option value="current">Current Season</option>
+        ${pastOptions}
+        <option value="all_time">All Time</option>
+      `;
+    }
+
+    async function renderPastPlayersTable() {
+      if (!window.api || !window.api.getPastPlayers) return;
+      const pastPlayers = await window.api.getPastPlayers();
+      const tbody = document.getElementById('past-players-body');
+      if (!tbody) return;
+
+      if (!pastPlayers || pastPlayers.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No past players tracked yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = pastPlayers.map(p => {
+        const posInfo = getPositionInfo(p.position_id);
+        const age = computeAge(p.dob);
+        // wage_at_departure is the best available proxy for a current-club
+        // wage we have no way to know — value is still just an estimate.
+        const value = estimateMarketValue(p.overall, p.potential, age, p.wage_at_departure);
+        const ovrLabel = p.overall_is_live ? p.overall : `${p.overall ?? '—'} (last known)`;
+        return `
+          <tr>
+            <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
+            <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+            <td>${age ?? '—'}</td>
+            <td><span class="rating-badge">${ovrLabel}</span></td>
+            <td>${p.current_club}</td>
+            <td style="color: var(--text-dim); font-style: italic;">Unknown</td>
+            <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(value)}</td>
+            <td>${p.departed_season || '—'}</td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function processIncomingTransfers(data) {
       currentTransfers = Array.isArray(data) ? data : (data?.transfers || []);
       sortTransfers(currentTransferSortColumn);
       renderHomeDashboard();
+    }
+
+    // The real Live Editor "transfers" table crashes the game (see
+    // main.js's getInferredTransfers for the full story), so transfer
+    // activity is inferred from squad-roster changes between synced
+    // seasons instead — no fee/exact date, but real and crash-free.
+    function refreshInferredTransfers() {
+      if (!window.api || !window.api.getInferredTransfers) return;
+      window.api.getInferredTransfers().then((data) => {
+        if (data && Array.isArray(data.transfers)) processIncomingTransfers(data);
+      });
+    }
+
+    // Multi-save support: auto-detect updates this list/selection on its
+    // own whenever a sync happens (see main.js's resolveActiveSave); this
+    // just keeps the dropdown's options current. Re-run after every sync
+    // so a brand-new save shows up without needing an app restart.
+    async function populateSaveSelector() {
+      if (!window.api || !window.api.getSavesList) return;
+      const saves = await window.api.getSavesList();
+      const select = document.getElementById('save-select');
+      if (!select) return;
+
+      const previouslySelected = select.value;
+      select.innerHTML = saves.map(s => {
+        const label = `${s.club_name || 'My Club'} — ${s.manager_name || 'Manager'}${s.is_live ? '' : ' (inactive)'}`;
+        return `<option value="${s.id}">${label}</option>`;
+      }).join('');
+
+      // Keep whatever the user was already looking at selected across a
+      // re-populate; otherwise default to whichever save is live.
+      const stillExists = saves.some(s => String(s.id) === previouslySelected);
+      if (stillExists) {
+        select.value = previouslySelected;
+      } else {
+        const live = saves.find(s => s.is_live);
+        if (live) select.value = String(live.id);
+      }
+    }
+
+    // Switches which save the whole UI is showing — the "manual browse"
+    // half of multi-save support. Feeds the bundle main.js already
+    // assembled (see selectSave in main.js) through the same ingestion
+    // functions live syncs use, so this is plumbing reuse, not new
+    // rendering logic.
+    async function changeSave(saveId) {
+      if (!window.api || !window.api.selectSave) return;
+      const bundle = await window.api.selectSave(parseInt(saveId, 10));
+      if (!bundle) return;
+
+      currentSaveIsSnapshot = !!bundle.calendar_is_snapshot;
+      currentSnapshotSyncedAt = (bundle.calendar && bundle.calendar.snapshot_synced_at) || null;
+
+      // Must happen before processIncomingPlayers — it only syncs
+      // squadTableRows to the new squad when selection is 'current';
+      // otherwise a past-season/all-time view left over from the
+      // previous save would keep showing stale data.
+      squadSeasonSelection = 'current';
+      processIncomingPlayers(bundle.squad || []);
+      processIncomingCalendar(bundle.calendar || {});
+      processIncomingTransfers(bundle.transfers || []);
+
+      populateSquadSeasonSelector();
+      renderPastPlayersTable();
+
+      currentYouthAcademy = bundle.youth_academy || [];
+      renderYouthAcademyTable();
+    }
+
+    // Irreversible — confirm with the user before calling into main.js's
+    // deleteSave, which wipes that save's seasons/player stats/matches/
+    // snapshot permanently (not the shared players table, which other
+    // saves may still reference).
+    async function deleteCurrentSave() {
+      const select = document.getElementById('save-select');
+      if (!select || !select.value || !window.api || !window.api.deleteSave) return;
+
+      const label = select.options[select.selectedIndex] ? select.options[select.selectedIndex].text : 'this save';
+      const confirmed = confirm(`Permanently delete all stored history for "${label}"? This can't be undone.`);
+      if (!confirmed) return;
+
+      const result = await window.api.deleteSave(parseInt(select.value, 10));
+      if (!result || !result.success) return;
+
+      await populateSaveSelector();
+      if (result.fallback_save_id) {
+        select.value = String(result.fallback_save_id);
+        await changeSave(result.fallback_save_id);
+      } else {
+        // No saves left at all.
+        currentPlayers = [];
+        squadTableRows = [];
+        currentCalendar = [];
+        currentTransfers = [];
+        renderTableRows();
+        renderPastPlayersTable();
+        renderHomeDashboard();
+      }
     }
 
     let refreshTimeoutHandle = null;
@@ -1822,6 +2330,17 @@
       const titleEl = document.getElementById('home-team-title');
       if (titleEl) titleEl.textContent = seasonLabel ? `${teamName} ${seasonLabel}` : teamName;
 
+      const snapshotNoteEl = document.getElementById('home-snapshot-note');
+      if (snapshotNoteEl) {
+        if (currentSaveIsSnapshot) {
+          const when = currentSnapshotSyncedAt ? formatDateMMDDYYYY(currentSnapshotSyncedAt) : 'unknown';
+          snapshotNoteEl.textContent = `Not the save currently loaded in-game — showing last known state as of ${when}.`;
+          snapshotNoteEl.style.display = 'block';
+        } else {
+          snapshotNoteEl.style.display = 'none';
+        }
+      }
+
       const headerEl = document.querySelector('.home-header-strip');
       if (headerEl && currentTeamColors && currentTeamColors.primary) {
         const { r, g, b } = currentTeamColors.primary;
@@ -1857,6 +2376,43 @@
       }).join('');
     }
 
+    // Domestic league name = whichever competition shows up most often in
+    // the calendar (mirrors the same "most fixtures wins" heuristic used
+    // server-side in main.js's refreshLeagueTeamsFromCalendar and in
+    // export_all.lua's standings aggregation) — cups/continental groups
+    // have far fewer fixtures than a full league season.
+    function getPrimaryLeagueName() {
+      const counts = {};
+      currentCalendar.forEach(m => {
+        if (!m.competition) return;
+        counts[m.competition] = (counts[m.competition] || 0) + 1;
+      });
+      let best = null, bestCount = 0;
+      for (const [comp, count] of Object.entries(counts)) {
+        if (count > bestCount) { bestCount = count; best = comp; }
+      }
+      return best;
+    }
+
+    function ordinal(n) {
+      const s = ['th', 'st', 'nd', 'rd'];
+      const v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    // Small (20px) variant of the header's .home-form-chip, oldest-first.
+    function formChipsHtml(formArr) {
+      if (!formArr || formArr.length === 0) {
+        return `<span style="color: var(--text-dim); font-size: 11px;">No results yet</span>`;
+      }
+      return formArr.map(letter => {
+        let color = 'var(--text-dim)';
+        if (letter === 'W') color = '#3fb950';
+        else if (letter === 'L') color = '#f85149';
+        return `<span class="home-form-chip" style="width:20px; height:20px; font-size:10px; background:${color}22; border-color:${color}55; color:${color};">${letter}</span>`;
+      }).join('');
+    }
+
     function renderUpcomingMatchWidget() {
       const container = document.getElementById('home-upcoming-match-body');
       if (!container) return;
@@ -1872,27 +2428,74 @@
       }
 
       const teamName = getMostCommonClubName() || 'My Club';
-      const matchup = upcoming.is_home ? `${teamName} vs ${upcoming.opponent || 'TBD'}` : `${upcoming.opponent || 'TBD'} vs ${teamName}`;
+      const homeTeamName = upcoming.is_home ? teamName : (upcoming.opponent || 'TBD');
+      const awayTeamName = upcoming.is_home ? (upcoming.opponent || 'TBD') : teamName;
+      const leftTeamName = teamName;
+      const rightTeamName = upcoming.opponent || 'Opponent';
+
+      const primaryLeague = getPrimaryLeagueName();
+      let competitionLine = upcoming.competition || 'League Match';
+      if (primaryLeague && upcoming.competition === primaryLeague) {
+        const leagueMatchesPlayed = currentCalendar.filter(m => m.played && m.competition === primaryLeague).length;
+        competitionLine += ` - Matchweek ${leagueMatchesPlayed + 1}`;
+      }
+
+      const teamStanding = leagueStandings ? leagueStandings.find(t => t.team_name === leftTeamName) : null;
+      const oppStanding = leagueStandings ? leagueStandings.find(t => t.team_name === rightTeamName) : null;
+
+      const teamPlaceHtml = teamStanding ? ordinal(teamStanding.rank) : '—';
+      const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
 
       container.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 6px;">${matchup}</div>
-        <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 10px;">${upcoming.competition || 'League Match'} · ${formatDateMMDDYYYY(upcoming.date)}</div>
-        <div style="font-size: 13px; color: var(--text-dim);">League Place: <span style="font-style: italic;">Not available yet</span></div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
+        <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
+        <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
+          <div style="flex: 1;">
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
+          </div>
+          <div style="flex: 1;">
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
+          </div>
+        </div>
       `;
     }
 
-    // Populated once export_all.lua's "teams" table read is wired in —
-    // [{ rank, team_name, played, wins, draws, losses, goals_for, goals_against, points }].
-    // Live Editor's export never captures league rank/points today (see
-    // export_all.lua's GetStandingsByIndex — it only reads a team's memory
-    // offset ID), so this stays null and the widget shows an honest
-    // placeholder rather than fake data until that's fixed.
+    // [{ rank, team_name, played, wins, draws, losses, goals_for, goals_against, points }],
+    // built in processIncomingCalendar() from data.standings — export_all.lua's
+    // GetValidStandings() (same FCEDataManager memory read as fixtures, +0x88)
+    // now captures the full league table, filtered to the user's own competition.
     let leagueStandings = null;
     let leagueTableExpanded = false;
 
     function toggleLeagueTableExpanded() {
       leagueTableExpanded = !leagueTableExpanded;
       renderLeagueTableWidget();
+    }
+
+    // Default (collapsed) view: our team plus 2 above/2 below instead of
+    // a fixed Top 5 — more useful when mid-table or fighting relegation,
+    // where the top of the table says nothing about our own situation.
+    // Clamped at either edge of the table so it still shows 5 rows near
+    // 1st or last place.
+    function getLeagueTableWindowRows(teamName) {
+      const idx = leagueStandings.findIndex(t => t.team_name === teamName);
+      if (idx === -1) return leagueStandings.slice(0, 5);
+
+      let start = idx - 2;
+      let end = idx + 2;
+      if (start < 0) { end += (0 - start); start = 0; }
+      if (end > leagueStandings.length - 1) { start -= (end - (leagueStandings.length - 1)); end = leagueStandings.length - 1; }
+      start = Math.max(0, start);
+
+      return leagueStandings.slice(start, end + 1);
     }
 
     function renderLeagueTableWidget() {
@@ -1904,7 +2507,8 @@
         return;
       }
 
-      const rows = leagueTableExpanded ? leagueStandings : leagueStandings.slice(0, 5);
+      const teamName = getMostCommonClubName() || '';
+      const rows = leagueTableExpanded ? leagueStandings : getLeagueTableWindowRows(teamName);
 
       container.innerHTML = `
         <table class="sub-table">
@@ -1913,8 +2517,9 @@
             ${rows.map(t => {
               const gd = t.goals_for - t.goals_against;
               const gdStr = gd > 0 ? `+${gd}` : `${gd}`;
+              const isUs = t.team_name === teamName;
               return `
-                <tr>
+                <tr style="${isUs ? 'background: #00ff8715; font-weight: 700;' : ''}">
                   <td>${t.rank}</td>
                   <td>${t.team_name}</td>
                   <td>${t.played}</td>
@@ -1927,8 +2532,8 @@
           </tbody>
         </table>
         ${leagueStandings.length > 5 ? `
-          <button class="home-toggle-btn" style="margin-top: 8px;" onclick="toggleLeagueTableExpanded()">
-            ${leagueTableExpanded ? 'Show Top 5' : `Show Full Table (${leagueStandings.length} teams)`}
+          <button class="home-toggle-btn" style="margin-top: 8px;" onclick="event.stopPropagation(); toggleLeagueTableExpanded()">
+            ${leagueTableExpanded ? 'Show My Position' : `Show Full Table (${leagueStandings.length} teams)`}
           </button>
         ` : ''}
       `;
@@ -1942,10 +2547,21 @@
       const avatarHtml = buildInitialsAvatar(captain ? captain.name : '?', 56, '50%');
       const nameHtml = captain ? captain.name : 'Not available yet';
 
+      const detailsHtml = captain ? `
+        <div style="display:flex; gap:14px; margin-top:4px; font-size:12px; color: var(--text-dim);">
+          <span>Age: <strong style="color: var(--text-color);">${computeAge(captain.dob) ?? '—'}</strong></span>
+          <span>OVR: <strong style="color: var(--accent-color);">${captain.overall ?? '—'}</strong></span>
+          <span>Pos: <strong style="color: var(--text-color);">${getPositionInfo(captain.position_id).label}</strong></span>
+        </div>
+      ` : '';
+
       container.innerHTML = `
         <div style="display:flex; align-items:center; gap:14px;">
           ${avatarHtml}
-          <div style="font-weight:600; font-size:16px;">${nameHtml}</div>
+          <div>
+            <div style="font-weight:600; font-size:16px;">${nameHtml}</div>
+            ${detailsHtml}
+          </div>
         </div>
       `;
     }
@@ -1991,32 +2607,246 @@
           <span>Goal Difference: <strong style="color: var(--accent-color);">${gdString}</strong></span>
         </div>
       `;
+
+      renderTeamRecordCompetitions();
     }
 
-    function renderTrophiesWidget() {
-      const container = document.getElementById('home-trophies-body');
+    // "Place finished" per competition — only shown for "This Season"
+    // (aggregating placements across an "All Time" range doesn't mean
+    // anything the way W-D-L totals do). Finds the current season via
+    // getSeasonsList (already used for the Squad Stats selector, has
+    // is_current + real season ids) rather than needing a new endpoint.
+    async function renderTeamRecordCompetitions() {
+      const container = document.getElementById('home-team-record-competitions');
       if (!container) return;
 
-      if (!currentTrophies) {
-        container.innerHTML = `<div class="empty-state" style="padding: 12px;">Trophy data not available yet.</div>`;
+      if (selectedTeamRecordSeason !== 'current' || !window.api || !window.api.getSeasonsList || !window.api.getSeasonCompetitionResults) {
+        container.innerHTML = '';
         return;
       }
 
-      const items = [
+      const seasons = await window.api.getSeasonsList();
+      const current = (seasons || []).find(s => s.is_current);
+      if (!current) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const results = await window.api.getSeasonCompetitionResults(current.id);
+      if (!results || results.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Competitions</div>
+        ${results.map(r => `
+          <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0;">
+            <span>${r.comp_name}</span>
+            <strong style="color: var(--accent-color);">${r.standing || '—'}</strong>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    // English pyramid only, per user's call — league tier structure isn't
+    // in-game data (Live Editor has no clean tier/promotion-relegation
+    // source we verified safe to read), so this is hand-built reference
+    // data rather than a live lookup. Extendable later for other saves.
+    // `teams` is the real-world typical division size, used only to place
+    // a dot within its tier band on the history chart (we don't store an
+    // exact team count per season — see parseStandingPosition).
+    const ENGLAND_PYRAMID = [
+      { tier: 1, name: 'Premier League', teams: 20 },
+      { tier: 2, name: 'Championship', teams: 24 },
+      { tier: 3, name: 'League One', teams: 24 },
+      { tier: 4, name: 'League Two', teams: 24 }
+    ];
+
+    function findPyramidTier(compName) {
+      if (!compName) return null;
+      const lname = compName.toLowerCase();
+      return ENGLAND_PYRAMID.find(t => t.name.toLowerCase() === lname) || null;
+    }
+
+    // Parses the leading number out of standings text like "5th" (see
+    // export_all.lua's ordinal_suffix output). A fully-completed,
+    // league-winning season stores the literal text "Winner" instead of
+    // "1st" (see getTrophiesWon in main.js) — that's still 1st place for
+    // charting purposes. Cup-style "W3 D1 L2" text has no leading number
+    // and no "Winner" equivalent here (cup names never match a pyramid
+    // tier), and returns null.
+    function parseStandingPosition(standingText) {
+      if (standingText === 'Winner') return 1;
+      const match = /^(\d+)/.exec(standingText || '');
+      return match ? parseInt(match[1], 10) : null;
+    }
+
+    // Hand-rolled SVG line chart (no charting library, matching the
+    // app's existing style elsewhere) plotting tier + position-within-
+    // tier per season. Y position within a tier's band is interpolated
+    // using ENGLAND_PYRAMID's approximate real-world division size,
+    // since we only store the ordinal position ("6th"), not the exact
+    // team count for that season.
+    function buildLeagueHistoryChartSvg(trace) {
+      if (trace.length === 0) return '';
+
+      const width = 600, height = 400;
+      const plotLeft = 74, plotRight = 580, plotTop = 24, plotBottom = 320;
+      const bandHeight = (plotBottom - plotTop) / ENGLAND_PYRAMID.length;
+      const n = trace.length;
+      const pointX = i => n > 1 ? plotLeft + (i / (n - 1)) * (plotRight - plotLeft) : (plotLeft + plotRight) / 2;
+
+      function pointY(tier, position, teams) {
+        const bandTop = plotTop + (tier - 1) * bandHeight;
+        const frac = teams > 1 ? (position - 1) / (teams - 1) : 0.5;
+        return bandTop + frac * bandHeight;
+      }
+
+      const points = trace.map((t, i) => {
+        const tierInfo = ENGLAND_PYRAMID.find(p => p.tier === t.tier) || ENGLAND_PYRAMID[0];
+        const pos = t.position || tierInfo.teams;
+        const wasRelegated = i < n - 1 && trace[i + 1].tier > t.tier;
+        return {
+          x: pointX(i),
+          y: pointY(t.tier, pos, tierInfo.teams),
+          label: t.position ? ordinal(t.position) : '—',
+          color: wasRelegated ? '#f85149' : '#3fb950'
+        };
+      });
+
+      const gridLines = ENGLAND_PYRAMID.map(t => {
+        const y = plotTop + t.tier * bandHeight;
+        return `
+          <line x1="${plotLeft}" y1="${y}" x2="${plotRight}" y2="${y}" style="stroke: var(--border-color); stroke-width: 1;" />
+          <text x="${plotRight - 4}" y="${y - 6}" text-anchor="end" font-size="11" style="fill: var(--text-dim);">${t.name.toLowerCase()}</text>
+        `;
+      }).join('');
+
+      const polylinePoints = points.map(p => `${p.x},${p.y}`).join(' ');
+      const dots = points.map(p => `
+        <circle cx="${p.x}" cy="${p.y}" r="6" fill="${p.color}" style="stroke: var(--card-bg); stroke-width: 1.5;" />
+        <text x="${p.x}" y="${p.y - 12}" text-anchor="middle" font-size="12" font-weight="700" style="fill: var(--text-color);">${p.label}</text>
+      `).join('');
+      const xLabels = trace.map((t, i) => `
+        <text x="${pointX(i)}" y="${plotBottom + 20}" text-anchor="middle" font-size="11" style="fill: var(--text-dim);">${t.season}</text>
+      `).join('');
+
+      return `
+        <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto;">
+          ${gridLines}
+          <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" style="stroke: var(--text-color); stroke-width: 2;" />
+          <line x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}" style="stroke: var(--text-color); stroke-width: 2;" />
+          <polyline points="${polylinePoints}" fill="none" style="stroke: var(--text-dim); stroke-width: 1.5;" />
+          ${dots}
+          ${xLabels}
+        </svg>
+      `;
+    }
+
+    async function openLeagueHierarchyModal() {
+      const dialog = document.getElementById('league-hierarchy-dialog');
+      const body = document.getElementById('league-hierarchy-body');
+      if (!dialog || !body) return;
+
+      const currentLeagueName = getPrimaryLeagueName();
+      const currentTier = findPyramidTier(currentLeagueName);
+
+      if (!currentTier) {
+        body.innerHTML = `<div class="empty-state" style="padding: 12px;">No league hierarchy data available for this league (English pyramid only for now).</div>`;
+        dialog.showModal();
+        return;
+      }
+
+      // Historical trace: for every synced season, find whichever
+      // competition result matches a pyramid tier and what position it
+      // recorded — shows tier movement (promotion/relegation) over time
+      // using data already accumulated in season_competition_results.
+      let trace = [];
+      if (window.api && window.api.getSeasonsList && window.api.getSeasonCompetitionResults) {
+        const seasons = await window.api.getSeasonsList();
+        for (const season of (seasons || [])) {
+          const results = await window.api.getSeasonCompetitionResults(season.id);
+          const match = (results || []).find(r => findPyramidTier(r.comp_name));
+          if (match) {
+            trace.push({
+              season: season.year_label,
+              tier: findPyramidTier(match.comp_name).tier,
+              tier_name: match.comp_name,
+              position: parseStandingPosition(match.standing)
+            });
+          }
+        }
+      }
+
+      if (trace.length === 0) {
+        body.innerHTML = `<div class="empty-state" style="padding: 12px;">No league history recorded yet.</div>`;
+        dialog.showModal();
+        return;
+      }
+
+      const captionLines = trace.map((t, i) => {
+        let suffix = '';
+        if (i < trace.length - 1) {
+          if (trace[i + 1].tier < t.tier) suffix = ' (Promoted)';
+          else if (trace[i + 1].tier > t.tier) suffix = ' (Relegated)';
+        }
+        const posLabel = t.position ? ordinal(t.position) : '—';
+        return `<div style="font-size: 12px; padding: 2px 0;">${t.season} - ${t.tier_name} ${posLabel}${suffix}</div>`;
+      }).join('');
+
+      body.innerHTML = buildLeagueHistoryChartSvg(trace) + `<div style="margin-top: 12px;">${captionLines}</div>`;
+      dialog.showModal();
+    }
+
+    async function renderTrophiesWidget() {
+      const container = document.getElementById('home-trophies-body');
+      if (!container) return;
+
+      // Historical counts baked into the "teams" table (no season
+      // attached, predates the save) — only show categories actually
+      // won, per user request, instead of always listing all five.
+      const items = currentTrophies ? [
         ['League Titles', currentTrophies.league_titles],
         ['Domestic Cups', currentTrophies.domestic_cups],
         ['UCL Wins', currentTrophies.uefa_cl_wins],
         ['UEL Wins', currentTrophies.uefa_el_wins],
         ['UECL Wins', currentTrophies.uefa_uecl_wins]
-      ];
+      ].filter(([, count]) => count > 0) : [];
 
-      container.innerHTML = `
-        <div class="stats-summary-grid" style="grid-template-columns: repeat(5, 1fr);">
-          ${items.map(([label, count]) => `
-            <div class="stat-box-item"><span>${label}</span><strong>${count || 0}</strong></div>
-          `).join('')}
-        </div>
-      `;
+      const historicalHtml = items.length > 0
+        ? `<div class="stats-summary-grid" style="grid-template-columns: repeat(${items.length}, 1fr);">
+            ${items.map(([label, count]) => `
+              <div class="stat-box-item"><span>${label}</span><strong>${count}</strong></div>
+            `).join('')}
+          </div>`
+        : '';
+
+      // Trophies actually won during this save — Winner/1st results
+      // accumulated in season_competition_results, with the season each
+      // was last won.
+      let wonHtml = '';
+      if (window.api && window.api.getTrophiesWon) {
+        const won = await window.api.getTrophiesWon();
+        if (won && won.length > 0) {
+          wonHtml = `
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: ${items.length > 0 ? '12px' : '0'} 0 6px;">Won This Save</div>
+            ${won.map(w => `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
+                <span>🏆 ${w.comp_name}${w.count > 1 ? ` <span style="color: var(--text-dim); font-size: 11px;">×${w.count}</span>` : ''}</span>
+                <span style="font-size: 12px; color: var(--text-dim);">Last Won: <strong style="color: var(--accent-color);">${w.last_won}</strong></span>
+              </div>
+            `).join('')}
+          `;
+        }
+      }
+
+      if (!historicalHtml && !wonHtml) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No trophies yet.</div>`;
+        return;
+      }
+
+      container.innerHTML = historicalHtml + wonHtml;
     }
 
     async function renderManagerPPGWidget() {
@@ -2171,9 +3001,13 @@
         const wage = Number(p.wage || 0);
         const reasons = [];
 
-        if (age !== null && age >= 28 && apps < avgSquadAppearances / 2 && wage >= medianSquadWage) reasons.push('Limited Minutes');
+        // Under-24s are young players still developing, not squad gaps
+        // that need replacing — skip them entirely regardless of reason.
+        if (age === null || age < 24) return null;
+
+        if (age >= 28 && apps < avgSquadAppearances / 2 && wage >= medianSquadWage) reasons.push('Limited Minutes');
         if (rating > 0 && rating < 6.0) reasons.push('Underperforming');
-        if (age !== null && age >= 31) reasons.push('Aging');
+        if (age >= 31) reasons.push('Aging');
 
         return reasons.length > 0 ? { ...p, __age: age, __reasons: reasons } : null;
       }).filter(Boolean);
@@ -2210,25 +3044,25 @@
       `;
     }
 
-    // "Youth academy" isn't a distinct flag in the export — the current
-    // squad data is confirmed (per the user) to already include academy
-    // prospects alongside first-team players, so this filters by age 21
-    // or under with 88+ potential rather than any explicit roster split.
-    // The game only ever gives us one exact potential number (the
-    // low-high "range" shown in-game is a scouting/fog-of-war UI
-    // convention, not separate data), so that's what's displayed.
+    // This is first-team-squad players who happen to be young/high-
+    // potential (age under 22, 87+), not the actual academy roster —
+    // see renderYouthAcademyTable below for that, which is a genuinely
+    // separate roster ("career_youthplayers") with its own real
+    // potential_low/potential_high range from the game (potentialvariance).
+    // This table only ever gets one exact potential number since these
+    // are already-promoted players, not academy prospects.
     function renderPromisingYouthTable() {
       const container = document.getElementById('home-youth-body');
       if (!container) return;
 
       const prospects = currentPlayers
         .map(p => ({ ...p, __age: computeAge(p.dob || p.birthdate) }))
-        .filter(p => p.__age !== null && p.__age <= 21 && Number(p.potential || 0) >= 88)
+        .filter(p => p.__age !== null && p.__age < 22 && Number(p.potential || 0) >= 87)
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }))
         .sort((a, b) => Number(b.potential || 0) - Number(a.potential || 0));
 
       if (prospects.length === 0) {
-        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No academy prospects (21 or under, 88+ potential) in the current squad.</div>`;
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No academy prospects (under 22, 87+ potential) in the current squad.</div>`;
         return;
       }
 
@@ -2248,6 +3082,54 @@
           </tbody>
         </table>
       `;
+    }
+
+    // Real academy roster ("career_youthplayers"), separate from the
+    // first-team squad — see main.js's getYouthAcademy. potential_low/
+    // potential_high is a genuine uncertainty range from the game
+    // (potentialvariance), deliberately shown instead of a single exact
+    // number so scouting a prospect isn't a sure thing.
+    function renderYouthAcademyTable() {
+      const container = document.getElementById('home-youth-academy-body');
+      if (!container) return;
+
+      if (!currentYouthAcademy || currentYouthAcademy.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No youth academy data loaded.</div>`;
+        return;
+      }
+
+      const rows = currentYouthAcademy.map(p => {
+        const age = computeAge(p.dob);
+        const posInfo = getPositionInfo(p.position_id);
+        const value = estimateMarketValue(p.overall, p.potential_high, age, 0);
+        return { ...p, __age: age, __posInfo: posInfo, __value: value };
+      });
+
+      container.innerHTML = `
+        <table class="sub-table">
+          <thead><tr><th>Player</th><th>Age</th><th>Pos</th><th>OVR</th><th>Potential</th><th>Value</th></tr></thead>
+          <tbody>
+            ${rows.map(p => `
+              <tr class="clickable-name" onclick="openPlayerProfile('${p.player_id ?? p.name}')">
+                <td>${p.name}</td>
+                <td>${p.__age ?? '—'}</td>
+                <td><span class="pos-badge pos-${p.__posInfo.group}">${p.__posInfo.label}</span></td>
+                <td>${p.overall || 0}</td>
+                <td style="color: var(--accent-color); font-weight:600;">${p.potential_low}-${p.potential_high}</td>
+                <td>${formatMoney(p.__value)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function refreshYouthAcademy() {
+      if (!window.api || !window.api.getYouthAcademy) return;
+      window.api.getYouthAcademy().then(data => {
+        currentYouthAcademy = data || [];
+        renderYouthAcademyTable();
+      });
     }
 
     // Manager identity (name / tenure / awards) isn't wired to any data
@@ -2275,9 +3157,16 @@
         tenureHtml = `<div style="font-size:13px; color: var(--text-dim); margin-top:4px;">${formatDuration(Math.max(months, 0))} at the club</div>`;
       }
 
+      const avatarHtml = buildInitialsAvatar(currentManager.name, 56, '50%');
+
       container.innerHTML = `
-        <div style="font-weight:600; font-size:16px;">${currentManager.name}</div>
-        ${tenureHtml}
+        <div style="display:flex; align-items:center; gap:14px;">
+          ${avatarHtml}
+          <div>
+            <div style="font-weight:600; font-size:16px;">${currentManager.name}</div>
+            ${tenureHtml}
+          </div>
+        </div>
       `;
     }
 
@@ -2293,6 +3182,7 @@
       renderTopStatsWidgets();
       renderExpiringContractsTable();
       renderPromisingYouthTable();
+      renderYouthAcademyTable();
       renderTeamNeedsWatchlist();
     }
 
@@ -2300,17 +3190,36 @@
       window.api.onSquadUpdated((data) => {
         clearTimeout(refreshTimeoutHandle);
         setRefreshButtonState(false);
+        currentSaveIsSnapshot = false;
         processIncomingPlayers(data);
+        refreshInferredTransfers();
+        populateSquadSeasonSelector();
+        renderPastPlayersTable();
+        populateSaveSelector();
+        refreshYouthAcademy();
       });
       window.api.onCareerStatsUpdated((data) => processIncomingPlayers(data));
       window.api.onTransfersUpdated((data) => processIncomingTransfers(data));
-      window.api.onCalendarUpdated((data) => processIncomingCalendar(data));
+      window.api.onCalendarUpdated((data) => {
+        currentSaveIsSnapshot = false;
+        processIncomingCalendar(data);
+        populateSaveSelector();
+      });
+      window.api.onYouthUpdated((data) => {
+        currentYouthAcademy = data || [];
+        renderYouthAcademyTable();
+      });
 
       // Also pull whatever's already in the DB on startup, in case the
       // window opens after a sync already happened (e.g. app restart).
       window.api.getSquadData().then((data) => {
         if (data && data.length) processIncomingPlayers(data);
       });
+      refreshInferredTransfers();
+      populateSquadSeasonSelector();
+      renderPastPlayersTable();
+      populateSaveSelector();
+      refreshYouthAcademy();
     } else {
       console.error('window.api is not available — check that preload.js is wired up in main.js (webPreferences.preload).');
     }
