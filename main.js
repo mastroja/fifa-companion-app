@@ -64,7 +64,9 @@ async function initDatabase() {
     ['is_loan_to_buy', 'INTEGER DEFAULT 0'],
     ['club_name', 'TEXT'],
     ['traits_json', 'TEXT'],
-    ['play_styles_json', 'TEXT']
+    ['play_styles_json', 'TEXT'],
+    ['overall_delta', 'INTEGER DEFAULT 0'],
+    ['attribute_deltas_json', 'TEXT']
   ];
   seasonStatsMigrations.forEach(([column, type]) => {
     try {
@@ -168,6 +170,23 @@ function computeSeasonLabel(dateStr) {
   const month = d.getMonth() + 1; // 1-12
   const startYear = month >= 7 ? year : year - 1;
   return `${startYear}/${startYear + 1}`;
+}
+
+// Per-attribute change since the last sync (not cumulative for the
+// season — each sync overwrites this with whatever changed since the
+// PREVIOUS sync only). Only includes attributes that actually moved, so
+// the UI can show e.g. "+3 sprint speed -4 jumping" without listing every
+// unchanged stat.
+function computeAttributeDeltas(oldAttrs, newAttrs) {
+  const deltas = {};
+  Object.keys(newAttrs || {}).forEach(key => {
+    const oldVal = Number((oldAttrs || {})[key]);
+    const newVal = Number(newAttrs[key]);
+    if (!isNaN(oldVal) && !isNaN(newVal) && oldVal !== newVal) {
+      deltas[key] = newVal - oldVal;
+    }
+  });
+  return deltas;
 }
 
 function getOrCreateSeason(saveId, yearLabel) {
@@ -600,6 +619,20 @@ function importFifaData(jsonPayload) {
     refreshCurrentSeasonFromCalendar();
   }
 
+  // Snapshot of each player's overall/attributes as they stood BEFORE
+  // this sync's upsert overwrites them — the baseline computeAttributeDeltas
+  // diffs the new payload against. Read once up front rather than per
+  // player to avoid a query per row.
+  const previousStatsByPlayer = new Map();
+  if (currentSeasonId) {
+    const prevRes = db.exec(`SELECT player_id, overall, attributes_json FROM player_season_stats WHERE season_id = ${currentSeasonId};`);
+    if (prevRes.length > 0) {
+      prevRes[0].values.forEach(([playerId, overall, attributesJson]) => {
+        previousStatsByPlayer.set(playerId, { overall, attributes: JSON.parse(attributesJson || '{}') });
+      });
+    }
+  }
+
   db.run('BEGIN TRANSACTION;');
   try {
     const playerStmt = db.prepare(`
@@ -622,8 +655,9 @@ function importFifaData(jsonPayload) {
          club_id, club_name, contract_expiry, contract_date, duration_months, player_role_, last_status_change_date,
          on_loan, loan_team_from, loan_club_name, loan_date_end, is_loan_to_buy, wage,
          goals, assists, appearances, clean_sheets, saves, yellow_cards, red_cards, avg_rating,
-         attributes_json, competitions_json, traits_json, play_styles_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         attributes_json, competitions_json, traits_json, play_styles_json,
+         overall_delta, attribute_deltas_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(player_id, season_id) DO UPDATE SET
         overall=excluded.overall,
         potential=excluded.potential,
@@ -654,10 +688,16 @@ function importFifaData(jsonPayload) {
         competitions_json=excluded.competitions_json,
         traits_json=excluded.traits_json,
         play_styles_json=excluded.play_styles_json,
+        overall_delta=excluded.overall_delta,
+        attribute_deltas_json=excluded.attribute_deltas_json,
         updated_at=CURRENT_TIMESTAMP;
     `);
 
     jsonPayload.players.forEach(p => {
+      const previous = previousStatsByPlayer.get(p.player_id);
+      const overallDelta = previous ? (p.overall || 0) - (previous.overall || 0) : 0;
+      const attributeDeltas = previous ? computeAttributeDeltas(previous.attributes, p.attributes || {}) : {};
+
       playerStmt.run([
         p.player_id,
         p.name || 'Unknown',
@@ -701,7 +741,9 @@ function importFifaData(jsonPayload) {
         JSON.stringify(p.attributes || {}),
         JSON.stringify(p.competitions || []),
         JSON.stringify(p.traits || []),
-        JSON.stringify(p.play_styles || [])
+        JSON.stringify(p.play_styles || []),
+        overallDelta,
+        JSON.stringify(attributeDeltas)
       ]);
     });
 
@@ -776,7 +818,7 @@ function getSquadFromDB(seasonId = currentSeasonId) {
            s.on_loan, s.loan_team_from, s.loan_club_name, s.loan_date_end, s.is_loan_to_buy, s.wage,
            s.goals, s.assists, s.appearances, s.clean_sheets, s.saves,
            s.yellow_cards, s.red_cards, s.avg_rating, s.attributes_json, s.competitions_json,
-           s.traits_json, s.play_styles_json, s.updated_at
+           s.traits_json, s.play_styles_json, s.updated_at, s.overall_delta, s.attribute_deltas_json
     FROM players p
     JOIN player_season_stats s ON s.player_id = p.player_id
     WHERE s.season_id = ${seasonId}
@@ -824,7 +866,9 @@ function getSquadFromDB(seasonId = currentSeasonId) {
     competitions: JSON.parse(row[35] || '[]'),
     traits: JSON.parse(row[36] || '[]'),
     play_styles: JSON.parse(row[37] || '[]'),
-    updated_at: row[38]
+    updated_at: row[38],
+    overall_delta: row[39] || 0,
+    attribute_deltas: JSON.parse(row[40] || '{}')
   }));
 }
 
