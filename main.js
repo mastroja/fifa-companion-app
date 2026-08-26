@@ -16,6 +16,7 @@ const transferExportPath = 'C:\\Users\\Public\\ea_fc_transfers_export.json';
 const watchlistInputPath = 'C:\\Users\\Public\\ea_fc_watchlist_input.json';
 const watchlistStatusPath = 'C:\\Users\\Public\\ea_fc_watchlist_status.json';
 const youthExportPath = 'C:\\Users\\Public\\ea_fc_youth_export.json';
+const leagueStatsExportPath = 'C:\\Users\\Public\\ea_fc_league_stats_export.json';
 
 // activeSaveId/currentSeasonId track whichever save/season the app is
 // currently pointed at — auto-updated on every sync (see
@@ -32,6 +33,16 @@ let liveSyncedSaveId = null;
 let currentSeasonId = null;
 let leagueTeamNames = new Set();
 let userClubName = null;
+// Most recently synced ea_fc_league_stats_export.json payload (see the
+// LEAGUE STATS EXPORT block in export_all.lua) — not persisted to the DB,
+// just kept here so a season-rollover mid-sync (see
+// generateSeasonAwardsIfNeeded) can check whether any of our own players
+// were the league's statistical leader at that moment. May be slightly
+// stale relative to the exact rollover tick since this file syncs
+// independently of the squad/calendar files that trigger rollover
+// detection — same best-effort-from-whatever-just-synced approach as the
+// rest of this app's live-only data.
+let latestLeagueStatsPayload = null;
 
 // ------------------------------------------------------------------
 // DB bootstrap
@@ -89,6 +100,14 @@ async function initDatabase() {
     db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_saves_save_uid ON saves(save_uid);`);
   } catch (e) {
     // index already exists, safe to ignore
+  }
+
+  // Youth Squad Career Mode, added after some users already had a DB on
+  // disk — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE saves ADD COLUMN youth_mode_enabled INTEGER DEFAULT 0;`);
+  } catch (e) {
+    // column already exists, safe to ignore
   }
 
   saveDatabaseToDisk();
@@ -526,6 +545,227 @@ function correctTransferFlags(transferPayload) {
   return transferPayload;
 }
 
+// ------------------------------------------------------------------
+// Youth Squad Career Mode — gameplay balancing
+// ------------------------------------------------------------------
+//
+// Rather than computing a real "average overall" from every rival team's
+// roster (which would mean exporting every team in the league's full
+// player list via new, unverified Lua table reads — see the "transfers"
+// table crash lesson), this uses static, tuned baseline overalls per
+// English pyramid tier, the same approach already used for
+// YOUTH_POTENTIAL_THRESHOLD_BY_TIER in index.html. Keep these three
+// constants and findPyramidTierServer in sync with ENGLAND_PYRAMID /
+// findPyramidTier in index.html if the tier names or numbers ever change.
+const YOUTH_MODE_PYRAMID_TIERS = [
+  { tier: 1, name: 'premier league' },
+  { tier: 2, name: 'championship' },
+  { tier: 3, name: 'league one' },
+  { tier: 4, name: 'league two' }
+];
+const YOUTH_MODE_AVG_OVERALL_BY_TIER = { 1: 80, 2: 76, 3: 72, 4: 68 };
+const YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER = { 1: Infinity, 2: 4, 3: 3, 4: 2 };
+const YOUTH_MODE_OVERALL_MARGIN = 2;
+
+function findPyramidTierServer(compName) {
+  if (!compName) return null;
+  const lname = compName.toLowerCase();
+  return YOUTH_MODE_PYRAMID_TIERS.find(t => lname.includes(t.name)) || null;
+}
+
+// Permanently enables Youth Squad Career Mode for a save. One-way by
+// design — there is no corresponding disable function or IPC channel.
+function enableYouthMode(saveId) {
+  if (!db || !saveId) return { success: false };
+  db.run('UPDATE saves SET youth_mode_enabled = 1 WHERE id = ?;', [saveId]);
+  saveDatabaseToDisk();
+  console.log(`[Youth Mode] Enabled for save ${saveId} (permanent).`);
+  return { success: true };
+}
+
+// Called right when a season boundary is crossed (see resolveActiveSave)
+// for a save with Youth Squad Career Mode on. Looks back at the season
+// that just ended: identifies its domestic league (whichever recorded
+// competition name matches a pyramid tier — cups never do), and flags
+// any player still genuinely on the squad (freshest updated_at that
+// season, not out on loan — same definition as __clubStatus === 'normal'
+// in index.html) whose overall exceeds that tier's static average by
+// more than YOUTH_MODE_OVERALL_MARGIN. Only writes a row if the count of
+// such players exceeds what the tier allows — nothing to review otherwise.
+function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
+  if (!db) return;
+
+  const enabledRes = db.exec(`SELECT youth_mode_enabled FROM saves WHERE id = ${saveId};`);
+  const youthModeEnabled = enabledRes.length > 0 && enabledRes[0].values.length > 0
+    && enabledRes[0].values[0][0] === 1;
+  if (!youthModeEnabled) return;
+
+  const compRes = db.exec(`SELECT comp_name FROM season_competition_results WHERE season_id = ${endedSeasonId};`);
+  const compNames = compRes.length > 0 ? compRes[0].values.map(r => r[0]) : [];
+  let leagueName = null;
+  let tierInfo = null;
+  for (const name of compNames) {
+    const t = findPyramidTierServer(name);
+    if (t) { leagueName = name; tierInfo = t; break; }
+  }
+  if (!tierInfo) return; // no recognized league this season — nothing to enforce
+
+  const allowance = YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER[tierInfo.tier];
+  if (allowance === Infinity) return; // Premier League — no restriction
+
+  const leagueAverage = YOUTH_MODE_AVG_OVERALL_BY_TIER[tierInfo.tier];
+  const cutoff = leagueAverage + YOUTH_MODE_OVERALL_MARGIN;
+
+  const squadRes = db.exec(`
+    SELECT p.player_id, p.name, s.overall, s.updated_at, s.on_loan
+    FROM players p JOIN player_season_stats s ON s.player_id = p.player_id
+    WHERE s.season_id = ${endedSeasonId};
+  `);
+  const rows = squadRes.length > 0 ? squadRes[0].values : [];
+  if (rows.length === 0) return;
+
+  let maxUpdatedAt = null;
+  rows.forEach(r => { if (r[3] && (!maxUpdatedAt || r[3] > maxUpdatedAt)) maxUpdatedAt = r[3]; });
+
+  const overratedPlayers = rows
+    .filter(r => r[4] !== 1 && maxUpdatedAt && r[3] >= maxUpdatedAt && r[2] > cutoff)
+    .map(r => ({ player_id: r[0], name: r[1], overall: r[2] }))
+    .sort((a, b) => b.overall - a.overall);
+
+  if (overratedPlayers.length <= allowance) return; // within limits
+
+  db.run(`
+    INSERT INTO season_end_reviews
+      (save_id, season_id, league_name, league_tier, league_average_overall, allowed_overrated_count, overrated_count, overrated_players_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(season_id) DO NOTHING;
+  `, [saveId, endedSeasonId, leagueName, tierInfo.tier, leagueAverage, allowance, overratedPlayers.length, JSON.stringify(overratedPlayers)]);
+  saveDatabaseToDisk();
+  console.log(`[Youth Mode] Season-end review for save ${saveId}: ${overratedPlayers.length} players over the ${leagueName} cap (allowed ${allowance}).`);
+}
+
+// Individual season-end awards: Golden Boot (league's top scorer),
+// Playmaker (top assists), Golden Glove (top clean sheets, goalkeepers
+// only) — only recorded if the league-wide leader in that category was
+// on OUR OWN squad that season. Uses whatever league-wide stats last
+// happened to sync (see latestLeagueStatsPayload) — there's no historical
+// per-season snapshot of league-wide stats, so this is a best-effort read
+// of "whoever was on top when the season last synced," same as the rest
+// of this app's live-only data.
+function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
+  if (!db || !latestLeagueStatsPayload || !Array.isArray(latestLeagueStatsPayload.players)) return;
+  const leaguePlayers = latestLeagueStatsPayload.players;
+  if (leaguePlayers.length === 0) return;
+
+  const ourRes = db.exec(`SELECT DISTINCT player_id FROM player_season_stats WHERE season_id = ${endedSeasonId};`);
+  const ourPlayerIds = new Set(ourRes.length > 0 ? ourRes[0].values.map(r => r[0]) : []);
+  if (ourPlayerIds.size === 0) return;
+
+  const categories = [
+    { key: 'goals', award: 'golden_boot' },
+    { key: 'assists', award: 'playmaker' },
+    { key: 'clean_sheets', award: 'golden_glove', positionFilter: 0 } // position_id 0 == GK
+  ];
+
+  categories.forEach(({ key, award, positionFilter }) => {
+    const pool = leaguePlayers.filter(p => positionFilter === undefined || p.position_id === positionFilter);
+    if (pool.length === 0) return;
+
+    const top = [...pool].sort((a, b) => (b[key] || 0) - (a[key] || 0))[0];
+    if (!top || !(top[key] > 0) || !ourPlayerIds.has(top.player_id)) return;
+
+    db.run(`
+      INSERT INTO player_awards (player_id, season_id, award_type, stat_value)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(season_id, award_type) DO NOTHING;
+    `, [top.player_id, endedSeasonId, award, top[key]]);
+    console.log(`[Awards] ${award} for player ${top.player_id} in season ${endedSeasonId} (${top[key]} ${key}).`);
+  });
+
+  saveDatabaseToDisk();
+}
+
+// Team trophies won during seasons this specific player was actually on
+// the squad — "Winner" standings (see getTrophiesWon) restricted to
+// season_ids where player_season_stats has a row for this player. League
+// wins are labeled "Champion" rather than "Winner" to read more naturally
+// (a cup is "won", a league is "won as champion").
+function getPlayerTrophies(playerId, saveId = activeSaveId) {
+  if (!db || !playerId || !saveId) return [];
+  const res = db.exec(`
+    SELECT r.comp_name, se.year_label
+    FROM season_competition_results r
+    JOIN seasons se ON se.id = r.season_id
+    WHERE se.save_id = ${saveId} AND r.standing = 'Winner'
+      AND r.season_id IN (SELECT season_id FROM player_season_stats WHERE player_id = ${playerId})
+    ORDER BY se.id ASC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(row => ({ comp_name: row[0], year_label: row[1] }));
+}
+
+const AWARD_LABELS = { golden_boot: 'Golden Boot', playmaker: 'Playmaker', golden_glove: 'Golden Glove' };
+const AWARD_STAT_LABELS = { golden_boot: 'goals', playmaker: 'assists', golden_glove: 'clean sheets' };
+
+// This player's individual season-end awards for a save (see
+// generateSeasonAwardsIfNeeded), most recent first.
+function getPlayerAwards(playerId, saveId = activeSaveId) {
+  if (!db || !playerId || !saveId) return [];
+  const res = db.exec(`
+    SELECT a.award_type, a.stat_value, se.year_label
+    FROM player_awards a
+    JOIN seasons se ON se.id = a.season_id
+    WHERE a.player_id = ${playerId} AND se.save_id = ${saveId}
+    ORDER BY se.id DESC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(row => ({
+    award_type: row[0],
+    label: AWARD_LABELS[row[0]] || row[0],
+    stat_label: AWARD_STAT_LABELS[row[0]] || 'stat',
+    stat_value: row[1],
+    year_label: row[2]
+  }));
+}
+
+function getPlayerHonours(playerId, saveId = activeSaveId) {
+  return {
+    trophies: getPlayerTrophies(playerId, saveId),
+    awards: getPlayerAwards(playerId, saveId)
+  };
+}
+
+// The oldest unacknowledged season-end review for a save, or null.
+function getPendingSeasonReview(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const res = db.exec(`
+    SELECT id, season_id, league_name, league_tier, league_average_overall,
+           allowed_overrated_count, overrated_count, overrated_players_json
+    FROM season_end_reviews
+    WHERE save_id = ${saveId} AND acknowledged = 0
+    ORDER BY id ASC LIMIT 1;
+  `);
+  if (res.length === 0 || res[0].values.length === 0) return null;
+  const row = res[0].values[0];
+  return {
+    id: row[0],
+    season_id: row[1],
+    league_name: row[2],
+    league_tier: row[3],
+    league_average_overall: row[4],
+    allowed_overrated_count: row[5],
+    overrated_count: row[6],
+    overrated_players: JSON.parse(row[7] || '[]')
+  };
+}
+
+function acknowledgeSeasonReview(reviewId) {
+  if (!db || !reviewId) return { success: false };
+  db.run('UPDATE season_end_reviews SET acknowledged = 1 WHERE id = ?;', [reviewId]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
 // Resolves which save a sync belongs to (via save_uid — see
 // getOrCreateSaveByUID) and which season within it, setting
 // activeSaveId/currentSeasonId to match. This is the "auto-detect" half
@@ -533,12 +773,37 @@ function correctTransferFlags(transferPayload) {
 // actually loaded in-game, regardless of whether it was the squad or
 // calendar file that triggered it.
 function resolveActiveSave(uid, managerName, clubName, dateForSeasonLabel) {
+  const previousSaveId = activeSaveId;
+  const previousSeasonId = currentSeasonId;
+
+  if (!uid && previousSaveId) {
+    // A blank save_uid on this sync (Live Editor's GetSaveUID() can come
+    // back empty transiently, e.g. mid-save-switch in-game) while a save
+    // is already active — getOrCreateSaveByUID's "no uid" fallback just
+    // picks whichever save happens to be oldest, which would silently
+    // reattribute this sync to the wrong save. Skipping resolution here
+    // (the caller then skips importing this sync's data entirely — see
+    // importFifaData and the calendar watcher) is what closes the exact
+    // gap that corrupted a real save with another save's players once
+    // already: better to drop one sync than misattribute it.
+    console.warn('[Season] Skipped season resolution — blank save_uid with a save already active.');
+    return false;
+  }
+
   const saveId = getOrCreateSaveByUID(uid, managerName, clubName);
   activeSaveId = saveId;
   liveSyncedSaveId = saveId;
 
   const seasonLabel = computeSeasonLabel(dateForSeasonLabel);
   currentSeasonId = getOrCreateSeason(saveId, seasonLabel);
+
+  // Only a genuine season rollover within the SAME save — not a switch to
+  // a different save mid-sync — should trigger a season-end review/awards.
+  if (previousSaveId === saveId && previousSeasonId && previousSeasonId !== currentSeasonId) {
+    generateSeasonEndReviewIfNeeded(saveId, previousSeasonId);
+    generateSeasonAwardsIfNeeded(saveId, previousSeasonId);
+  }
+
   db.run('UPDATE seasons SET is_current = 1 WHERE id = ?;', [currentSeasonId]);
   db.run('UPDATE seasons SET is_current = 0 WHERE id != ? AND save_id = ?;', [
     currentSeasonId,
@@ -546,6 +811,7 @@ function resolveActiveSave(uid, managerName, clubName, dateForSeasonLabel) {
   ]);
   saveDatabaseToDisk();
   console.log(`[Season] Save ${saveId}, season "${seasonLabel}" (id ${currentSeasonId})`);
+  return true;
 }
 
 // Calendar-triggered entry point for resolveActiveSave — accepts an
@@ -562,7 +828,7 @@ function refreshCurrentSeasonFromCalendar(parsedPayload = null) {
     }
   }
 
-  resolveActiveSave(
+  return resolveActiveSave(
     parsed && parsed.save_uid,
     parsed && parsed.manager && parsed.manager.name,
     parsed && parsed.club_name,
@@ -617,6 +883,17 @@ function importFifaData(jsonPayload) {
     resolveActiveSave(jsonPayload.save_uid, null, null, jsonPayload.current_date);
   } else if (!currentSeasonId) {
     refreshCurrentSeasonFromCalendar();
+  } else {
+    // GetSaveUID() came back empty on this export (seen in practice during
+    // an in-game save switch, when club-name lookups for the same payload
+    // also came back blank) while a DIFFERENT save was already active from
+    // a previous sync. Silently upserting this payload into that stale
+    // currentSeasonId would attribute one save's squad to another save's
+    // history — exactly what corrupted a real save this way once already.
+    // Safer to drop this one sync than misattribute it; the next sync
+    // (almost always moments later) will carry a real save_uid.
+    console.warn('[DB] Squad export had no save_uid while a different save was already active — skipping import to avoid cross-save contamination.');
+    return;
   }
 
   // Snapshot of each player's overall/attributes as they stood BEFORE
@@ -632,6 +909,22 @@ function importFifaData(jsonPayload) {
       });
     }
   }
+
+  // One shared timestamp for every row in this sync batch. Previously each
+  // row's updated_at was set via SQL's CURRENT_TIMESTAMP, evaluated
+  // per-row at execution time — SQLite's CURRENT_TIMESTAMP only has
+  // 1-second resolution, so a squad sync spanning more than a second
+  // (any squad of real size) could tick over mid-loop and give
+  // earlier-processed players a strictly older updated_at than
+  // later-processed ones, even though every player here is being synced
+  // in this exact batch. That falsely tripped the "transferred" (stale
+  // updated_at) detection below/in index.html on players who were still
+  // very much on the squad — most visibly on players just signed in,
+  // since a fresh arrival's row is often the first one processed.
+  // Computing it once here and binding it to every row guarantees the
+  // whole batch shares one identical value, so only genuinely-departed
+  // players (whose row isn't touched at all this sync) end up stale.
+  const syncTimestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
   db.run('BEGIN TRANSACTION;');
   try {
@@ -657,7 +950,7 @@ function importFifaData(jsonPayload) {
          goals, assists, appearances, clean_sheets, saves, yellow_cards, red_cards, avg_rating,
          attributes_json, competitions_json, traits_json, play_styles_json,
          overall_delta, attribute_deltas_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(player_id, season_id) DO UPDATE SET
         overall=excluded.overall,
         potential=excluded.potential,
@@ -690,7 +983,7 @@ function importFifaData(jsonPayload) {
         play_styles_json=excluded.play_styles_json,
         overall_delta=excluded.overall_delta,
         attribute_deltas_json=excluded.attribute_deltas_json,
-        updated_at=CURRENT_TIMESTAMP;
+        updated_at=excluded.updated_at;
     `);
 
     jsonPayload.players.forEach(p => {
@@ -743,7 +1036,8 @@ function importFifaData(jsonPayload) {
         JSON.stringify(p.traits || []),
         JSON.stringify(p.play_styles || []),
         overallDelta,
-        JSON.stringify(attributeDeltas)
+        JSON.stringify(attributeDeltas),
+        syncTimestamp
       ]);
     });
 
@@ -1196,7 +1490,7 @@ function getTeamRecordSeasons(saveId = activeSaveId) {
 function getSavesList() {
   if (!db) return [];
   const res = db.exec(`
-    SELECT s.id, s.club_name, s.manager_name, s.save_uid, ss.synced_at
+    SELECT s.id, s.club_name, s.manager_name, s.save_uid, ss.synced_at, s.youth_mode_enabled
     FROM saves s
     LEFT JOIN save_snapshots ss ON ss.save_id = s.id
     ORDER BY s.id ASC;
@@ -1208,7 +1502,8 @@ function getSavesList() {
     manager_name: row[2],
     save_uid: row[3],
     last_synced_at: row[4],
-    is_live: row[0] === liveSyncedSaveId
+    is_live: row[0] === liveSyncedSaveId,
+    youth_mode_enabled: row[5] === 1
   }));
 }
 
@@ -1226,6 +1521,10 @@ function selectSave(saveId) {
 
   const seasonId = getCurrentSeasonForSave(saveId);
   const isLive = saveId === liveSyncedSaveId;
+
+  const youthRes = db.exec(`SELECT youth_mode_enabled FROM saves WHERE id = ${saveId};`);
+  const youthModeEnabled = youthRes.length > 0 && youthRes[0].values.length > 0
+    && youthRes[0].values[0][0] === 1;
 
   let calendar = null;
   let calendarIsSnapshot = false;
@@ -1258,7 +1557,9 @@ function selectSave(saveId) {
     past_players: getPastPlayers(saveId),
     transfers: getInferredTransfers(saveId),
     seasons: getSeasonsList(saveId),
-    youth_academy: getYouthAcademy(saveId)
+    youth_academy: getYouthAcademy(saveId),
+    youth_mode_enabled: youthModeEnabled,
+    pending_season_review: getPendingSeasonReview(saveId)
   };
 }
 
@@ -1276,6 +1577,8 @@ function deleteSave(saveId) {
   db.run('DELETE FROM player_season_stats WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM season_competition_results WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM youth_academy_snapshot WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
+  db.run('DELETE FROM player_awards WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
+  db.run('DELETE FROM season_end_reviews WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM seasons WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM save_snapshots WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM saves WHERE id = ?;', [saveId]);
@@ -1302,15 +1605,32 @@ function deleteSave(saveId) {
 // how the app triggers a re-export without the user alt-tabbing over
 // and pressing it themselves. This only synthesizes a keystroke; the
 // file watcher below picks up whatever Live Editor writes as a result.
+//
+// SendKeys always delivers to whatever window currently has OS focus —
+// which is this app's own window when the user clicks the button, not
+// the game. So the game window has to be brought to the foreground
+// first (WScript.Shell's AppActivate, the standard SendKeys pairing)
+// or the F10 keystroke never reaches Live Editor's hotkey handler at
+// all. The companion window is refocused afterward so the user isn't
+// left staring at the game.
+const GAME_WINDOW_TITLE = 'EA SPORTS FC 26';
+
 function triggerLiveEditorRefresh() {
   return new Promise(resolve => {
-    const psCommand = "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{F10}')";
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], (err) => {
-      if (err) {
-        console.error('[Refresh] Failed to send F10 hotkey:', err.message);
+    const psCommand = [
+      "$activated = (New-Object -ComObject WScript.Shell).AppActivate('" + GAME_WINDOW_TITLE + "');",
+      "if (-not $activated) { Write-Output 'ACTIVATE_FAILED'; exit 1 }",
+      "Start-Sleep -Milliseconds 150;",
+      "Add-Type -AssemblyName System.Windows.Forms;",
+      "[System.Windows.Forms.SendKeys]::SendWait('{F10}');"
+    ].join(' ');
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], (err, stdout) => {
+      if (mainWindow) mainWindow.focus();
+      if (err || (stdout || '').includes('ACTIVATE_FAILED')) {
+        console.error('[Refresh] Failed to send F10 hotkey — could not find/focus the game window ("' + GAME_WINDOW_TITLE + '"). Is the game running?', err ? err.message : '');
         resolve(false);
       } else {
-        console.log('[Refresh] Sent F10 — waiting on Live Editor to write updated export files.');
+        console.log('[Refresh] Focused game window and sent F10 — waiting on Live Editor to write updated export files.');
         resolve(true);
       }
     });
@@ -1347,13 +1667,17 @@ ipcMain.handle('trigger-refresh', () => triggerLiveEditorRefresh());
 ipcMain.handle('get-career-totals', () => getCareerTotalsForSquad());
 ipcMain.handle('get-manager-ppg', () => getManagerSeasonPPG());
 ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
-ipcMain.handle('get-inferred-transfers', () => getInferredTransfers());
+ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfers(saveId));
 ipcMain.handle('get-saves-list', () => getSavesList());
 ipcMain.handle('select-save', (_event, saveId) => selectSave(saveId));
 ipcMain.handle('delete-save', (_event, saveId) => deleteSave(saveId));
 ipcMain.handle('get-season-competition-results', (_event, seasonId) => getSeasonCompetitionResults(seasonId));
 ipcMain.handle('get-trophies-won', () => getTrophiesWon());
-ipcMain.handle('get-youth-academy', () => getYouthAcademy());
+ipcMain.handle('get-youth-academy', (_event, saveId) => getYouthAcademy(saveId));
+ipcMain.handle('enable-youth-mode', (_event, saveId) => enableYouthMode(saveId));
+ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeasonReview(saveId));
+ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
+ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 
 app.whenReady().then(async () => {
   await initDatabase();
@@ -1369,14 +1693,24 @@ app.whenReady().then(async () => {
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
         saveSnapshotForActiveSave(rawCalendar);
-        mainWindow.webContents.send('calendar-updated', startupCalendarPayload);
+        mainWindow.webContents.send('calendar-updated', { save_id: activeSaveId, data: startupCalendarPayload });
       } catch (err) {
         console.error('[Startup] Failed to load existing calendar export:', err);
       }
     }
+
+    if (fs.existsSync(leagueStatsExportPath)) {
+      try {
+        const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
+        latestLeagueStatsPayload = startupLeagueStats;
+        mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [] });
+      } catch (err) {
+        console.error('[Startup] Failed to load existing league stats export:', err);
+      }
+    }
   });
 
-  const watcher = chokidar.watch([squadExportPath, calendarExportPath, transferExportPath, youthExportPath], {
+  const watcher = chokidar.watch([squadExportPath, calendarExportPath, transferExportPath, youthExportPath, leagueStatsExportPath], {
     persistent: true,
     usePolling: true,
     interval: 500
@@ -1391,14 +1725,19 @@ app.whenReady().then(async () => {
           const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
           const calendarPayload = JSON.parse(rawCalendar);
 
-          refreshCurrentSeasonFromCalendar(calendarPayload);
-          refreshLeagueTeamsFromCalendar(calendarPayload);
-          importCalendarMatches(calendarPayload);
-          persistSeasonCompetitionResults(calendarPayload);
-          saveSnapshotForActiveSave(rawCalendar);
+          // resolveActiveSave returns false when this sync had a blank
+          // save_uid while a different save was already active (see its
+          // comment) — importing this payload in that state risks writing
+          // it into the wrong save's history, so skip it entirely.
+          if (refreshCurrentSeasonFromCalendar(calendarPayload)) {
+            refreshLeagueTeamsFromCalendar(calendarPayload);
+            importCalendarMatches(calendarPayload);
+            persistSeasonCompetitionResults(calendarPayload);
+            saveSnapshotForActiveSave(rawCalendar);
 
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('calendar-updated', calendarPayload);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('calendar-updated', { save_id: activeSaveId, data: calendarPayload });
+            }
           }
         } catch (err) {
           console.error('[Watcher] Failed to process calendar export file:', err);
@@ -1416,7 +1755,7 @@ app.whenReady().then(async () => {
         const squadData = getSquadFromDB();
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('squad-updated', squadData);
+          mainWindow.webContents.send('squad-updated', { save_id: activeSaveId, data: squadData });
         }
       } catch (err) {
         console.error('[Watcher] Failed to process export file:', err);
@@ -1429,7 +1768,7 @@ app.whenReady().then(async () => {
         const transferPayload = correctTransferFlags(JSON.parse(rawTransfers));
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('transfers-updated', transferPayload);
+          mainWindow.webContents.send('transfers-updated', { save_id: activeSaveId, data: transferPayload });
         }
       } catch (err) {
         console.error('[Watcher] Failed to process transfers export file:', err);
@@ -1442,10 +1781,29 @@ app.whenReady().then(async () => {
         importYouthAcademy(JSON.parse(rawYouth));
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('youth-updated', getYouthAcademy());
+          mainWindow.webContents.send('youth-updated', { save_id: activeSaveId, data: getYouthAcademy() });
         }
       } catch (err) {
         console.error('[Watcher] Failed to process youth academy export file:', err);
+      }
+    }
+
+    // League-wide stats (see export_all.lua's LEAGUE STATS EXPORT block)
+    // aren't persisted to the DB — this is live-only data, same pattern
+    // as raw transfers/calendar payloads, not accumulated season history.
+    // Browsing an inactive save won't show that save's own league stats
+    // (no snapshot for this file yet), only whatever was last live.
+    if (filePath.includes('ea_fc_league_stats_export.json') && fs.existsSync(leagueStatsExportPath)) {
+      try {
+        const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
+        const leagueStatsPayload = JSON.parse(rawLeagueStats);
+        latestLeagueStatsPayload = leagueStatsPayload;
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [] });
+        }
+      } catch (err) {
+        console.error('[Watcher] Failed to process league stats export file:', err);
       }
     }
   });

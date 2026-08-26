@@ -10,7 +10,11 @@ CREATE TABLE IF NOT EXISTS saves (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     manager_name TEXT,
     club_name TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- One-way switch: once set to 1 for a save it is never set back to 0
+    -- (see enableYouthMode in main.js) — "always activated" per the user's
+    -- design for Youth Squad Career Mode.
+    youth_mode_enabled INTEGER DEFAULT 0
 );
 
 -- Seasons table (one row per season per save)
@@ -155,4 +159,46 @@ CREATE TABLE IF NOT EXISTS season_competition_results (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(season_id, comp_name)
+);
+
+-- Youth Squad Career Mode: one row per season that ended with more
+-- players over the league's overall-rating cap than the tier allows (see
+-- generateSeasonEndReviewIfNeeded in main.js). Only created for saves with
+-- youth_mode_enabled = 1, and only when there's actually a violation to
+-- surface — the end-of-season popup reads whatever's unacknowledged for
+-- the active save. UNIQUE(season_id) means each season is only ever
+-- evaluated once, right when the next season starts.
+-- Individual season-end awards (Golden Boot / Playmaker / Golden Glove) —
+-- one row per season per award, only for players who were the league-wide
+-- leader in that category AND on our own squad that season. See
+-- generateSeasonAwardsIfNeeded in main.js. UNIQUE(season_id, award_type)
+-- means only one recipient per award per season (ties broken by whichever
+-- the league-wide stats list happened to sort first).
+CREATE TABLE IF NOT EXISTS player_awards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL,
+    award_type TEXT NOT NULL,   -- 'golden_boot' | 'playmaker' | 'golden_glove'
+    stat_value INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, award_type)
+);
+
+CREATE TABLE IF NOT EXISTS season_end_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL,
+    league_name TEXT,
+    league_tier INTEGER,
+    league_average_overall INTEGER,
+    allowed_overrated_count INTEGER,
+    overrated_count INTEGER,
+    overrated_players_json TEXT,
+    acknowledged INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id)
 );

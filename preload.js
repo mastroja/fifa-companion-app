@@ -10,17 +10,22 @@ contextBridge.exposeInMainWorld('api', {
   getCareerTotals: () => ipcRenderer.invoke('get-career-totals'),
   getManagerPPG: () => ipcRenderer.invoke('get-manager-ppg'),
   getTeamRecordSeasons: () => ipcRenderer.invoke('get-team-record-seasons'),
-  getInferredTransfers: () => ipcRenderer.invoke('get-inferred-transfers'),
+  getInferredTransfers: (saveId) => ipcRenderer.invoke('get-inferred-transfers', saveId),
   getSavesList: () => ipcRenderer.invoke('get-saves-list'),
   selectSave: (saveId) => ipcRenderer.invoke('select-save', saveId),
   deleteSave: (saveId) => ipcRenderer.invoke('delete-save', saveId),
   getSeasonCompetitionResults: (seasonId) => ipcRenderer.invoke('get-season-competition-results', seasonId),
   getTrophiesWon: () => ipcRenderer.invoke('get-trophies-won'),
-  getYouthAcademy: () => ipcRenderer.invoke('get-youth-academy'),
+  getYouthAcademy: (saveId) => ipcRenderer.invoke('get-youth-academy', saveId),
+  enableYouthMode: (saveId) => ipcRenderer.invoke('enable-youth-mode', saveId),
+  getPendingSeasonReview: (saveId) => ipcRenderer.invoke('get-pending-season-review', saveId),
+  getPlayerHonours: (playerId, saveId) => ipcRenderer.invoke('get-player-honours', playerId, saveId),
+  acknowledgeSeasonReview: (reviewId) => ipcRenderer.invoke('acknowledge-season-review', reviewId),
 
   onSquadUpdated: (callback) => ipcRenderer.on('squad-updated', (_event, data) => callback(data)),
   onCareerStatsUpdated: (callback) => ipcRenderer.on('career-stats-updated', (_event, data) => callback(data)),
   onTransfersUpdated: (callback) => ipcRenderer.on('transfers-updated', (_event, data) => callback(data)),
   onCalendarUpdated: (callback) => ipcRenderer.on('calendar-updated', (_event, data) => callback(data)),
-  onYouthUpdated: (callback) => ipcRenderer.on('youth-updated', (_event, data) => callback(data))
+  onYouthUpdated: (callback) => ipcRenderer.on('youth-updated', (_event, data) => callback(data)),
+  onLeagueStatsUpdated: (callback) => ipcRenderer.on('league-stats-updated', (_event, data) => callback(data))
 });
