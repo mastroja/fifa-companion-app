@@ -27,6 +27,14 @@ assert(IsInCM(), "Script must be executed in career mode")
 -- scope can read it via closure.
 local save_uid = GetSaveUID() or ""
 
+-- Populated by the CALENDAR EXPORT block below (it already resolves the
+-- user's primary league via fixture aggregation — see the STANDINGS
+-- section there) and read by the LEAGUE STATS EXPORT block at the very
+-- end of this file. Declared here, outside every do...end block, purely
+-- as a read-only handoff so the new block doesn't need to duplicate that
+-- fixture-aggregation logic.
+local league_team_ids = {}
+
 -- ================= SQUAD EXPORT =================
 do
     require 'imports/other/helpers'
@@ -996,6 +1004,14 @@ do
                 table.concat(last5, ",")
             ))
         end
+
+        -- Hand off this competition's team ids to the LEAGUE STATS EXPORT
+        -- block at the end of this file (see league_team_ids declaration
+        -- up top) — pure addition, doesn't read or modify anything else
+        -- in this block.
+        for tid in pairs(team_stats) do
+            league_team_ids[tid] = true
+        end
     end
 
     -- ============================================================
@@ -1254,5 +1270,124 @@ do
         print("[Lua] Successfully synced career calendar to public path.")
     else
         print("[Lua] Error: Could not write calendar file path.")
+    end
+end
+
+-- ================= LEAGUE STATS EXPORT =================
+-- League-wide player stats (top scorers/assists/clean sheets/cards) for
+-- the companion app's League Stats tab. A separate, independent block
+-- rather than an extension of the squad export above — if anything here
+-- is wrong, it can't touch the squad/transfers/calendar exports, which
+-- all already work.
+--
+-- Every call this block makes is already proven safe elsewhere in this
+-- same script, run every single F10 press without issue:
+--   - a full teamplayerlinks scan (squad export block already does this
+--     for the whole table, not just the user's team, to resolve loan
+--     destinations)
+--   - a full players scan (squad export block already does this too)
+--   - GetPlayersStats() (already called in the squad export block)
+-- Nothing new is being read from the game's memory here — this only
+-- combines three already-working reads differently: GetPlayersStats()'s
+-- own docs confirm it returns stats for every player in the user's
+-- competition (not just their own team), so cross-referencing it against
+-- league_team_ids (handed off from the calendar block above) is enough
+-- to build a real league-wide leaderboard with no new risk surface.
+do
+    local league_players_table = LE.db:GetTable("players")
+    local league_tpl_table = LE.db:GetTable("teamplayerlinks")
+
+    -- Same epoch/formula as convertFifaDate in the squad export block
+    -- above (that one's local to its own do...end block, so duplicated
+    -- here rather than restructured across blocks).
+    local function league_convert_fifa_date(dayOffset)
+        if not dayOffset or dayOffset <= 0 then return "" end
+        local baseEpochSeconds = -12219292800
+        local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
+        return os.date("%m-%d-%Y", targetSeconds) or tostring(dayOffset)
+    end
+
+    local team_id_by_player = {}
+    if league_tpl_table then
+        local rec = league_tpl_table:GetFirstRecord()
+        while rec > 0 do
+            local pid = league_tpl_table:GetRecordFieldValue(rec, "playerid")
+            local tid = league_tpl_table:GetRecordFieldValue(rec, "teamid")
+            if pid and pid > 0 and tid and league_team_ids[tid] then
+                team_id_by_player[pid] = tid
+            end
+            rec = league_tpl_table:GetNextValidRecord()
+        end
+    end
+
+    -- Aggregate GetPlayersStats() (already called once per sync in the
+    -- squad export block, same function, safe to call again here) down
+    -- to just players currently on a team within the user's own league.
+    local combined = {}
+    local all_stats = GetPlayersStats()
+    for i = 1, #all_stats do
+        local stat = all_stats[i]
+        local pid = stat.playerid
+        local tid = team_id_by_player[pid]
+        if tid then
+            if not combined[pid] then
+                combined[pid] = {
+                    team_id = tid, appearances = 0, goals = 0, assists = 0,
+                    clean_sheets = 0, yellow_cards = 0, red_cards = 0
+                }
+            end
+            local c = combined[pid]
+            c.appearances = c.appearances + (stat.app or 0)
+            c.goals = c.goals + (stat.goals or 0)
+            c.assists = c.assists + (stat.assists or 0)
+            c.clean_sheets = c.clean_sheets + (stat.clean_sheets or 0)
+            c.yellow_cards = c.yellow_cards + (stat.yellow or 0)
+            c.red_cards = c.red_cards + (stat.red or 0)
+        end
+    end
+
+    local team_name_cache = {}
+    local function league_team_name(tid)
+        if team_name_cache[tid] == nil then
+            team_name_cache[tid] = GetTeamName(tid) or ""
+        end
+        return team_name_cache[tid]
+    end
+
+    local league_players_json_list = {}
+    if league_players_table then
+        local rec = league_players_table:GetFirstRecord()
+        while rec > 0 do
+            local pid = league_players_table:GetRecordFieldValue(rec, "playerid")
+            local c = pid and combined[pid]
+            if c then
+                local overall = league_players_table:GetRecordFieldValue(rec, "overallrating") or 0
+                local position_id = league_players_table:GetRecordFieldValue(rec, "preferredposition1") or 0
+                local raw_dob = league_players_table:GetRecordFieldValue(rec, "birthdate") or 0
+                local name = (GetPlayerName(pid) or ""):gsub('"', '\\"')
+                local team_name = league_team_name(c.team_id):gsub('"', '\\"')
+                table.insert(league_players_json_list, string.format(
+                    '{"player_id":%d,"name":"%s","team_name":"%s","overall":%d,"position_id":%d,"dob":"%s","appearances":%d,"goals":%d,"assists":%d,"clean_sheets":%d,"yellow_cards":%d,"red_cards":%d}',
+                    pid, name, team_name, overall, position_id, league_convert_fifa_date(raw_dob),
+                    c.appearances, c.goals, c.assists, c.clean_sheets, c.yellow_cards, c.red_cards
+                ))
+            end
+            rec = league_players_table:GetNextValidRecord()
+        end
+    end
+
+    local league_save_uid_escaped = save_uid:gsub('"', '\\"')
+    local league_json_output = string.format(
+        '{"save_uid":"%s","players":[\n    %s\n  ]}',
+        league_save_uid_escaped, table.concat(league_players_json_list, ",\n    ")
+    )
+
+    local league_file = io.open("C:\\Users\\Public\\ea_fc_league_stats_export.json", "w+")
+    if league_file then
+        league_file:write(league_json_output)
+        league_file:close()
+        print("[Lua] Successfully synced league stats to public path.")
+    else
+        print("[Lua] Error: Could not write league stats file path.")
     end
 end
