@@ -2747,17 +2747,20 @@
 
     let refreshTimeoutHandle = null;
 
-    // Off by default (unchecked on every launch — not persisted), since
-    // triggerRefresh() steals window focus and sends a real F10 keypress
-    // to the game: it can't run quietly in the background, so this should
-    // be an explicit opt-in each session rather than a surprise. Gated on
-    // document.hasFocus() at each tick so it only ever fires while the
-    // user is actually looking at this app — never while they're
-    // alt-tabbed away, mid-match, or doing anything else.
+    // Persisted across launches (localStorage — a per-machine UI
+    // preference, not save data) since triggerRefresh() steals window
+    // focus and sends a real F10 keypress to the game: it can't run
+    // quietly in the background, so it's gated on document.hasFocus() at
+    // each tick — only ever fires while the user is actually looking at
+    // this app, never while they're alt-tabbed away, mid-match, or doing
+    // anything else.
     let autoRefreshIntervalHandle = null;
     const AUTO_REFRESH_INTERVAL_MS = 60000;
+    const AUTO_REFRESH_STORAGE_KEY = 'autoRefreshEnabled';
 
     function onAutoRefreshToggle(enabled) {
+      try { localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, enabled ? '1' : '0'); } catch (e) { /* localStorage unavailable — just won't persist */ }
+
       clearInterval(autoRefreshIntervalHandle);
       autoRefreshIntervalHandle = null;
       if (!enabled) return;
@@ -2766,6 +2769,18 @@
         if (document.hasFocus()) triggerRefresh();
       }, AUTO_REFRESH_INTERVAL_MS);
     }
+
+    // Restores the checkbox (and the interval, if it was left on) from
+    // the last session — runs once at script load, after the checkbox
+    // element above has already been parsed into the DOM.
+    (function restoreAutoRefreshPreference() {
+      let wasEnabled = false;
+      try { wasEnabled = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY) === '1'; } catch (e) { /* localStorage unavailable — defaults off */ }
+      if (!wasEnabled) return;
+      const checkbox = document.getElementById('auto-refresh-toggle');
+      if (checkbox) checkbox.checked = true;
+      onAutoRefreshToggle(true);
+    })();
 
     function setRefreshButtonState(isRefreshing) {
       const btn = document.getElementById('refresh-btn');
@@ -3323,12 +3338,14 @@
         return;
       }
 
+      const ourClub = getMostCommonClubName();
+
       container.innerHTML = `
         <table class="sub-table">
           <thead><tr><th>#</th><th>Player</th><th>Team</th><th>OVR</th><th>Age</th><th>Apps</th><th>${statKey === 'goals' ? 'G' : statKey === 'assists' ? 'A' : statKey === 'clean_sheets' ? 'CS' : statKey === 'yellow_cards' ? 'YC' : 'RC'}</th></tr></thead>
           <tbody>
             ${ranked.map((p, i) => `
-              <tr>
+              <tr style="${p.team_name === ourClub ? 'background: #00ff8715; font-weight: 700;' : ''}">
                 <td>${i + 1}</td>
                 <td>${p.name}</td>
                 <td>${p.team_name}</td>
