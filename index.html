@@ -445,6 +445,7 @@
       </label>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
       <button class="refresh-btn" onclick="previewSeasonOverview()" title="Opens the End of Season Overview using whatever season data currently exists — for testing, doesn't mark anything as acknowledged">🏆 Preview Season Overview</button>
+      <button class="refresh-btn" onclick="previewSeasonOverview(true)" title="Same as Preview, but fakes a relegation and an EFL Cup win so you can see the celebration/relegation animations without actually needing that result — for testing only, doesn't touch any real data">🧪 Test Celebrations</button>
     </div>
   </header>
 
@@ -4283,13 +4284,29 @@
     // recently ended season, or the in-progress current one if no season
     // has ended yet) and never marks anything acknowledged, so it can be
     // run repeatedly without disturbing the real auto-trigger's state.
-    async function previewSeasonOverview() {
+    // simulateCelebration is the "Test Celebrations" button — purely a
+    // display-only override on the fetched payload (fakes relegation +
+    // an EFL Cup win) so the animations can be checked without needing
+    // that actual result; nothing is written back to the database.
+    async function previewSeasonOverview(simulateCelebration) {
       if (!currentSaveId || !window.api || !window.api.getSeasonOverviewPreview) {
         alert('No save selected yet.');
         return;
       }
       const overview = await window.api.getSeasonOverviewPreview(currentSaveId);
       if (overview) {
+        if (simulateCelebration) {
+          if (overview.league) {
+            overview.league.won = false;
+            overview.league.promoted = false;
+            overview.league.relegated = true;
+          }
+          overview.other_competitions = [
+            ...(overview.other_competitions || []).filter(c => c.comp_name !== 'EFL Cup'),
+            { comp_name: 'EFL Cup', standing: 'Winner' }
+          ];
+          overview.won_competitions = [...(overview.won_competitions || []), 'EFL Cup'];
+        }
         openSeasonOverview(overview, true);
       } else {
         alert('No season data yet to preview — sync at least one squad export first.');
@@ -4636,6 +4653,23 @@
           </div>
 
           <div class="season-overview-grid2">
+            <div class="season-overview-stat-block">
+              <h4>Match Record</h4>
+              ${d.team_record ? `<div class="season-overview-stat-row"><span>Played</span><span>${d.team_record.played}</span></div>` : ''}
+              ${d.team_record ? `<div class="season-overview-stat-row"><span>Record</span><span>${d.team_record.wins}-${d.team_record.draws}-${d.team_record.losses}</span></div>` : ''}
+              ${d.team_record ? `<div class="season-overview-stat-row"><span>GF - GA</span><span>${d.team_record.goals_for} - ${d.team_record.goals_against}</span></div>` : ''}
+              ${d.biggest_win ? `<div class="season-overview-stat-row"><span>Biggest Win</span><span>${d.biggest_win.user_score}-${d.biggest_win.opponent_score} vs ${d.biggest_win.opponent}</span></div>` : ''}
+              ${d.biggest_loss ? `<div class="season-overview-stat-row"><span>Biggest Loss</span><span>${d.biggest_loss.user_score}-${d.biggest_loss.opponent_score} vs ${d.biggest_loss.opponent}</span></div>` : ''}
+              ${!d.team_record ? `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>` : ''}
+            </div>
+
+            <div class="season-overview-stat-block">
+              <h4>Manager PPG</h4>
+              ${d.manager_ppg !== null && d.manager_ppg !== undefined
+                ? `<div class="season-overview-stat-row"><span>Points Per Game</span><span>${d.manager_ppg.toFixed(2)}</span></div>`
+                : `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>`}
+            </div>
+
             <div class="season-overview-stat-block">
               <h4>Club Leaders</h4>
               ${s.goals[0] ? `<div class="season-overview-stat-row"><span>Top Scorer</span><span>${s.goals[0].name} (${s.goals[0].value})</span></div>` : ''}

@@ -716,6 +716,24 @@ function getSeasonOverview(saveId, seasonId) {
     teamRecord = { played, wins: wins || 0, draws: draws || 0, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0 };
   }
 
+  // Biggest win/loss by goal margin — ties keep whichever match was
+  // found first (no meaningful secondary sort for a tie here).
+  let biggestWin = null, biggestLoss = null;
+  const marginRes = db.exec(`
+    SELECT opponent, competition, match_date, user_score, opponent_score
+    FROM matches WHERE season_id = ${seasonId};
+  `);
+  if (marginRes.length > 0) {
+    marginRes[0].values.forEach(([opponent, competition, match_date, user_score, opponent_score]) => {
+      const margin = user_score - opponent_score;
+      const entry = { opponent, competition, match_date, user_score, opponent_score, margin };
+      if (margin > 0 && (!biggestWin || margin > biggestWin.margin)) biggestWin = entry;
+      if (margin < 0 && (!biggestLoss || margin < biggestLoss.margin)) biggestLoss = entry;
+    });
+  }
+
+  const managerPpgRow = getManagerSeasonPPG(saveId).find(r => r.season === yearLabel);
+
   const allCompsRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
   const otherCompetitions = [];
   const wonCompetitions = wonLeague ? [leagueResult.comp_name] : [];
@@ -743,6 +761,9 @@ function getSeasonOverview(saveId, seasonId) {
     league_history: leagueHistory,
     standings: getSeasonStandings(seasonId),
     team_record: teamRecord,
+    biggest_win: biggestWin,
+    biggest_loss: biggestLoss,
+    manager_ppg: managerPpgRow ? managerPpgRow.ppg : null,
     other_competitions: otherCompetitions,
     won_competitions: wonCompetitions,
     squad_leaders: {
