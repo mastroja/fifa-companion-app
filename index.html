@@ -616,6 +616,12 @@
   <div id="league-stats-tab" class="tab-content">
     <div class="home-header-strip">
       <h2 id="league-stats-league-name">League Stats</h2>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <label for="league-stats-season-select" style="font-weight: bold; font-size: 14px;">Season:</label>
+        <select id="league-stats-season-select" onchange="onLeagueStatsSeasonChange(this.value)">
+          <option value="current">Current Season</option>
+        </select>
+      </div>
     </div>
     <div class="home-dashboard-grid home-grid-top">
       <div class="profile-card home-widget">
@@ -2405,6 +2411,9 @@
 
       currentYouthAcademy = bundle.youth_academy || [];
       renderYouthAcademyTable();
+
+      leagueStatsSelectedSeasonId = null; // a different save has different seasons
+      populateLeagueStatsSeasonSelector();
     }
 
     // Irreversible — confirm with the user before calling into main.js's
@@ -2435,10 +2444,14 @@
         leagueStandings = null;
         currentLeaguePlayerStats = [];
         currentLeagueStatsLeagueName = null;
+        leagueStatsSelectedSeasonId = null;
+        leagueStatsHistoricalPlayers = [];
+        leagueStatsHistoricalLeagueName = null;
         renderTableRows();
         renderPastPlayersTable();
         renderHomeDashboard();
         renderLeagueStatsTab();
+        populateLeagueStatsSeasonSelector();
       }
     }
 
@@ -2795,22 +2808,19 @@
     // League Stats tab
     // ------------------------------------------------------------------
     //
-    // Team-level sections (table, top scoring, worst defense) need no new
-    // Live Editor data — they're all derived from the same full-league
-    // `leagueStandings` already captured by GetValidStandings() for the
-    // Home dashboard's League Table widget.
+    // Team-level sections (table, top scoring, worst defense) are derived
+    // from the same live, full-league `leagueStandings` already captured
+    // by GetValidStandings() for the Home dashboard's League Table widget
+    // — there's no persisted history for a past season's standings, so
+    // these stay live-only regardless of the season selector below.
     //
-    // Player-level sections (scorers/assists/clean sheets/cards) need
-    // league-wide per-player stats, which export_all.lua doesn't capture
-    // yet — GetPlayersStats() already returns stats for every player in
-    // the user's competition (proven safe, already called every sync —
-    // see export_all.lua), it's just filtered down to only the user's own
-    // squad today. Extending that is a real but much lower-risk Lua change
-    // than a brand new bulk read; per this project's standing safety rule
-    // it still needs a standalone verify-first script before it goes near
-    // the F10-bound script, so these sections render an honest "not wired
-    // up yet" placeholder from an empty currentLeaguePlayerStats until
-    // that's done.
+    // Player-level sections (scorers/assists/clean sheets/cards) come from
+    // export_all.lua's LEAGUE STATS EXPORT block, filtered to league
+    // matches only (see GetPlayersStats() there). Every sync also persists
+    // these rows into season_league_stats (see persistLeagueStats in
+    // main.js), which is what makes the season selector possible — a past
+    // season's leaderboard is read from the DB, the current season reads
+    // the live push below.
     let currentLeaguePlayerStats = [];
     // The real competition name resolved server-side by export_all.lua's
     // LEAGUE STATS EXPORT block (same primary-league fixture aggregation
@@ -2819,10 +2829,72 @@
     // existed, so the header still shows something sensible.
     let currentLeagueStatsLeagueName = null;
 
+    // Season selector state — null means "current season" (the live data
+    // above, reactive to every sync); a season id means a past season,
+    // fetched once via getLeagueStatsForSeason and held statically until
+    // the selector changes again (a historical season's stats don't
+    // change, so there's nothing to keep re-fetching).
+    let leagueStatsSelectedSeasonId = null;
+    let leagueStatsHistoricalPlayers = [];
+    let leagueStatsHistoricalLeagueName = null;
+
+    function getDisplayedLeagueStatsPlayers() {
+      return leagueStatsSelectedSeasonId ? leagueStatsHistoricalPlayers : currentLeaguePlayerStats;
+    }
+
+    function getDisplayedLeagueStatsLeagueName() {
+      return leagueStatsSelectedSeasonId ? leagueStatsHistoricalLeagueName : currentLeagueStatsLeagueName;
+    }
+
     function renderLeagueStatsTabHeader() {
       const el = document.getElementById('league-stats-league-name');
       if (!el) return;
-      el.textContent = currentLeagueStatsLeagueName || getPrimaryLeagueName() || 'League Stats';
+      const name = getDisplayedLeagueStatsLeagueName();
+      // The live getPrimaryLeagueName() fallback only makes sense for the
+      // current season — showing it for a past season with no captured
+      // name would mislabel it with whatever league the save is in NOW.
+      el.textContent = name || (leagueStatsSelectedSeasonId ? 'Unknown League' : (getPrimaryLeagueName() || 'League Stats'));
+    }
+
+    async function onLeagueStatsSeasonChange(value) {
+      if (value === 'current') {
+        leagueStatsSelectedSeasonId = null;
+        renderLeagueStatsTab();
+        return;
+      }
+
+      if (!window.api || !window.api.getLeagueStatsForSeason) return;
+      const seasonId = parseInt(value, 10);
+      leagueStatsSelectedSeasonId = seasonId;
+      const result = await window.api.getLeagueStatsForSeason(seasonId);
+      leagueStatsHistoricalPlayers = (result && result.players) || [];
+      leagueStatsHistoricalLeagueName = (result && result.league_name) || null;
+      renderLeagueStatsTab();
+    }
+
+    // Rebuilds the selector's options every time it's called (seasons list
+    // can grow), but always re-marks whichever option matches
+    // leagueStatsSelectedSeasonId as selected — this runs on every live
+    // league-stats sync (see onLeagueStatsUpdated), so without that a user
+    // actively browsing history would get silently bounced back to
+    // "Current Season" on the next sync.
+    async function populateLeagueStatsSeasonSelector() {
+      if (!window.api || !window.api.getSeasonsList) return;
+      const seasons = await window.api.getSeasonsList();
+      const select = document.getElementById('league-stats-season-select');
+      if (!select) return;
+
+      const pastOptions = seasons
+        .filter(s => !s.is_current)
+        .slice()
+        .reverse()
+        .map(s => `<option value="${s.id}" ${leagueStatsSelectedSeasonId === s.id ? 'selected' : ''}>${s.league_name || 'Unknown League'} ${shortenSeasonLabel(s.year_label)}</option>`)
+        .join('');
+
+      select.innerHTML = `
+        <option value="current" ${!leagueStatsSelectedSeasonId ? 'selected' : ''}>Current Season</option>
+        ${pastOptions}
+      `;
     }
 
     function renderLeagueStatsTab() {
@@ -2857,6 +2929,17 @@
 
       if (attackTitle) attackTitle.textContent = leagueStatsExtremeMode.attack === 'best' ? 'Best Attack' : 'Worst Attack';
       if (defenseTitle) defenseTitle.textContent = leagueStatsExtremeMode.defense === 'best' ? 'Best Defense' : 'Worst Defense';
+
+      // Team standings have no persisted season history (see the comment
+      // above this tab's state) — showing live standings under a past
+      // season's header would mislabel them as that season's, so this
+      // stays an honest placeholder instead until browsing history.
+      if (leagueStatsSelectedSeasonId) {
+        const msg = `<div class="empty-state" style="padding: 12px;">Team standings aren't available for past seasons yet — only the player leaderboards are.</div>`;
+        scoringContainer.innerHTML = msg;
+        defenseContainer.innerHTML = msg;
+        return;
+      }
 
       if (!leagueStandings || leagueStandings.length === 0) {
         const msg = `<div class="empty-state" style="padding: 12px;">Standings not available yet.</div>`;
@@ -2899,12 +2982,13 @@
       const container = document.getElementById(containerId);
       if (!container) return;
 
-      if (!currentLeaguePlayerStats || currentLeaguePlayerStats.length === 0) {
-        container.innerHTML = `<div class="empty-state" style="padding: 12px;">League-wide player stats aren't wired up yet — needs an export_all.lua update, see conversation with the user.</div>`;
+      const source = getDisplayedLeagueStatsPlayers();
+      if (!source || source.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No data for this season yet.</div>`;
         return;
       }
 
-      const ranked = currentLeaguePlayerStats
+      const ranked = source
         .filter(p => Number(p[statKey] || 0) > 0)
         .filter(p => !positionFilter || getPositionInfo(p.position_id).group === positionFilter)
         .sort((a, b) => Number(b[statKey] || 0) - Number(a[statKey] || 0))
@@ -4047,6 +4131,7 @@
         if (currentSaveId !== envelope.save_id) return;
         currentLeaguePlayerStats = envelope.data || [];
         currentLeagueStatsLeagueName = envelope.league_name || null;
+        populateLeagueStatsSeasonSelector();
         renderLeagueStatsTab();
       });
 

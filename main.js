@@ -119,6 +119,14 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // League Stats season selector, added after some users already had a DB
+  // on disk — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN league_name TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -341,6 +349,83 @@ function persistSeasonCompetitionResults(calendarPayload) {
   }
 
   saveDatabaseToDisk();
+}
+
+// Persists the league-wide (not just our own squad) per-player stats
+// from a league-stats sync (see export_all.lua's LEAGUE STATS EXPORT)
+// into season_league_stats, upserted per (season, player) — same
+// continuous-accumulation pattern as player_season_stats, so a season's
+// leaderboard is already fully captured by the time it ends rather than
+// needing a separate snapshot exactly at the rollover moment (which could
+// race against — or miss — the actual season change, same staleness risk
+// noted on latestLeagueStatsPayload above). Also keeps seasons.league_name
+// current for whichever season is still being written to, since a save
+// can change league across seasons via promotion/relegation.
+function persistLeagueStats(seasonId, leagueStatsPayload) {
+  if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
+
+  if (leagueStatsPayload.league_name) {
+    db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueStatsPayload.league_name, seasonId]);
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO season_league_stats
+      (season_id, player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(season_id, player_id) DO UPDATE SET
+      name = excluded.name,
+      team_name = excluded.team_name,
+      overall = excluded.overall,
+      position_id = excluded.position_id,
+      dob = excluded.dob,
+      appearances = excluded.appearances,
+      goals = excluded.goals,
+      assists = excluded.assists,
+      clean_sheets = excluded.clean_sheets,
+      yellow_cards = excluded.yellow_cards,
+      red_cards = excluded.red_cards,
+      updated_at = CURRENT_TIMESTAMP;
+  `);
+
+  try {
+    leagueStatsPayload.players.forEach(p => {
+      if (!p.player_id) return;
+      stmt.run([
+        seasonId, p.player_id, p.name || 'Unknown', p.team_name || '', p.overall || 0,
+        p.position_id || 0, p.dob || '', p.appearances || 0, p.goals || 0, p.assists || 0,
+        p.clean_sheets || 0, p.yellow_cards || 0, p.red_cards || 0
+      ]);
+    });
+  } finally {
+    stmt.free();
+  }
+
+  saveDatabaseToDisk();
+}
+
+// The league-wide leaderboard for one specific past (or current) season,
+// for the League Stats tab's season selector — same row shape as the
+// live league-stats-updated push, so the renderer can use one rendering
+// path for both. Returns the season's league_name alongside the rows
+// since a save can change league across seasons.
+function getLeagueStatsForSeason(seasonId) {
+  if (!db || !seasonId) return { league_name: null, players: [] };
+
+  const seasonRes = db.exec(`SELECT league_name FROM seasons WHERE id = ${seasonId};`);
+  const leagueName = (seasonRes.length > 0 && seasonRes[0].values.length > 0) ? seasonRes[0].values[0][0] : null;
+
+  const res = db.exec(`
+    SELECT player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards
+    FROM season_league_stats
+    WHERE season_id = ${seasonId};
+  `);
+  const rows = res.length > 0 ? res[0].values : [];
+  const players = rows.map(r => ({
+    player_id: r[0], name: r[1], team_name: r[2], overall: r[3], position_id: r[4], dob: r[5],
+    appearances: r[6], goals: r[7], assists: r[8], clean_sheets: r[9], yellow_cards: r[10], red_cards: r[11]
+  }));
+
+  return { league_name: leagueName, players };
 }
 
 // Per-season competition results (see persistSeasonCompetitionResults),
@@ -1221,9 +1306,9 @@ function getSquadFromDB(seasonId = currentSeasonId) {
 // Season list for the Squad Stats selector (current save only).
 function getSeasonsList(saveId = activeSaveId) {
   if (!db || !saveId) return [];
-  const res = db.exec(`SELECT id, year_label, is_current FROM seasons WHERE save_id = ${saveId} ORDER BY year_label ASC;`);
+  const res = db.exec(`SELECT id, year_label, is_current, league_name FROM seasons WHERE save_id = ${saveId} ORDER BY year_label ASC;`);
   if (res.length === 0) return [];
-  return res[0].values.map(row => ({ id: row[0], year_label: row[1], is_current: row[2] === 1 }));
+  return res[0].values.map(row => ({ id: row[0], year_label: row[1], is_current: row[2] === 1, league_name: row[3] }));
 }
 
 // Resolves "the current season" for an arbitrary save — the season-list
@@ -1730,6 +1815,7 @@ ipcMain.handle('enable-youth-mode', (_event, saveId) => enableYouthMode(saveId))
 ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeasonReview(saveId));
 ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
+ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 
 app.whenReady().then(async () => {
   await initDatabase();
@@ -1755,6 +1841,7 @@ app.whenReady().then(async () => {
       try {
         const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
         latestLeagueStatsPayload = startupLeagueStats;
+        persistLeagueStats(currentSeasonId, startupLeagueStats);
         mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [], league_name: startupLeagueStats.league_name || null });
       } catch (err) {
         console.error('[Startup] Failed to load existing league stats export:', err);
@@ -1850,6 +1937,7 @@ app.whenReady().then(async () => {
         const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
         const leagueStatsPayload = JSON.parse(rawLeagueStats);
         latestLeagueStatsPayload = leagueStatsPayload;
+        persistLeagueStats(currentSeasonId, leagueStatsPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [], league_name: leagueStatsPayload.league_name || null });
