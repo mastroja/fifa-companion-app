@@ -313,6 +313,9 @@
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <button class="refresh-btn" id="youth-mode-btn" onclick="onYouthModeButtonClick()">🎓 Youth Mode: Off</button>
       <span class="badge" id="current-ingame-date">N/A</span>
+      <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); cursor: pointer;" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
+        <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" /> Auto-refresh
+      </label>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
     </div>
   </header>
@@ -464,6 +467,7 @@
         </label>
       </div>
       <button class="home-toggle-btn" onclick="sortTable('club_status')">Sort by Club Status</button>
+      <button class="home-toggle-btn" onclick="onBackfillAcademyClick()" title="Marks every player currently on your senior squad as an academy graduate in the database — for a save where the youth academy wasn't tracked in time to catch these signings naturally.">Mark Current Squad as Academy Graduates</button>
     </div>
 
     <div class="table-container">
@@ -500,14 +504,14 @@
       <table>
         <thead>
           <tr>
-            <th>Player</th>
-            <th>Pos</th>
-            <th>Age</th>
-            <th>Current OVR</th>
-            <th>Current Club</th>
-            <th>Sold For</th>
-            <th>Current Value</th>
-            <th>Departed</th>
+            <th onclick="sortPastPlayers('name')">Player ↕</th>
+            <th onclick="sortPastPlayers('position_id')">Pos ↕</th>
+            <th onclick="sortPastPlayers('years_active')">Years Active ↕</th>
+            <th onclick="sortPastPlayers('overall')">Current OVR ↕</th>
+            <th onclick="sortPastPlayers('current_club')">Current Club ↕</th>
+            <th title="No data source for actual transfer fees — always shows Unknown, not sortable">Sold For</th>
+            <th onclick="sortPastPlayers('__value')">Current Value ↕</th>
+            <th onclick="sortPastPlayers('departed_season')">Departed ↕</th>
           </tr>
         </thead>
         <tbody id="past-players-body">
@@ -2350,36 +2354,78 @@
     // (Transfer History) can reuse this same fetch instead of each making
     // their own round trip — refreshed alongside the Former Players table.
     let currentPastPlayers = [];
+    let pastPlayersSortColumn = 'departed_season';
+    let pastPlayersSortAscending = false;
 
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
       const pastPlayers = await window.api.getPastPlayers(currentSaveId);
       currentPastPlayers = pastPlayers || [];
       filterAndRenderTransfers(); // Sold view reads currentPastPlayers directly
+      renderPastPlayersRows();
+    }
+
+    function sortPastPlayers(column) {
+      if (pastPlayersSortColumn === column) {
+        pastPlayersSortAscending = !pastPlayersSortAscending;
+      } else {
+        pastPlayersSortColumn = column;
+        pastPlayersSortAscending = true;
+      }
+      renderPastPlayersRows();
+    }
+
+    // Pulled apart from the fetch above so sortPastPlayers can just
+    // re-render the already-cached list instead of re-fetching.
+    function renderPastPlayersRows() {
       const tbody = document.getElementById('past-players-body');
       if (!tbody) return;
 
-      if (!pastPlayers || pastPlayers.length === 0) {
+      if (currentPastPlayers.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = pastPlayers.map(p => {
-        const posInfo = getPositionInfo(p.position_id);
+      // Precompute the derived fields sorting/display both need, once,
+      // rather than recomputing per comparison during sort.
+      const rows = currentPastPlayers.map(p => {
         const age = computeAge(p.dob);
         // wage_at_departure is the best available proxy for a current-club
         // wage we have no way to know — value is still just an estimate.
         const value = estimateMarketValue(p.overall, p.potential, age, p.wage_at_departure);
+        return { ...p, __value: value };
+      });
+
+      rows.sort((a, b) => {
+        let valA = a[pastPlayersSortColumn];
+        let valB = b[pastPlayersSortColumn];
+        if (pastPlayersSortColumn === 'position_id') {
+          valA = getPositionInfo(a.position_id).label;
+          valB = getPositionInfo(b.position_id).label;
+        } else if (pastPlayersSortColumn === '__value') {
+          valA = Number(valA || 0); valB = Number(valB || 0);
+          return pastPlayersSortAscending ? valA - valB : valB - valA;
+        } else if (pastPlayersSortColumn === 'overall' || pastPlayersSortColumn === 'years_active') {
+          valA = Number(valA || 0); valB = Number(valB || 0);
+          return pastPlayersSortAscending ? valA - valB : valB - valA;
+        }
+        valA = String(valA ?? '');
+        valB = String(valB ?? '');
+        return pastPlayersSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
+
+      tbody.innerHTML = rows.map(p => {
+        const posInfo = getPositionInfo(p.position_id);
         const ovrLabel = p.overall_is_live ? p.overall : `${p.overall ?? '—'} (last known)`;
         return `
           <tr>
             <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
-            <td>${age ?? '—'}</td>
+            <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
             <td>${p.current_club}</td>
             <td style="color: var(--text-dim); font-style: italic;">Unknown</td>
-            <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(value)}</td>
+            <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(p.__value)}</td>
             <td>${p.departed_season || '—'}</td>
           </tr>
         `;
@@ -2536,6 +2582,26 @@
     }
 
     let refreshTimeoutHandle = null;
+
+    // Off by default (unchecked on every launch — not persisted), since
+    // triggerRefresh() steals window focus and sends a real F10 keypress
+    // to the game: it can't run quietly in the background, so this should
+    // be an explicit opt-in each session rather than a surprise. Gated on
+    // document.hasFocus() at each tick so it only ever fires while the
+    // user is actually looking at this app — never while they're
+    // alt-tabbed away, mid-match, or doing anything else.
+    let autoRefreshIntervalHandle = null;
+    const AUTO_REFRESH_INTERVAL_MS = 60000;
+
+    function onAutoRefreshToggle(enabled) {
+      clearInterval(autoRefreshIntervalHandle);
+      autoRefreshIntervalHandle = null;
+      if (!enabled) return;
+
+      autoRefreshIntervalHandle = setInterval(() => {
+        if (document.hasFocus()) triggerRefresh();
+      }, AUTO_REFRESH_INTERVAL_MS);
+    }
 
     function setRefreshButtonState(isRefreshing) {
       const btn = document.getElementById('refresh-btn');
@@ -3823,6 +3889,28 @@
         currentYouthModeEnabled = true;
         updateYouthModeButton();
         renderYouthModeWarning();
+      }
+    }
+
+    // One-time manual fix for a save where the youth academy wasn't being
+    // tracked yet when today's senior players were actually promoted —
+    // see backfillAcademyForCurrentSquad in main.js for why this writes to
+    // the earliest season on record rather than the current one.
+    async function onBackfillAcademyClick() {
+      if (!currentSaveId || !window.api || !window.api.backfillAcademyForCurrentSquad) return;
+
+      const confirmed = confirm(
+        'Mark every player currently on your senior squad as an academy graduate?\n\n' +
+        'This permanently updates the database — use it only if the youth academy genuinely wasn\'t being tracked when these players were promoted.'
+      );
+      if (!confirmed) return;
+
+      const result = await window.api.backfillAcademyForCurrentSquad(currentSaveId);
+      if (result && result.success) {
+        alert(`Marked ${result.marked} player${result.marked === 1 ? '' : 's'} as academy graduates.`);
+        refreshSignedPlayers();
+      } else {
+        alert('Nothing to mark — no current squad data found for this save yet.');
       }
     }
 

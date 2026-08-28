@@ -1470,11 +1470,25 @@ function getPastPlayers(saveId = activeSaveId) {
   `);
   if (pastRes.length === 0) return [];
 
+  // ASC order means the first time a player_id is seen here is their
+  // earliest season with the club — kept alongside the (repeatedly
+  // overwritten) most recent row so years-with-club can be computed as
+  // a real span instead of just a single "departed" point in time.
   const lastKnown = new Map();
+  const firstYearLabelByPlayer = new Map();
   pastRes[0].values.forEach(row => {
     const [player_id, name, position_id, dob, overall, potential, wage, club_id, year_label, season_id] = row;
+    if (!firstYearLabelByPlayer.has(player_id)) firstYearLabelByPlayer.set(player_id, year_label);
     lastKnown.set(player_id, { player_id, name, position_id, dob, overall, potential, wage, year_label, season_id });
   });
+
+  // year_label is "2026/2027" — the leading year is enough to measure a
+  // span in whole seasons; +1 makes a single season played count as 1
+  // year, not 0.
+  function seasonStartYear(yearLabel) {
+    const year = parseInt(String(yearLabel || '').split('/')[0], 10);
+    return isNaN(year) ? null : year;
+  }
 
   const watchlistStatus = readWatchlistStatus();
 
@@ -1496,6 +1510,11 @@ function getPastPlayers(saveId = activeSaveId) {
     const live = watchlistStatus.get(playerId);
     if (live && live.club_name) currentClub = live.club_name;
 
+    const joinedSeason = firstYearLabelByPlayer.get(playerId) || info.year_label;
+    const joinedYear = seasonStartYear(joinedSeason);
+    const departedYear = seasonStartYear(info.year_label);
+    const yearsActive = (joinedYear !== null && departedYear !== null) ? (departedYear - joinedYear + 1) : null;
+
     results.push({
       player_id: info.player_id,
       name: info.name,
@@ -1505,7 +1524,9 @@ function getPastPlayers(saveId = activeSaveId) {
       potential: live ? live.potential : info.potential,
       overall_is_live: !!live,
       wage_at_departure: info.wage,
+      joined_season: joinedSeason,
       departed_season: info.year_label,
+      years_active: yearsActive,
       current_club: currentClub
     });
   });
@@ -1632,6 +1653,59 @@ function getSignedPlayers(saveId = activeSaveId) {
   });
 
   return results;
+}
+
+// One-time manual fix (see the "Mark Current Squad as Academy Graduates"
+// button) for a save where the youth academy wasn't being tracked yet
+// when today's senior players were actually promoted — the normal
+// everInAcademy detection above has no youth_academy_snapshot row to
+// find for them. Backfills one into the EARLIEST season on record
+// instead of the current one: getYouthAcademy() only ever shows the
+// CURRENT season's snapshot, so writing to the current season would
+// incorrectly make these senior players show up on the live Youth
+// Academy roster tab. Placeholder tier/months_in_squad (we have no real
+// historical academy data for them) — overall/potential borrowed from
+// their current stats since that's the closest honest approximation.
+function backfillAcademyForCurrentSquad(saveId = activeSaveId) {
+  if (!db || !saveId) return { success: false, marked: 0 };
+  const currentSeasonForSave = getCurrentSeasonForSave(saveId);
+  if (!currentSeasonForSave) return { success: false, marked: 0 };
+
+  const earliestRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} ORDER BY id ASC LIMIT 1;`);
+  const earliestSeasonId = (earliestRes.length > 0 && earliestRes[0].values.length > 0)
+    ? earliestRes[0].values[0][0] : currentSeasonForSave;
+
+  const currentRes = db.exec(`
+    SELECT player_id, on_loan, updated_at, overall, potential FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+  `);
+  const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
+
+  let maxUpdatedAt = null;
+  currentRows.forEach(([, , updated_at]) => {
+    if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
+  });
+
+  // "Currently on the squad" = touched by the latest sync or out on loan
+  // — same definition used everywhere else in this file.
+  const activeRows = currentRows.filter(([, on_loan, updated_at]) => on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt));
+  if (activeRows.length === 0) return { success: false, marked: 0 };
+
+  const stmt = db.prepare(`
+    INSERT INTO youth_academy_snapshot (player_id, season_id, tier, months_in_squad, overall, potential_low, potential_high, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(player_id, season_id) DO NOTHING;
+  `);
+  try {
+    activeRows.forEach(([player_id, , , overall, potential]) => {
+      stmt.run([player_id, earliestSeasonId, 1, 0, overall || 0, potential || 0, potential || 0]);
+    });
+  } finally {
+    stmt.free();
+  }
+
+  saveDatabaseToDisk();
+  console.log(`[Academy Backfill] Marked ${activeRows.length} current squad players as academy graduates for save ${saveId}.`);
+  return { success: true, marked: activeRows.length };
 }
 
 // Full multi-season history for one player — this is the whole point.
@@ -1943,6 +2017,7 @@ ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHono
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
+ipcMain.handle('backfill-academy-for-current-squad', (_event, saveId) => backfillAcademyForCurrentSquad(saveId));
 
 app.whenReady().then(async () => {
   await initDatabase();
