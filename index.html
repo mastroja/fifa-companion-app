@@ -1967,7 +1967,7 @@
             <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${
               typeof player.potential === 'string' && player.potential.includes('-')
                 ? player.potential
-                : formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances, position_id: player.position_id, youth_reveal_tier: player.youth_reveal_tier }, careerStats)
+                : formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances, position_id: player.position_id, youth_reveal_tier: player.youth_reveal_tier, overall: baseOvr }, careerStats)
             }</strong></span>
           </div>
         </div>
@@ -4261,6 +4261,20 @@
     // optional; falls back to the player object's own (season-scoped)
     // fields if not given, which under-counts a multi-season veteran but
     // degrades safely rather than erroring.
+    // A player whose overall has already caught up to (or passed) the
+    // low end of their displayed range would otherwise show a range that
+    // makes no sense (a "ceiling" below where they already stand) — and
+    // would itself leak metagame info, telling the manager "this player
+    // has basically nowhere left to grow." Shifting the whole window up
+    // so it starts at their overall (keeping the same width, so there's
+    // still real range above them) preserves the mystery instead.
+    function shiftRevealRangeAboveOverall(low, high, overall) {
+      const ovr = Number(overall || 0);
+      if (!ovr || low >= ovr) return [low, high];
+      const shift = ovr - low;
+      return [ovr, Math.min(99, high + shift)];
+    }
+
     function formatPotentialDisplay(player, careerStats) {
       const potential = Number(player.potential || 0);
       if (!potential) return '—';
@@ -4277,8 +4291,9 @@
 
       const highOffset = Math.round(width * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
       const lowOffset = width - highOffset;
-      const low = Math.max(1, potential - lowOffset);
-      const high = Math.min(99, potential + highOffset);
+      let low = Math.max(1, potential - lowOffset);
+      let high = Math.min(99, potential + highOffset);
+      [low, high] = shiftRevealRangeAboveOverall(low, high, player.overall);
       return `${low}-${high}`;
     }
 
@@ -4295,24 +4310,26 @@
     // reported potential) so an academy prospect never looks more "known"
     // than a player who's just been promoted.
     function formatAcademyPotentialDisplay(academyPlayer) {
-      const low = Number(academyPlayer.potential_low || 0);
-      const high = Number(academyPlayer.potential_high || 0);
+      let low = Number(academyPlayer.potential_low || 0);
+      let high = Number(academyPlayer.potential_high || 0);
       if (!low && !high) return '—';
       if (!currentYouthModeEnabled) return `${low}-${high}`;
 
       const gameWidth = high - low;
       const tier = findPyramidTier(getPrimaryLeagueName());
       const defaultWidth = (YOUTH_REVEAL_SCHEDULE_BY_TIER[tier ? tier.tier : 4] || YOUTH_REVEAL_SCHEDULE_BY_TIER[4])[0][1];
-      if (gameWidth >= defaultWidth) return `${low}-${high}`;
-
-      // Clamping at the edges can shift the reported low/high off-center
-      // from the real potential — the midpoint is still the best estimate
-      // of it we have without exporting the raw (intentionally hidden)
-      // potential field itself.
-      const potential = Math.round((low + high) / 2);
-      const highOffset = Math.round(defaultWidth * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
-      const lowOffset = defaultWidth - highOffset;
-      return `${Math.max(1, potential - lowOffset)}-${Math.min(99, potential + highOffset)}`;
+      if (gameWidth < defaultWidth) {
+        // Clamping at the edges can shift the reported low/high off-center
+        // from the real potential — the midpoint is still the best
+        // estimate of it we have without exporting the raw (intentionally
+        // hidden) potential field itself.
+        const potential = Math.round((low + high) / 2);
+        const highOffset = Math.round(defaultWidth * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
+        low = Math.max(1, potential - (defaultWidth - highOffset));
+        high = Math.min(99, potential + highOffset);
+      }
+      [low, high] = shiftRevealRangeAboveOverall(low, high, academyPlayer.overall);
+      return `${low}-${high}`;
     }
 
     let currentYouthModeEnabled = false;
