@@ -158,6 +158,22 @@
       transition: background 0.3s ease, border-color 0.3s ease;
     }
     .home-header-strip h2 { font-size: 22px; font-weight: 800; letter-spacing: 0.3px; margin: 0; transition: color 0.3s ease; }
+    /* Solid dark pill (not tinted to match the banner) so this stays
+       readable no matter what team-color gradient the banner behind it
+       ends up being. */
+    .home-ingame-date {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #fff;
+      font-size: 14px;
+      font-weight: 700;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    }
     .home-form-strip { display: flex; gap: 6px; }
     .home-form-chip {
       display: inline-flex;
@@ -169,6 +185,7 @@
       border: 1px solid;
       font-size: 12px;
       font-weight: 700;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
     }
 
     .home-dashboard-grid { display: grid; gap: 20px; margin-bottom: 20px; }
@@ -439,7 +456,6 @@
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <button class="refresh-btn" id="youth-mode-btn" onclick="onYouthModeButtonClick()">🎓 Youth Mode: Off</button>
-      <span class="badge" id="current-ingame-date">N/A</span>
       <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); cursor: pointer;" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
         <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" /> Auto-refresh
       </label>
@@ -463,7 +479,10 @@
   <div id="home-tab" class="tab-content active">
     <div class="home-header-strip">
       <div>
-        <h2 id="home-team-title">My Club</h2>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <h2 id="home-team-title">My Club</h2>
+          <span class="home-ingame-date" id="home-ingame-date">📅 N/A</span>
+        </div>
         <div id="home-snapshot-note" style="font-size: 12px; opacity: 0.85; display: none;"></div>
       </div>
       <div class="home-form-strip" id="home-form-strip"></div>
@@ -887,7 +906,8 @@
             }))
         : null;
 
-      document.getElementById('current-ingame-date').textContent = formatDateMMDDYYYY(activeDate);
+      const ingameDateEl = document.getElementById('home-ingame-date');
+      if (ingameDateEl) ingameDateEl.textContent = `📅 ${formatDateMMDDYYYY(activeDate)}`;
       
       updateCalendarSummaryStats();
 
@@ -2929,10 +2949,13 @@
         const awayScore = parseInt(parts[1].trim(), 10);
         const userScore = m.is_home ? homeScore : awayScore;
         const oppScore = m.is_home ? awayScore : homeScore;
-        let letter = 'D', color = 'var(--text-dim)';
-        if (userScore > oppScore) { letter = 'W'; color = '#3fb950'; }
-        else if (userScore < oppScore) { letter = 'L'; color = '#f85149'; }
-        return `<span class="home-form-chip" style="background:${color}22; border-color:${color}55; color:${color};">${letter}</span>`;
+        // Solid fill + white text (not the old translucent same-hue tint)
+        // so this reads clearly against ANY team-color header background,
+        // not just the app's default dark one.
+        let letter = 'D', bg = '#57606a';
+        if (userScore > oppScore) { letter = 'W'; bg = '#2ea043'; }
+        else if (userScore < oppScore) { letter = 'L'; bg = '#da3633'; }
+        return `<span class="home-form-chip" style="background:${bg}; border-color:rgba(255,255,255,0.35); color:#fff;">${letter}</span>`;
       }).join('');
     }
 
@@ -2966,10 +2989,10 @@
         return `<span style="color: var(--text-dim); font-size: 11px;">No results yet</span>`;
       }
       return formArr.map(letter => {
-        let color = 'var(--text-dim)';
-        if (letter === 'W') color = '#3fb950';
-        else if (letter === 'L') color = '#f85149';
-        return `<span class="home-form-chip" style="width:20px; height:20px; font-size:10px; background:${color}22; border-color:${color}55; color:${color};">${letter}</span>`;
+        let bg = '#57606a';
+        if (letter === 'W') bg = '#2ea043';
+        else if (letter === 'L') bg = '#da3633';
+        return `<span class="home-form-chip" style="width:20px; height:20px; font-size:10px; background:${bg}; border-color:rgba(255,255,255,0.35); color:#fff;">${letter}</span>`;
       }).join('');
     }
 
