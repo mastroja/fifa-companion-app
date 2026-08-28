@@ -716,6 +716,25 @@ function getSeasonOverview(saveId, seasonId) {
     teamRecord = { played, wins: wins || 0, draws: draws || 0, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0 };
   }
 
+  // Same shape as teamRecord above but filtered to just the primary
+  // league's fixtures (matches.competition), plus points — for showing
+  // "how did we do IN THE LEAGUE specifically" next to the position,
+  // separate from the all-competitions record.
+  let leagueRecord = null;
+  if (leagueResult) {
+    const escapedCompName = leagueResult.comp_name.replace(/'/g, "''");
+    const leagueRecordRes = db.exec(`
+      SELECT COUNT(*), SUM(CASE WHEN result='W' THEN 1 ELSE 0 END), SUM(CASE WHEN result='D' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN result='L' THEN 1 ELSE 0 END), SUM(user_score), SUM(opponent_score)
+      FROM matches WHERE season_id = ${seasonId} AND competition = '${escapedCompName}';
+    `);
+    if (leagueRecordRes.length > 0 && leagueRecordRes[0].values.length > 0 && leagueRecordRes[0].values[0][0] > 0) {
+      const [played, wins, draws, losses, gf, ga] = leagueRecordRes[0].values[0];
+      const w = wins || 0, dr = draws || 0;
+      leagueRecord = { played, wins: w, draws: dr, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0, points: (w * 3) + dr };
+    }
+  }
+
   // Biggest win/loss by goal margin — ties keep whichever match was
   // found first (no meaningful secondary sort for a tie here).
   let biggestWin = null, biggestLoss = null;
@@ -731,8 +750,6 @@ function getSeasonOverview(saveId, seasonId) {
       if (margin < 0 && (!biggestLoss || margin < biggestLoss.margin)) biggestLoss = entry;
     });
   }
-
-  const managerPpgRow = getManagerSeasonPPG(saveId).find(r => r.season === yearLabel);
 
   const allCompsRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
   const otherCompetitions = [];
@@ -761,9 +778,9 @@ function getSeasonOverview(saveId, seasonId) {
     league_history: leagueHistory,
     standings: getSeasonStandings(seasonId),
     team_record: teamRecord,
+    league_record: leagueRecord,
     biggest_win: biggestWin,
     biggest_loss: biggestLoss,
-    manager_ppg: managerPpgRow ? managerPpgRow.ppg : null,
     other_competitions: otherCompetitions,
     won_competitions: wonCompetitions,
     squad_leaders: {
