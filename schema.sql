@@ -23,6 +23,17 @@ CREATE TABLE IF NOT EXISTS seasons (
     save_id INTEGER NOT NULL,
     year_label TEXT NOT NULL,       -- e.g. "2026/2027"
     is_current INTEGER DEFAULT 0,   -- 1 = the season currently being written to
+    -- The primary domestic league's real name for this season (e.g.
+    -- "Premier League", "Championship") — a save can change league across
+    -- seasons via promotion/relegation, so this can't just live on saves.
+    -- Set from export_all.lua's LEAGUE STATS EXPORT (see persistLeagueStats
+    -- in main.js), updated on every sync while this is the current season.
+    league_name TEXT,
+    -- 1 once the End of Season Overview splash for the season THAT
+    -- FOLLOWED this one has been shown and dismissed — tracked on the
+    -- season that just ENDED, not the new one, since the overview reviews
+    -- the ended season. See getPendingSeasonOverview in main.js.
+    overview_acknowledged INTEGER DEFAULT 0,
     FOREIGN KEY(save_id) REFERENCES saves(id),
     UNIQUE(save_id, year_label)
 );
@@ -149,6 +160,56 @@ CREATE TABLE IF NOT EXISTS youth_academy_snapshot (
     FOREIGN KEY(player_id) REFERENCES players(player_id),
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(player_id, season_id)
+);
+
+-- League-wide (not just our own squad) per-player stats, upserted every
+-- league-stats sync exactly like player_season_stats is for our own
+-- squad — this is what makes the League Stats tab's season selector
+-- possible: a past season's leaderboard is already fully captured by the
+-- time it ends, rather than needing a separate "snapshot on rollover"
+-- step that could race with the season actually changing. See
+-- persistLeagueStats in main.js and export_all.lua's LEAGUE STATS EXPORT.
+CREATE TABLE IF NOT EXISTS season_league_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    name TEXT,
+    team_name TEXT,
+    overall INTEGER,
+    position_id INTEGER,
+    dob TEXT,
+    appearances INTEGER,
+    goals INTEGER,
+    assists INTEGER,
+    clean_sheets INTEGER,
+    yellow_cards INTEGER,
+    red_cards INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, player_id)
+);
+
+-- Every team's row in the primary league table, upserted every calendar
+-- sync exactly like season_league_stats — same reasoning: a season's
+-- full table is already captured by the time it ends. Rank isn't stored
+-- (computed on read, sorted by points/GD/GF) since it shifts as more
+-- fixtures complete within the same season. See persistSeasonStandings
+-- in main.js and the calendar export's "standings" array.
+CREATE TABLE IF NOT EXISTS season_standings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    team_name TEXT,
+    played INTEGER,
+    wins INTEGER,
+    draws INTEGER,
+    losses INTEGER,
+    goals_for INTEGER,
+    goals_against INTEGER,
+    points INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, team_id)
 );
 
 CREATE TABLE IF NOT EXISTS season_competition_results (

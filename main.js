@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const chokidar = require('chokidar');
@@ -115,6 +115,22 @@ async function initDatabase() {
   // this column and just come back NULL, same ignore-already-exists pattern.
   try {
     db.run(`ALTER TABLE season_end_reviews ADD COLUMN league_average_margin INTEGER;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
+  // League Stats season selector, added after some users already had a DB
+  // on disk — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN league_name TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
+  // End of Season Overview splash, added after some users already had a
+  // DB on disk — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN overview_acknowledged INTEGER DEFAULT 0;`);
   } catch (e) {
     // column already exists, safe to ignore
   }
@@ -343,6 +359,134 @@ function persistSeasonCompetitionResults(calendarPayload) {
   saveDatabaseToDisk();
 }
 
+// Persists every team's row in the calendar export's "standings" array
+// into season_standings, upserted per (season, team) — same continuous-
+// accumulation pattern as season_league_stats, so a season's full table
+// is already captured by the time it ends. Raw payload fields are
+// gf/ga (not goals_for/goals_against) — see processIncomingCalendar in
+// index.html for the same raw shape.
+function persistSeasonStandings(seasonId, standingsArray) {
+  if (!db || !seasonId || !Array.isArray(standingsArray) || standingsArray.length === 0) return;
+
+  const stmt = db.prepare(`
+    INSERT INTO season_standings (season_id, team_id, team_name, played, wins, draws, losses, goals_for, goals_against, points, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(season_id, team_id) DO UPDATE SET
+      team_name = excluded.team_name,
+      played = excluded.played,
+      wins = excluded.wins,
+      draws = excluded.draws,
+      losses = excluded.losses,
+      goals_for = excluded.goals_for,
+      goals_against = excluded.goals_against,
+      points = excluded.points,
+      updated_at = CURRENT_TIMESTAMP;
+  `);
+  try {
+    standingsArray.forEach(t => {
+      if (t.team_id === undefined || t.team_id === null) return;
+      stmt.run([seasonId, t.team_id, t.team_name || '', t.played || 0, t.wins || 0, t.draws || 0, t.losses || 0, t.gf || 0, t.ga || 0, t.points || 0]);
+    });
+  } finally {
+    stmt.free();
+  }
+  saveDatabaseToDisk();
+}
+
+// Every team's row for a season, ranked by points/GD/GF (the standard
+// league tiebreaker order) — rank is computed here rather than stored,
+// since it shifts as more fixtures complete within the season.
+function getSeasonStandings(seasonId) {
+  if (!db || !seasonId) return [];
+  const res = db.exec(`
+    SELECT team_id, team_name, played, wins, draws, losses, goals_for, goals_against, points
+    FROM season_standings WHERE season_id = ${seasonId};
+  `);
+  if (res.length === 0) return [];
+  const rows = res[0].values.map(([team_id, team_name, played, wins, draws, losses, goals_for, goals_against, points]) =>
+    ({ team_id, team_name, played, wins, draws, losses, goals_for, goals_against, points }));
+  rows.sort((a, b) => (b.points - a.points) || ((b.goals_for - b.goals_against) - (a.goals_for - a.goals_against)) || (b.goals_for - a.goals_for));
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return rows;
+}
+
+// Persists the league-wide (not just our own squad) per-player stats
+// from a league-stats sync (see export_all.lua's LEAGUE STATS EXPORT)
+// into season_league_stats, upserted per (season, player) — same
+// continuous-accumulation pattern as player_season_stats, so a season's
+// leaderboard is already fully captured by the time it ends rather than
+// needing a separate snapshot exactly at the rollover moment (which could
+// race against — or miss — the actual season change, same staleness risk
+// noted on latestLeagueStatsPayload above). Also keeps seasons.league_name
+// current for whichever season is still being written to, since a save
+// can change league across seasons via promotion/relegation.
+function persistLeagueStats(seasonId, leagueStatsPayload) {
+  if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
+
+  if (leagueStatsPayload.league_name) {
+    db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueStatsPayload.league_name, seasonId]);
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO season_league_stats
+      (season_id, player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(season_id, player_id) DO UPDATE SET
+      name = excluded.name,
+      team_name = excluded.team_name,
+      overall = excluded.overall,
+      position_id = excluded.position_id,
+      dob = excluded.dob,
+      appearances = excluded.appearances,
+      goals = excluded.goals,
+      assists = excluded.assists,
+      clean_sheets = excluded.clean_sheets,
+      yellow_cards = excluded.yellow_cards,
+      red_cards = excluded.red_cards,
+      updated_at = CURRENT_TIMESTAMP;
+  `);
+
+  try {
+    leagueStatsPayload.players.forEach(p => {
+      if (!p.player_id) return;
+      stmt.run([
+        seasonId, p.player_id, p.name || 'Unknown', p.team_name || '', p.overall || 0,
+        p.position_id || 0, p.dob || '', p.appearances || 0, p.goals || 0, p.assists || 0,
+        p.clean_sheets || 0, p.yellow_cards || 0, p.red_cards || 0
+      ]);
+    });
+  } finally {
+    stmt.free();
+  }
+
+  saveDatabaseToDisk();
+}
+
+// The league-wide leaderboard for one specific past (or current) season,
+// for the League Stats tab's season selector — same row shape as the
+// live league-stats-updated push, so the renderer can use one rendering
+// path for both. Returns the season's league_name alongside the rows
+// since a save can change league across seasons.
+function getLeagueStatsForSeason(seasonId) {
+  if (!db || !seasonId) return { league_name: null, players: [] };
+
+  const seasonRes = db.exec(`SELECT league_name FROM seasons WHERE id = ${seasonId};`);
+  const leagueName = (seasonRes.length > 0 && seasonRes[0].values.length > 0) ? seasonRes[0].values[0][0] : null;
+
+  const res = db.exec(`
+    SELECT player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards
+    FROM season_league_stats
+    WHERE season_id = ${seasonId};
+  `);
+  const rows = res.length > 0 ? res[0].values : [];
+  const players = rows.map(r => ({
+    player_id: r[0], name: r[1], team_name: r[2], overall: r[3], position_id: r[4], dob: r[5],
+    appearances: r[6], goals: r[7], assists: r[8], clean_sheets: r[9], yellow_cards: r[10], red_cards: r[11]
+  }));
+
+  return { league_name: leagueName, players };
+}
+
 // Per-season competition results (see persistSeasonCompetitionResults),
 // for Team Record's "place finished" breakdown. seasonId is a specific
 // season row (from getSeasonsList/getTeamRecordSeasons), not a save id
@@ -354,6 +498,361 @@ function getSeasonCompetitionResults(seasonId) {
   `);
   if (res.length === 0) return [];
   return res[0].values.map(row => ({ comp_name: row[0], standing: row[1] }));
+}
+
+// ------------------------------------------------------------------
+// End of Season Overview — the season-boundary splash screen
+// ------------------------------------------------------------------
+//
+// Everything below is computed fresh from already-persisted tables
+// (season_competition_results, player_season_stats, season_league_stats,
+// matches) rather than snapshotted once at rollover — a past season's
+// overview can always be regenerated on demand (see getSeasonOverview
+// and the Preview button in index.html), and there's no risk of racing
+// the exact rollover moment the way a point-in-time snapshot would.
+
+// Whichever competition recorded for this season matches the English
+// pyramid — same lookup used for Youth Squad Career Mode.
+function getSeasonPrimaryLeagueResult(seasonId) {
+  const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
+  const compRows = compRes.length > 0 ? compRes[0].values : [];
+  for (const [comp_name, standing] of compRows) {
+    const tier = findPyramidTierServer(comp_name);
+    if (tier) return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+  }
+  return null;
+}
+
+function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
+  const signed = getSignedPlayers(saveId).filter(p => p.signed_season === yearLabel);
+  const sold = getPastPlayers(saveId).filter(p => p.departed_season === yearLabel);
+
+  const loanRes = db.exec(`
+    SELECT s.player_id, p.name, p.position_id, s.overall, s.loan_club_name, s.loan_date_end
+    FROM player_season_stats s
+    JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId} AND s.on_loan = 1;
+  `);
+  const loaned = loanRes.length > 0 ? loanRes[0].values.map(
+    ([player_id, name, position_id, overall, loan_club_name, loan_date_end]) =>
+      ({ player_id, name, position_id, overall, loan_club_name, loan_date_end })
+  ) : [];
+
+  return { signed, sold, loaned };
+}
+
+// Every player_id currently under contract to the save's club — touched
+// by the latest squad sync, or out on loan (still ours). Shared by
+// getSeasonPlayerProgression to keep a season review's highlights to
+// players still actually with the club, not ones who've since departed.
+function getCurrentActivePlayerIds(saveId) {
+  const currentSeasonForSave = getCurrentSeasonForSave(saveId);
+  if (!currentSeasonForSave) return new Set();
+  const res = db.exec(`SELECT player_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};`);
+  const rows = res.length > 0 ? res[0].values : [];
+  let maxUpdatedAt = null;
+  rows.forEach(([, , updated_at]) => { if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at; });
+  const ids = new Set();
+  rows.forEach(([player_id, on_loan, updated_at]) => {
+    if (on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt)) ids.add(player_id);
+  });
+  return ids;
+}
+
+// Highest/lowest rated, biggest growth/regression, highest/lowest
+// potential — growth is this season's overall minus the immediately
+// preceding season's, null (excluded from the growth lists) for anyone
+// with no prior-season row to compare against (their first season).
+// Scoped to players still currently on the books — a departed player's
+// growth isn't relevant to "at a glance" for a squad you no longer have.
+function getSeasonPlayerProgression(saveId, seasonId) {
+  const activeIds = getCurrentActivePlayerIds(saveId);
+  const curRes = db.exec(`
+    SELECT s.player_id, p.name, s.overall, s.potential
+    FROM player_season_stats s JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId};
+  `);
+  const curRows = curRes.length > 0 ? curRes[0].values.filter(([player_id]) => activeIds.has(player_id)) : [];
+  if (curRows.length === 0) return null;
+
+  // Skips past any untracked season (see EARLIEST_TRACKED_SEASON_YEAR) —
+  // if the season right before this one predates tracking, there's no
+  // valid "previous" to compare against, same as if this were the save's
+  // first season ever.
+  const prevSeasonRes = db.exec(`SELECT id, year_label FROM seasons WHERE save_id = ${saveId} AND id < ${seasonId} ORDER BY id DESC;`);
+  const prevSeasonRow = prevSeasonRes.length > 0 ? prevSeasonRes[0].values[0] : null;
+  const prevSeasonId = (prevSeasonRow && isSeasonYearLabelTracked(prevSeasonRow[1])) ? prevSeasonRow[0] : null;
+
+  const prevOverallByPlayer = new Map();
+  if (prevSeasonId) {
+    const prevRes = db.exec(`SELECT player_id, overall FROM player_season_stats WHERE season_id = ${prevSeasonId};`);
+    if (prevRes.length > 0) prevRes[0].values.forEach(([pid, ovr]) => prevOverallByPlayer.set(pid, ovr));
+  }
+
+  const players = curRows.map(([player_id, name, overall, potential]) => {
+    const prevOverall = prevOverallByPlayer.get(player_id);
+    const growth = (prevOverall !== undefined) ? overall - prevOverall : null;
+    return { player_id, name, overall, potential, growth };
+  });
+
+  const withGrowth = players.filter(p => p.growth !== null);
+  const byDesc = field => [...players].sort((a, b) => b[field] - a[field]).slice(0, 5);
+  const byAsc = field => [...players].sort((a, b) => a[field] - b[field]).slice(0, 5);
+
+  return {
+    highest_rated: byDesc('overall'),
+    lowest_rated: byAsc('overall'),
+    highest_potential: byDesc('potential'),
+    lowest_potential: byAsc('potential'),
+    biggest_growth: [...withGrowth].sort((a, b) => b.growth - a.growth).slice(0, 5),
+    biggest_regression: [...withGrowth].sort((a, b) => a.growth - b.growth).slice(0, 5)
+  };
+}
+
+// Each currently-active squad player's overall across every season with
+// the club up to and including this one — feeds the progression page's
+// line chart. Scoped to players still actually on the books now (not
+// everyone who's ever passed through, and not anyone since departed).
+function getSquadProgressionHistory(saveId, seasonId) {
+  const activeIds = Array.from(getCurrentActivePlayerIds(saveId));
+  if (activeIds.length === 0) return [];
+
+  const res = db.exec(`
+    SELECT s.player_id, p.name, se.year_label, s.overall
+    FROM player_season_stats s
+    JOIN players p ON p.player_id = s.player_id
+    JOIN seasons se ON se.id = s.season_id
+    WHERE se.save_id = ${saveId} AND s.player_id IN (${activeIds.join(',')}) AND se.id <= ${seasonId}
+    ORDER BY se.id ASC;
+  `);
+  const byPlayer = new Map();
+  if (res.length > 0) {
+    res[0].values.forEach(([player_id, name, year_label, overall]) => {
+      if (!isSeasonYearLabelTracked(year_label)) return; // see EARLIEST_TRACKED_SEASON_YEAR
+      if (!byPlayer.has(player_id)) byPlayer.set(player_id, { player_id, name, points: [] });
+      byPlayer.get(player_id).points.push({ year_label, overall });
+    });
+  }
+  return Array.from(byPlayer.values());
+}
+
+function seasonTopN(seasonId, field, limit) {
+  const res = db.exec(`
+    SELECT p.player_id, p.name, s.overall, s.${field}
+    FROM player_season_stats s JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId} AND s.${field} > 0
+    ORDER BY s.${field} DESC LIMIT ${limit};
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([player_id, name, overall, value]) => ({ player_id, name, overall, value }));
+}
+
+function seasonLeagueTopN(seasonId, field, limit) {
+  const res = db.exec(`
+    SELECT player_id, name, team_name, ${field}
+    FROM season_league_stats
+    WHERE season_id = ${seasonId} AND ${field} > 0
+    ORDER BY ${field} DESC LIMIT ${limit};
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([player_id, name, team_name, value]) => ({ player_id, name, team_name, value }));
+}
+
+// The full aggregate payload for one season's End of Season Overview —
+// everything every page of the splash needs, in one round trip.
+function getSeasonOverview(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return null;
+
+  const seasonRes = db.exec(`SELECT year_label FROM seasons WHERE id = ${seasonId} AND save_id = ${saveId};`);
+  if (seasonRes.length === 0 || seasonRes[0].values.length === 0) return null;
+  const yearLabel = seasonRes[0].values[0][0];
+
+  const saveRes = db.exec(`SELECT club_name FROM saves WHERE id = ${saveId};`);
+  const clubName = (saveRes.length > 0 && saveRes[0].values.length > 0 && saveRes[0].values[0][0]) ? saveRes[0].values[0][0] : 'My Club';
+
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  const leaguePosition = leagueResult ? parseStandingPositionServer(leagueResult.standing) : null;
+  const wonLeague = !!leagueResult && leagueResult.standing === 'Winner';
+
+  // Promotion/relegation compares this season's tier against whichever
+  // season directly followed it — only known once THAT season has
+  // recorded at least one recognized-league result of its own, which may
+  // not be true yet immediately after rollover (hence "unknown" is a
+  // valid, honest outcome here, not just win/promoted/relegated/stayed).
+  let relegated = false, promoted = false;
+  if (leagueResult) {
+    const nextSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id > ${seasonId} ORDER BY id ASC LIMIT 1;`);
+    if (nextSeasonRes.length > 0 && nextSeasonRes[0].values.length > 0) {
+      const nextResult = getSeasonPrimaryLeagueResult(nextSeasonRes[0].values[0][0]);
+      if (nextResult) {
+        relegated = nextResult.tier > leagueResult.tier;
+        promoted = nextResult.tier < leagueResult.tier;
+      }
+    }
+  }
+
+  const leagueHistoryRes = db.exec(`
+    SELECT r.comp_name, r.standing, se.year_label, se.id
+    FROM season_competition_results r JOIN seasons se ON se.id = r.season_id
+    WHERE se.save_id = ${saveId} ORDER BY se.id ASC;
+  `);
+  const leagueHistory = [];
+  if (leagueHistoryRes.length > 0) {
+    leagueHistoryRes[0].values.forEach(([comp_name, standing, year_label, sid]) => {
+      if (!isSeasonYearLabelTracked(year_label)) return; // see EARLIEST_TRACKED_SEASON_YEAR
+      const tier = findPyramidTierServer(comp_name);
+      if (tier) leagueHistory.push({ season_id: sid, year_label, tier: tier.tier, tier_name: tier.name, position: parseStandingPositionServer(standing) });
+    });
+  }
+
+  const recordRes = db.exec(`
+    SELECT COUNT(*), SUM(CASE WHEN result='W' THEN 1 ELSE 0 END), SUM(CASE WHEN result='D' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN result='L' THEN 1 ELSE 0 END), SUM(user_score), SUM(opponent_score)
+    FROM matches WHERE season_id = ${seasonId};
+  `);
+  let teamRecord = null;
+  if (recordRes.length > 0 && recordRes[0].values.length > 0 && recordRes[0].values[0][0] > 0) {
+    const [played, wins, draws, losses, gf, ga] = recordRes[0].values[0];
+    teamRecord = { played, wins: wins || 0, draws: draws || 0, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0 };
+  }
+
+  // Same shape as teamRecord above but filtered to just the primary
+  // league's fixtures (matches.competition), plus points — for showing
+  // "how did we do IN THE LEAGUE specifically" next to the position,
+  // separate from the all-competitions record.
+  let leagueRecord = null;
+  if (leagueResult) {
+    const escapedCompName = leagueResult.comp_name.replace(/'/g, "''");
+    const leagueRecordRes = db.exec(`
+      SELECT COUNT(*), SUM(CASE WHEN result='W' THEN 1 ELSE 0 END), SUM(CASE WHEN result='D' THEN 1 ELSE 0 END),
+             SUM(CASE WHEN result='L' THEN 1 ELSE 0 END), SUM(user_score), SUM(opponent_score)
+      FROM matches WHERE season_id = ${seasonId} AND competition = '${escapedCompName}';
+    `);
+    if (leagueRecordRes.length > 0 && leagueRecordRes[0].values.length > 0 && leagueRecordRes[0].values[0][0] > 0) {
+      const [played, wins, draws, losses, gf, ga] = leagueRecordRes[0].values[0];
+      const w = wins || 0, dr = draws || 0;
+      leagueRecord = { played, wins: w, draws: dr, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0, points: (w * 3) + dr };
+    }
+  }
+
+  // Biggest win/loss by goal margin — ties keep whichever match was
+  // found first (no meaningful secondary sort for a tie here).
+  let biggestWin = null, biggestLoss = null;
+  const marginRes = db.exec(`
+    SELECT opponent, competition, match_date, user_score, opponent_score
+    FROM matches WHERE season_id = ${seasonId};
+  `);
+  if (marginRes.length > 0) {
+    marginRes[0].values.forEach(([opponent, competition, match_date, user_score, opponent_score]) => {
+      const margin = user_score - opponent_score;
+      const entry = { opponent, competition, match_date, user_score, opponent_score, margin };
+      if (margin > 0 && (!biggestWin || margin > biggestWin.margin)) biggestWin = entry;
+      if (margin < 0 && (!biggestLoss || margin < biggestLoss.margin)) biggestLoss = entry;
+    });
+  }
+
+  const allCompsRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
+  const otherCompetitions = [];
+  const wonCompetitions = wonLeague ? [leagueResult.comp_name] : [];
+  if (allCompsRes.length > 0) {
+    allCompsRes[0].values.forEach(([comp_name, standing]) => {
+      if (leagueResult && comp_name === leagueResult.comp_name) return; // shown separately
+      otherCompetitions.push({ comp_name, standing });
+      if (standing === 'Winner') wonCompetitions.push(comp_name);
+    });
+  }
+
+  return {
+    save_id: saveId,
+    season_id: seasonId,
+    year_label: yearLabel,
+    club_name: clubName,
+    league: leagueResult ? {
+      comp_name: leagueResult.comp_name,
+      standing_text: leagueResult.standing,
+      position: leaguePosition,
+      won: wonLeague,
+      relegated,
+      promoted
+    } : null,
+    league_history: leagueHistory,
+    standings: getSeasonStandings(seasonId),
+    team_record: teamRecord,
+    league_record: leagueRecord,
+    biggest_win: biggestWin,
+    biggest_loss: biggestLoss,
+    other_competitions: otherCompetitions,
+    won_competitions: wonCompetitions,
+    squad_leaders: {
+      goals: seasonTopN(seasonId, 'goals', 5),
+      assists: seasonTopN(seasonId, 'assists', 5),
+      appearances: seasonTopN(seasonId, 'appearances', 5),
+      clean_sheets: seasonTopN(seasonId, 'clean_sheets', 5),
+      yellow_cards: seasonTopN(seasonId, 'yellow_cards', 5),
+      red_cards: seasonTopN(seasonId, 'red_cards', 5)
+    },
+    league_leaders: {
+      goals: seasonLeagueTopN(seasonId, 'goals', 5),
+      assists: seasonLeagueTopN(seasonId, 'assists', 5),
+      appearances: seasonLeagueTopN(seasonId, 'appearances', 5),
+      clean_sheets: seasonLeagueTopN(seasonId, 'clean_sheets', 5),
+      yellow_cards: seasonLeagueTopN(seasonId, 'yellow_cards', 5),
+      red_cards: seasonLeagueTopN(seasonId, 'red_cards', 5)
+    },
+    transfers: getSeasonTransfersForSeason(saveId, seasonId, yearLabel),
+    progression: getSeasonPlayerProgression(saveId, seasonId),
+    progression_history: getSquadProgressionHistory(saveId, seasonId)
+  };
+}
+
+// The most recent ended season (is_current = 0) that hasn't had its
+// overview acknowledged yet — null once every ended season has been
+// seen, or if this save has never had a season actually end.
+// The user's save has a stray/incomplete 2024/2025 season on record from
+// before season-scoped tracking (League Stats history, End of Season
+// Overview) was fully built out — rather than deleting that history
+// outright, these newer features just don't consider any season before
+// this one. Not a deletion: player_season_stats/matches/etc. for that
+// season are untouched, only these two entry points skip past it.
+const EARLIEST_TRACKED_SEASON_YEAR = 2025;
+
+function isSeasonYearLabelTracked(yearLabel) {
+  const year = parseInt(String(yearLabel || '').split('/')[0], 10);
+  return !isNaN(year) && year >= EARLIEST_TRACKED_SEASON_YEAR;
+}
+
+function getPendingSeasonOverview(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const res = db.exec(`
+    SELECT id, year_label FROM seasons
+    WHERE save_id = ${saveId} AND is_current = 0 AND overview_acknowledged = 0
+    ORDER BY id DESC;
+  `);
+  if (res.length === 0) return null;
+  const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+  return row ? getSeasonOverview(saveId, row[0]) : null;
+}
+
+function acknowledgeSeasonOverview(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return { success: false };
+  db.run('UPDATE seasons SET overview_acknowledged = 1 WHERE id = ? AND save_id = ?;', [seasonId, saveId]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// For the "Preview" test button — the most recent ended season if one
+// exists, otherwise the current in-progress season, so there's always
+// something to preview even before a save has ever crossed a season
+// boundary. Doesn't check/set overview_acknowledged at all.
+function getSeasonOverviewPreview(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const endedRes = db.exec(`SELECT id, year_label FROM seasons WHERE save_id = ${saveId} AND is_current = 0 ORDER BY id DESC;`);
+  if (endedRes.length > 0) {
+    const row = endedRes[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+    if (row) return getSeasonOverview(saveId, row[0]);
+  }
+  const currentSeasonId = getCurrentSeasonForSave(saveId);
+  return currentSeasonId ? getSeasonOverview(saveId, currentSeasonId) : null;
 }
 
 // Current youth academy roster for a save — see importYouthAcademy.
@@ -1221,9 +1720,9 @@ function getSquadFromDB(seasonId = currentSeasonId) {
 // Season list for the Squad Stats selector (current save only).
 function getSeasonsList(saveId = activeSaveId) {
   if (!db || !saveId) return [];
-  const res = db.exec(`SELECT id, year_label, is_current FROM seasons WHERE save_id = ${saveId} ORDER BY year_label ASC;`);
+  const res = db.exec(`SELECT id, year_label, is_current, league_name FROM seasons WHERE save_id = ${saveId} ORDER BY year_label ASC;`);
   if (res.length === 0) return [];
-  return res[0].values.map(row => ({ id: row[0], year_label: row[1], is_current: row[2] === 1 }));
+  return res[0].values.map(row => ({ id: row[0], year_label: row[1], is_current: row[2] === 1, league_name: row[3] }));
 }
 
 // Resolves "the current season" for an arbitrary save — the season-list
@@ -1335,23 +1834,37 @@ function getPastPlayers(saveId = activeSaveId) {
   if (!currentSeasonForSave) return [];
 
   const currentRes = db.exec(`
-    SELECT player_id, club_id FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+    SELECT player_id, club_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
   `);
+  const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
+
+  // A departed player's row is never deleted (history is kept forever),
+  // and nothing overwrites its club_id once the squad export stops
+  // including them mid-season — so club_id alone can't tell "still ours"
+  // from "left ours" for anyone whose old club happens to still be the
+  // user's team id. The real signal is whether the row was actually
+  // touched by the most recent squad sync, same __clubStatus logic used
+  // client-side in index.html (transformPlayersForTable).
+  let maxUpdatedAt = null;
+  currentRows.forEach(([, , , updated_at]) => {
+    if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
+  });
+
   const currentClubById = new Map();
-  if (currentRes.length > 0) {
-    currentRes[0].values.forEach(([player_id, club_id]) => currentClubById.set(player_id, club_id));
-  }
+  const stillOnRosterIds = new Set();
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+    currentClubById.set(player_id, club_id);
+    // Out on loan is still "ours" (contracted here, just playing
+    // elsewhere) — only a row that's gone stale relative to the latest
+    // sync means the player actually left the club.
+    if (on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt)) stillOnRosterIds.add(player_id);
+  });
 
   // The user's own team id, same trick as getInferredTransfers: whichever
-  // club_id shows up on a non-loan row.
-  const bioRes = db.exec(`
-    SELECT player_id, club_id, on_loan FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
-  `);
+  // club_id shows up on a non-loan row that's still actually on the roster.
   let userTeamId = null;
-  if (bioRes.length > 0) {
-    for (const [, club_id, on_loan] of bioRes[0].values) {
-      if (!on_loan) { userTeamId = club_id; break; }
-    }
+  for (const [player_id, club_id, on_loan] of currentRows) {
+    if (!on_loan && stillOnRosterIds.has(player_id)) { userTeamId = club_id; break; }
   }
   if (userTeamId === null) return [];
 
@@ -1371,18 +1884,31 @@ function getPastPlayers(saveId = activeSaveId) {
   `);
   if (pastRes.length === 0) return [];
 
+  // ASC order means the first time a player_id is seen here is their
+  // earliest season with the club — kept alongside the (repeatedly
+  // overwritten) most recent row so years-with-club can be computed as
+  // a real span instead of just a single "departed" point in time.
   const lastKnown = new Map();
+  const firstYearLabelByPlayer = new Map();
   pastRes[0].values.forEach(row => {
     const [player_id, name, position_id, dob, overall, potential, wage, club_id, year_label, season_id] = row;
+    if (!firstYearLabelByPlayer.has(player_id)) firstYearLabelByPlayer.set(player_id, year_label);
     lastKnown.set(player_id, { player_id, name, position_id, dob, overall, potential, wage, year_label, season_id });
   });
+
+  // year_label is "2026/2027" — the leading year is enough to measure a
+  // span in whole seasons; +1 makes a single season played count as 1
+  // year, not 0.
+  function seasonStartYear(yearLabel) {
+    const year = parseInt(String(yearLabel || '').split('/')[0], 10);
+    return isNaN(year) ? null : year;
+  }
 
   const watchlistStatus = readWatchlistStatus();
 
   const results = [];
   lastKnown.forEach((info, playerId) => {
-    const stillOursNow = currentClubById.get(playerId) === userTeamId;
-    if (stillOursNow) return; // still on the current roster, not a "past" player
+    if (stillOnRosterIds.has(playerId)) return; // still on the roster (or out on loan), not a "past" player
 
     const currentClubId = currentClubById.get(playerId);
     let currentClub = 'Unknown';
@@ -1398,6 +1924,11 @@ function getPastPlayers(saveId = activeSaveId) {
     const live = watchlistStatus.get(playerId);
     if (live && live.club_name) currentClub = live.club_name;
 
+    const joinedSeason = firstYearLabelByPlayer.get(playerId) || info.year_label;
+    const joinedYear = seasonStartYear(joinedSeason);
+    const departedYear = seasonStartYear(info.year_label);
+    const yearsActive = (joinedYear !== null && departedYear !== null) ? (departedYear - joinedYear + 1) : null;
+
     results.push({
       player_id: info.player_id,
       name: info.name,
@@ -1407,7 +1938,9 @@ function getPastPlayers(saveId = activeSaveId) {
       potential: live ? live.potential : info.potential,
       overall_is_live: !!live,
       wage_at_departure: info.wage,
+      joined_season: joinedSeason,
       departed_season: info.year_label,
+      years_active: yearsActive,
       current_club: currentClub
     });
   });
@@ -1419,6 +1952,119 @@ function getPastPlayers(saveId = activeSaveId) {
   if (saveId === activeSaveId) {
     writeWatchlistFile(results.map(r => r.player_id));
   }
+
+  return results;
+}
+
+// Signed players: everyone currently under contract to the club (on the
+// active roster or out on loan — a loanee is still "signed" here, the
+// Loaned tab covers where they currently are) with where they came from.
+// "Academy" if they were ever tracked in this save's youth academy,
+// otherwise the most recent club season_league_stats shows them at
+// BEFORE they first appeared on our books (a rival team's rival, if
+// they were playing in this same league) — 'Unknown Club' when neither
+// applies, same honesty-about-missing-data philosophy as the rest of
+// this app (player_season_stats only ever records OUR OWN roster, so
+// there's no direct "previous club" field to read for an outside signing).
+function getSignedPlayers(saveId = activeSaveId) {
+  if (!db || !saveId) return [];
+  const currentSeasonForSave = getCurrentSeasonForSave(saveId);
+  if (!currentSeasonForSave) return [];
+
+  const currentRes = db.exec(`
+    SELECT player_id, club_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+  `);
+  const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
+
+  let maxUpdatedAt = null;
+  currentRows.forEach(([, , , updated_at]) => {
+    if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
+  });
+
+  // Signed = currently under contract: touched by the latest sync
+  // (on the pitch for us) or out on loan (still ours, just away).
+  const activeIds = [];
+  let userTeamId = null;
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+    const isActive = on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt);
+    if (isActive) {
+      activeIds.push(player_id);
+      if (!on_loan && userTeamId === null) userTeamId = club_id;
+    }
+  });
+  if (userTeamId === null || activeIds.length === 0) return [];
+
+  const ourClubNameRes = db.exec(`SELECT club_name FROM player_season_stats WHERE club_id = ${userTeamId} AND club_name IS NOT NULL LIMIT 1;`);
+  const ourClubName = (ourClubNameRes.length > 0 && ourClubNameRes[0].values.length > 0) ? ourClubNameRes[0].values[0][0] : null;
+
+  const everInAcademy = new Set();
+  const academyRes = db.exec(`
+    SELECT DISTINCT y.player_id FROM youth_academy_snapshot y
+    JOIN seasons se ON se.id = y.season_id
+    WHERE se.save_id = ${saveId};
+  `);
+  if (academyRes.length > 0) academyRes[0].values.forEach(([pid]) => everInAcademy.add(pid));
+
+  // Earliest season_id each active player_id has ever had a row for on
+  // our books this save — that's "when" they signed. Computed in JS from
+  // a flat, ASC-ordered scan rather than a nested SQL query.
+  const allOursRes = db.exec(`
+    SELECT s.player_id, s.season_id, se.year_label
+    FROM player_season_stats s
+    JOIN seasons se ON se.id = s.season_id
+    WHERE se.save_id = ${saveId}
+    ORDER BY s.season_id ASC;
+  `);
+  const earliestSeasonByPlayer = new Map();
+  if (allOursRes.length > 0) {
+    allOursRes[0].values.forEach(([player_id, season_id, year_label]) => {
+      if (!earliestSeasonByPlayer.has(player_id)) {
+        earliestSeasonByPlayer.set(player_id, { season_id, year_label });
+      }
+    });
+  }
+
+  const bioRes = db.exec(`SELECT player_id, name, position_id, dob FROM players;`);
+  const bioById = new Map();
+  if (bioRes.length > 0) bioRes[0].values.forEach(([player_id, name, position_id, dob]) => bioById.set(player_id, { name, position_id, dob }));
+
+  const results = [];
+  activeIds.forEach(playerId => {
+    const earliest = earliestSeasonByPlayer.get(playerId);
+    const isAcademy = everInAcademy.has(playerId);
+
+    let fromTeam = 'Unknown Club';
+    if (isAcademy) {
+      fromTeam = 'Academy';
+    } else if (earliest) {
+      // A rival team's row for this same player_id from a season BEFORE
+      // they first appeared on our own books — the closest thing to a
+      // real "signed from" club this app can honestly know.
+      const priorRes = db.exec(`
+        SELECT team_name FROM season_league_stats
+        WHERE player_id = ${playerId} AND season_id < ${earliest.season_id}
+        ORDER BY season_id DESC LIMIT 1;
+      `);
+      if (priorRes.length > 0 && priorRes[0].values.length > 0) {
+        const priorTeamName = priorRes[0].values[0][0];
+        // Guards against a same-club false positive (e.g. a promoted
+        // academy player whose earliest player_season_stats row lags one
+        // sync behind their earliest season_league_stats row).
+        if (priorTeamName && priorTeamName !== ourClubName) fromTeam = priorTeamName;
+      }
+    }
+
+    const bio = bioById.get(playerId) || {};
+    results.push({
+      player_id: playerId,
+      name: bio.name || 'Unknown',
+      position_id: bio.position_id || 0,
+      dob: bio.dob || '',
+      from_team: fromTeam,
+      is_academy: isAcademy,
+      signed_season: earliest ? earliest.year_label : null
+    });
+  });
 
   return results;
 }
@@ -1689,6 +2335,30 @@ function triggerLiveEditorRefresh() {
   });
 }
 
+// Renders the CURRENT page's print-media styles (see #season-overview-print
+// and its @media print rules in index.html — the renderer fills that
+// element with the summary content right before calling this) straight to
+// a PDF file the user picks, via Electron's own PDF renderer — no external
+// PDF library, and no OS print dialog detour either.
+async function exportSeasonOverviewPdf(suggestedFileName) {
+  if (!mainWindow) return { success: false };
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Season Overview PDF',
+    defaultPath: suggestedFileName || 'season-overview.pdf',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  });
+  if (canceled || !filePath) return { success: false, canceled: true };
+
+  try {
+    const pdfBuffer = await mainWindow.webContents.printToPDF({ printBackground: true, landscape: false });
+    fs.writeFileSync(filePath, pdfBuffer);
+    return { success: true, filePath };
+  } catch (err) {
+    console.error('[PDF Export] Failed to generate/save PDF:', err.message);
+    return { success: false };
+  }
+}
+
 // ------------------------------------------------------------------
 // Electron boilerplate
 // ------------------------------------------------------------------
@@ -1730,6 +2400,12 @@ ipcMain.handle('enable-youth-mode', (_event, saveId) => enableYouthMode(saveId))
 ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeasonReview(saveId));
 ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
+ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
+ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
+ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
+ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
+ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
+ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
 
 app.whenReady().then(async () => {
   await initDatabase();
@@ -1744,6 +2420,7 @@ app.whenReady().then(async () => {
         refreshLeagueTeamsFromCalendar(startupCalendarPayload);
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
+        persistSeasonStandings(currentSeasonId, startupCalendarPayload.standings);
         saveSnapshotForActiveSave(rawCalendar);
         mainWindow.webContents.send('calendar-updated', { save_id: activeSaveId, data: startupCalendarPayload });
       } catch (err) {
@@ -1755,6 +2432,7 @@ app.whenReady().then(async () => {
       try {
         const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
         latestLeagueStatsPayload = startupLeagueStats;
+        persistLeagueStats(currentSeasonId, startupLeagueStats);
         mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [], league_name: startupLeagueStats.league_name || null });
       } catch (err) {
         console.error('[Startup] Failed to load existing league stats export:', err);
@@ -1785,6 +2463,7 @@ app.whenReady().then(async () => {
             refreshLeagueTeamsFromCalendar(calendarPayload);
             importCalendarMatches(calendarPayload);
             persistSeasonCompetitionResults(calendarPayload);
+            persistSeasonStandings(currentSeasonId, calendarPayload.standings);
             saveSnapshotForActiveSave(rawCalendar);
 
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1850,6 +2529,7 @@ app.whenReady().then(async () => {
         const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
         const leagueStatsPayload = JSON.parse(rawLeagueStats);
         latestLeagueStatsPayload = leagueStatsPayload;
+        persistLeagueStats(currentSeasonId, leagueStatsPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [], league_name: leagueStatsPayload.league_name || null });
