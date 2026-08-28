@@ -110,6 +110,15 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Added when the flat YOUTH_MODE_OVERALL_MARGIN constant was replaced by
+  // a per-tier/per-band margin — existing season_end_reviews rows predate
+  // this column and just come back NULL, same ignore-already-exists pattern.
+  try {
+    db.run(`ALTER TABLE season_end_reviews ADD COLUMN league_average_margin INTEGER;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -563,14 +572,54 @@ const YOUTH_MODE_PYRAMID_TIERS = [
   { tier: 3, name: 'league one' },
   { tier: 4, name: 'league two' }
 ];
-const YOUTH_MODE_AVG_OVERALL_BY_TIER = { 1: 80, 2: 76, 3: 72, 4: 68 };
-const YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER = { 1: Infinity, 2: 4, 3: 3, 4: 2 };
-const YOUTH_MODE_OVERALL_MARGIN = 2;
+
+// Lower tiers: flat baseline overall/allowance/margin per tier.
+const YOUTH_MODE_TIER_CONFIG = {
+  2: { leagueAverage: 72, allowance: 3, margin: 3 }, // Championship
+  3: { leagueAverage: 67, allowance: 3, margin: 3 }, // League One
+  4: { leagueAverage: 63, allowance: 2, margin: 3 }  // League Two
+};
+
+// Premier League scales with table position instead of a flat baseline
+// — a mid-table/relegation-threatened squad gets held to a tighter cap
+// than a title-chasing top-5 side, which faces no cap at all. Bands
+// checked in order; the first whose position <= maxPos applies. Keep in
+// sync with index.html's YOUTH_MODE_PREMIER_LEAGUE_BANDS (same bands,
+// applied there to the LIVE position instead of this final one).
+const YOUTH_MODE_PREMIER_LEAGUE_BANDS = [
+  { maxPos: 5, leagueAverage: 80, allowance: Infinity, margin: 0 },
+  { maxPos: 8, leagueAverage: 78, allowance: 4, margin: 5 },
+  { maxPos: 14, leagueAverage: 76, allowance: 3, margin: 4 },
+  { maxPos: Infinity, leagueAverage: 74, allowance: 3, margin: 3 }
+];
+
+function getYouthModePremierLeagueBand(position) {
+  return YOUTH_MODE_PREMIER_LEAGUE_BANDS.find(b => position <= b.maxPos)
+    || YOUTH_MODE_PREMIER_LEAGUE_BANDS[YOUTH_MODE_PREMIER_LEAGUE_BANDS.length - 1];
+}
+
+// Resolves the rule to enforce for a tier — Premier League needs a final
+// table position to pick a band (null if that couldn't be parsed out of
+// the stored standings text), every other tier just uses its flat config.
+function getYouthModeTierRule(tier, finalPosition) {
+  if (tier === 1) return finalPosition === null ? null : getYouthModePremierLeagueBand(finalPosition);
+  return YOUTH_MODE_TIER_CONFIG[tier] || null;
+}
 
 function findPyramidTierServer(compName) {
   if (!compName) return null;
   const lname = compName.toLowerCase();
   return YOUTH_MODE_PYRAMID_TIERS.find(t => lname.includes(t.name)) || null;
+}
+
+// Parses the leading number out of standings text like "5th" (see
+// export_all.lua's ordinal_suffix output) — mirrors parseStandingPosition
+// in index.html. A league-winning season stores the literal text "Winner"
+// instead of "1st" (see getTrophiesWon), which is still 1st place here.
+function parseStandingPositionServer(standingText) {
+  if (standingText === 'Winner') return 1;
+  const match = /^(\d+)/.exec(standingText || '');
+  return match ? parseInt(match[1], 10) : null;
 }
 
 // Permanently enables Youth Squad Career Mode for a save. One-way by
@@ -589,9 +638,10 @@ function enableYouthMode(saveId) {
 // competition name matches a pyramid tier — cups never do), and flags
 // any player still genuinely on the squad (freshest updated_at that
 // season, not out on loan — same definition as __clubStatus === 'normal'
-// in index.html) whose overall exceeds that tier's static average by
-// more than YOUTH_MODE_OVERALL_MARGIN. Only writes a row if the count of
-// such players exceeds what the tier allows — nothing to review otherwise.
+// in index.html) whose overall exceeds that tier/band's average by more
+// than its margin (see getYouthModeTierRule). Only writes a row if the
+// count of such players exceeds what the tier/band allows — nothing to
+// review otherwise.
 function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
   if (!db) return;
 
@@ -600,21 +650,22 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
     && enabledRes[0].values[0][0] === 1;
   if (!youthModeEnabled) return;
 
-  const compRes = db.exec(`SELECT comp_name FROM season_competition_results WHERE season_id = ${endedSeasonId};`);
-  const compNames = compRes.length > 0 ? compRes[0].values.map(r => r[0]) : [];
+  const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${endedSeasonId};`);
+  const compRows = compRes.length > 0 ? compRes[0].values : [];
   let leagueName = null;
   let tierInfo = null;
-  for (const name of compNames) {
+  let standingText = null;
+  for (const [name, standing] of compRows) {
     const t = findPyramidTierServer(name);
-    if (t) { leagueName = name; tierInfo = t; break; }
+    if (t) { leagueName = name; tierInfo = t; standingText = standing; break; }
   }
   if (!tierInfo) return; // no recognized league this season — nothing to enforce
 
-  const allowance = YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER[tierInfo.tier];
-  if (allowance === Infinity) return; // Premier League — no restriction
+  const rule = getYouthModeTierRule(tierInfo.tier, parseStandingPositionServer(standingText));
+  if (!rule || rule.allowance === Infinity) return; // no restriction at this tier/position
 
-  const leagueAverage = YOUTH_MODE_AVG_OVERALL_BY_TIER[tierInfo.tier];
-  const cutoff = leagueAverage + YOUTH_MODE_OVERALL_MARGIN;
+  const { leagueAverage, allowance, margin } = rule;
+  const cutoff = leagueAverage + margin;
 
   const squadRes = db.exec(`
     SELECT p.player_id, p.name, s.overall, s.updated_at, s.on_loan
@@ -636,10 +687,10 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
 
   db.run(`
     INSERT INTO season_end_reviews
-      (save_id, season_id, league_name, league_tier, league_average_overall, allowed_overrated_count, overrated_count, overrated_players_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (save_id, season_id, league_name, league_tier, league_average_overall, league_average_margin, allowed_overrated_count, overrated_count, overrated_players_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(season_id) DO NOTHING;
-  `, [saveId, endedSeasonId, leagueName, tierInfo.tier, leagueAverage, allowance, overratedPlayers.length, JSON.stringify(overratedPlayers)]);
+  `, [saveId, endedSeasonId, leagueName, tierInfo.tier, leagueAverage, margin, allowance, overratedPlayers.length, JSON.stringify(overratedPlayers)]);
   saveDatabaseToDisk();
   console.log(`[Youth Mode] Season-end review for save ${saveId}: ${overratedPlayers.length} players over the ${leagueName} cap (allowed ${allowance}).`);
 }
@@ -739,7 +790,7 @@ function getPlayerHonours(playerId, saveId = activeSaveId) {
 function getPendingSeasonReview(saveId = activeSaveId) {
   if (!db || !saveId) return null;
   const res = db.exec(`
-    SELECT id, season_id, league_name, league_tier, league_average_overall,
+    SELECT id, season_id, league_name, league_tier, league_average_overall, league_average_margin,
            allowed_overrated_count, overrated_count, overrated_players_json
     FROM season_end_reviews
     WHERE save_id = ${saveId} AND acknowledged = 0
@@ -753,9 +804,10 @@ function getPendingSeasonReview(saveId = activeSaveId) {
     league_name: row[2],
     league_tier: row[3],
     league_average_overall: row[4],
-    allowed_overrated_count: row[5],
-    overrated_count: row[6],
-    overrated_players: JSON.parse(row[7] || '[]')
+    league_average_margin: row[5],
+    allowed_overrated_count: row[6],
+    overrated_count: row[7],
+    overrated_players: JSON.parse(row[8] || '[]')
   };
 }
 
@@ -1703,7 +1755,7 @@ app.whenReady().then(async () => {
       try {
         const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
         latestLeagueStatsPayload = startupLeagueStats;
-        mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [] });
+        mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [], league_name: startupLeagueStats.league_name || null });
       } catch (err) {
         console.error('[Startup] Failed to load existing league stats export:', err);
       }
@@ -1800,7 +1852,7 @@ app.whenReady().then(async () => {
         latestLeagueStatsPayload = leagueStatsPayload;
 
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [] });
+          mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [], league_name: leagueStatsPayload.league_name || null });
         }
       } catch (err) {
         console.error('[Watcher] Failed to process league stats export file:', err);

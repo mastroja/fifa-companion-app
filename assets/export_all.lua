@@ -34,6 +34,13 @@ local save_uid = GetSaveUID() or ""
 -- as a read-only handoff so the new block doesn't need to duplicate that
 -- fixture-aggregation logic.
 local league_team_ids = {}
+-- The user's primary league's real competition name (e.g. "Premier
+-- League"), resolved via GetCompetitionNameByObjID once the STANDINGS
+-- section below identifies primary_comp_obj_id. Same handoff pattern as
+-- league_team_ids — lets the LEAGUE STATS EXPORT block filter
+-- GetPlayersStats() down to league matches only, instead of every
+-- competition (cups, continental, etc.) the player appeared in.
+local primary_league_comp_name = nil
 
 -- ================= SQUAD EXPORT =================
 do
@@ -942,6 +949,10 @@ do
         end
     end
 
+    if primary_comp_obj_id ~= nil then
+        primary_league_comp_name = GetCompetitionNameByObjID(primary_comp_obj_id)
+    end
+
     local standings_json_list = {}
     if primary_comp_obj_id ~= nil then
         -- Chronological order matters here (unlike the season totals below)
@@ -1288,11 +1299,14 @@ end
 --   - a full players scan (squad export block already does this too)
 --   - GetPlayersStats() (already called in the squad export block)
 -- Nothing new is being read from the game's memory here — this only
--- combines three already-working reads differently: GetPlayersStats()'s
--- own docs confirm it returns stats for every player in the user's
--- competition (not just their own team), so cross-referencing it against
--- league_team_ids (handed off from the calendar block above) is enough
--- to build a real league-wide leaderboard with no new risk surface.
+-- combines three already-working reads differently: GetPlayersStats()
+-- returns one row per player PER COMPETITION they appeared in that
+-- season (confirmed by the squad export block's own per-competition
+-- breakdown above, stat.compname), not just their own team's league —
+-- so rows are filtered down to primary_league_comp_name (handed off from
+-- the calendar block above) as well as cross-referenced against
+-- league_team_ids, otherwise cup/continental appearances would inflate
+-- every stat.
 do
     local league_players_table = LE.db:GetTable("players")
     local league_tpl_table = LE.db:GetTable("teamplayerlinks")
@@ -1322,14 +1336,19 @@ do
 
     -- Aggregate GetPlayersStats() (already called once per sync in the
     -- squad export block, same function, safe to call again here) down
-    -- to just players currently on a team within the user's own league.
+    -- to just players currently on a team within the user's own league,
+    -- counting only the stat rows for THAT competition — a player who
+    -- also played a cup or continental competition this season has a
+    -- separate GetPlayersStats() row for that, which must be excluded
+    -- here or the league leaderboard would include non-league goals/
+    -- assists/cards.
     local combined = {}
     local all_stats = GetPlayersStats()
     for i = 1, #all_stats do
         local stat = all_stats[i]
         local pid = stat.playerid
         local tid = team_id_by_player[pid]
-        if tid then
+        if tid and primary_league_comp_name and stat.compname == primary_league_comp_name then
             if not combined[pid] then
                 combined[pid] = {
                     team_id = tid, appearances = 0, goals = 0, assists = 0,
@@ -1377,16 +1396,25 @@ do
     end
 
     local league_save_uid_escaped = save_uid:gsub('"', '\\"')
+    local league_name_escaped = (primary_league_comp_name or ""):gsub('"', '\\"')
     local league_json_output = string.format(
-        '{"save_uid":"%s","players":[\n    %s\n  ]}',
-        league_save_uid_escaped, table.concat(league_players_json_list, ",\n    ")
+        '{"save_uid":"%s","league_name":"%s","players":[\n    %s\n  ]}',
+        league_save_uid_escaped, league_name_escaped, table.concat(league_players_json_list, ",\n    ")
     )
 
     local league_file = io.open("C:\\Users\\Public\\ea_fc_league_stats_export.json", "w+")
     if league_file then
         league_file:write(league_json_output)
         league_file:close()
-        print("[Lua] Successfully synced league stats to public path.")
+        -- Logs the resolved league name and how many players matched it —
+        -- if stat.compname's exact text doesn't match GetCompetitionNameByObjID's
+        -- (e.g. a sponsor-prefixed vs. plain name), the filter above would
+        -- silently return zero players instead of erroring, so this is the
+        -- one place to catch that from the Live Editor console/log.
+        print(string.format(
+            "[Lua] Successfully synced league stats to public path (league: %s, %d players).",
+            primary_league_comp_name or "unresolved", #league_players_json_list
+        ))
     else
         print("[Lua] Error: Could not write league stats file path.")
     end
