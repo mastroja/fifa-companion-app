@@ -1661,6 +1661,13 @@
         }
       }
 
+      // Career-cumulative stats (across every season, not just this
+      // one) feed the Youth Mode potential reveal — see
+      // formatPotentialDisplay/getCareerStatsMap.
+      const careerStats = (currentYouthModeEnabled && player.player_id)
+        ? (await getCareerStatsMap()).get(player.player_id)
+        : null;
+
       // club_name is always the player's actual current club now (see
       // export_squad.lua's loaned_out_destination resolution) — no need
       // to prefer loan_club_name (that's their contract/parent club).
@@ -1957,7 +1964,11 @@
           <div style="text-align: center; background: var(--expand-bg); padding: 16px 22px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
             <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
             <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}${deltaBadge(player.overall_delta, 16)}</strong>
-            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances })}</strong></span>
+            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${
+              typeof player.potential === 'string' && player.potential.includes('-')
+                ? player.potential
+                : formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances, position_id: player.position_id, youth_reveal_tier: player.youth_reveal_tier }, careerStats)
+            }</strong></span>
           </div>
         </div>
 
@@ -3870,8 +3881,7 @@
       renderTopStatsWidgets();
     }
 
-    async function getStatSourceList(mode) {
-      if (mode === 'current') return currentPlayers;
+    async function ensureCareerTotalsCache() {
       if (!careerTotalsCache && window.api && window.api.getCareerTotals) {
         try {
           careerTotalsCache = await window.api.getCareerTotals();
@@ -3881,6 +3891,24 @@
         }
       }
       return careerTotalsCache || [];
+    }
+
+    async function getStatSourceList(mode) {
+      if (mode === 'current') return currentPlayers;
+      return ensureCareerTotalsCache();
+    }
+
+    // Career-cumulative goals/assists/appearances/clean_sheets per
+    // player, keyed by player_id — used by formatPotentialDisplay so the
+    // Youth Mode potential reveal is based on a player's whole senior
+    // career so far (across every season), not just this season's
+    // stats, which would otherwise make the "mystery" reset every
+    // pre-season for anyone who isn't brand new.
+    async function getCareerStatsMap() {
+      const totals = await ensureCareerTotalsCache();
+      const map = new Map();
+      totals.forEach(p => map.set(p.player_id, p));
+      return map;
     }
 
     // Home dashboard tables default to 5 rows with a "Show All" toggle so
@@ -4150,31 +4178,105 @@
 
     // Under Youth Squad Career Mode, an exact potential number gives the
     // manager metagame knowledge they wouldn't realistically have — shown
-    // as a range instead, centered on the real value. The range starts
-    // wide (±10 total width) for a player with no track record and
-    // narrows by 1 for every 8 first-team appearances, floored at a
-    // 3-wide range once someone's an established regular (you'd have a
-    // much clearer read on a player you've actually seen play a lot).
-    const YOUTH_MODE_POTENTIAL_RANGE_MAX = 10;
-    const YOUTH_MODE_POTENTIAL_RANGE_MIN = 3;
-    const YOUTH_MODE_APPS_PER_RANGE_STEP = 8;
+    // as a range instead. How narrow that range is depends on:
+    //   1. Total career appearances/goals/assists/clean sheets since
+    //      promotion (across every season, not reset each year — see
+    //      getCareerStatsMap), and
+    //   2. The scouting quality of whichever league the club was in the
+    //      moment this player was promoted — locked forever at that tier
+    //      (see youth_reveal_tier / lockYouthRevealTiers in main.js) even
+    //      if the club is later promoted or relegated.
+    //
+    // [threshold, width] pairs per pyramid tier (1=Premier League ... 4=
+    // League Two, see ENGLAND_PYRAMID) — width is how wide the displayed
+    // range is once cumulative appearances reach threshold. Better-
+    // resourced leagues need far fewer appearances for the same
+    // certainty; the Premier League's superior scouting means it skips
+    // the widest bands outright — a Premier League promotion starts
+    // already at a 10-wide read instead of the usual 20, in exchange for
+    // needing far fewer appearances to fully resolve after that.
+    const YOUTH_REVEAL_SCHEDULE_BY_TIER = {
+      4: [[0, 20], [10, 16], [25, 12], [40, 10], [50, 8], [60, 4], [70, 0]],
+      3: [[0, 20], [5, 16], [20, 12], [35, 10], [45, 8], [55, 4], [65, 0]],
+      2: [[0, 20], [0, 16], [15, 12], [30, 10], [40, 8], [50, 4], [60, 0]],
+      1: [[0, 10], [15, 8], [25, 4], [40, 0]]
+    };
 
-    function computeYouthModePotentialRangeWidth(appearances) {
-      const steps = Math.floor(Number(appearances || 0) / YOUTH_MODE_APPS_PER_RANGE_STEP);
-      return Math.max(YOUTH_MODE_POTENTIAL_RANGE_MIN, YOUTH_MODE_POTENTIAL_RANGE_MAX - steps);
+    function resolveRevealWidth(schedule, cumulativeAppearances) {
+      const apps = Number(cumulativeAppearances || 0);
+      let width = schedule[0][1];
+      for (const [threshold, w] of schedule) {
+        if (apps >= threshold) width = w;
+      }
+      return width;
     }
+
+    // Position-based "accelerated reveal" — consistently good performance
+    // narrows the range faster than raw appearances alone would. Each
+    // bucket's threshold is calibrated to how often that position
+    // actually racks up the relevant stat (a center-back scoring/
+    // assisting is far rarer than a striker doing the same, so it counts
+    // for more, sooner); CDM benefits from both, reflecting the modern
+    // "elite two-way #6" archetype.
+    const YOUTH_REVEAL_POSITION_BUCKET = {
+      0: 'GK',
+      1: 'CB', 4: 'CB', 5: 'CB', 6: 'CB',
+      2: 'FB', 3: 'FB', 7: 'FB', 8: 'FB',
+      9: 'CDM', 10: 'CDM', 11: 'CDM',
+      13: 'CM', 14: 'CM', 15: 'CM',
+      12: 'FWD', 16: 'FWD', 17: 'FWD', 18: 'FWD', 19: 'FWD',
+      20: 'FWD', 21: 'FWD', 22: 'FWD', 23: 'FWD', 24: 'FWD', 25: 'FWD', 26: 'FWD', 27: 'FWD'
+    };
+
+    const YOUTH_REVEAL_ACCELERATION = {
+      GK: { cleanSheetEvery: 4 },
+      CB: { cleanSheetEvery: 4, gaEvery: 2 },
+      FB: { cleanSheetEvery: 4, gaEvery: 3 },
+      CDM: { cleanSheetEvery: 4, gaEvery: 4 },
+      CM: { gaEvery: 4 },
+      FWD: { gaEvery: 10 }
+    };
+
+    function computeYouthRevealAccelerationShrink(positionId, goals, assists, cleanSheets) {
+      const config = YOUTH_REVEAL_ACCELERATION[YOUTH_REVEAL_POSITION_BUCKET[Number(positionId)]];
+      if (!config) return 0;
+      let shrink = 0;
+      if (config.gaEvery) shrink += Math.floor((Number(goals || 0) + Number(assists || 0)) / config.gaEvery) * 2;
+      if (config.cleanSheetEvery) shrink += Math.floor(Number(cleanSheets || 0) / config.cleanSheetEvery) * 2;
+      return shrink;
+    }
+
+    // The range is deliberately skewed, not centered — the upper bound
+    // sits much closer to the real potential than the lower bound does,
+    // so a wide early-career range doesn't just paint every prospect as
+    // "could be a 99"; it reads as "definitely at least decent, might
+    // still bust or might be special."
+    const YOUTH_REVEAL_HIGH_OFFSET_FRACTION = 0.2;
 
     // Only the DISPLAYED text changes here — every threshold/sort/filter
     // elsewhere in the app keeps using the real potential value, this is
     // purely cosmetic obfuscation for the human reading the screen.
-    function formatPotentialDisplay(player) {
+    // careerStats (cumulative goals/assists/appearances/clean_sheets
+    // since promotion, across every season — see getCareerStatsMap) is
+    // optional; falls back to the player object's own (season-scoped)
+    // fields if not given, which under-counts a multi-season veteran but
+    // degrades safely rather than erroring.
+    function formatPotentialDisplay(player, careerStats) {
       const potential = Number(player.potential || 0);
       if (!potential) return '—';
       if (!currentYouthModeEnabled) return String(potential);
 
-      const width = computeYouthModePotentialRangeWidth(player.appearances);
-      const lowOffset = Math.floor(width / 2);
-      const highOffset = Math.ceil(width / 2);
+      const stats = careerStats || player;
+      const tier = player.youth_reveal_tier || 4;
+      const schedule = YOUTH_REVEAL_SCHEDULE_BY_TIER[tier] || YOUTH_REVEAL_SCHEDULE_BY_TIER[4];
+
+      const baseWidth = resolveRevealWidth(schedule, stats.appearances);
+      const accelShrink = computeYouthRevealAccelerationShrink(player.position_id, stats.goals, stats.assists, stats.clean_sheets);
+      const width = Math.max(0, baseWidth - accelShrink);
+      if (width === 0) return String(potential);
+
+      const highOffset = Math.round(width * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
+      const lowOffset = width - highOffset;
       const low = Math.max(1, potential - lowOffset);
       const high = Math.min(99, potential + highOffset);
       return `${low}-${high}`;
@@ -4962,7 +5064,7 @@
     // potential_low/potential_high range from the game (potentialvariance).
     // This table only ever gets one exact potential number since these
     // are already-promoted players, not academy prospects.
-    function renderPromisingYouthTable() {
+    async function renderPromisingYouthTable() {
       const potentialThreshold = getPromisingYouthThreshold();
 
       // Filtering/sorting always uses the real potential value — only the
@@ -4975,6 +5077,8 @@
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }))
         .sort((a, b) => Number(b.potential || 0) - Number(a.potential || 0));
 
+      const careerStatsMap = currentYouthModeEnabled ? await getCareerStatsMap() : null;
+
       const prefix = `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">Threshold: under 22, ${potentialThreshold}+ potential (${getPrimaryLeagueName() || 'league'})</div>`;
 
       renderExpandableList('home-youth-body', prospects, (visible) => `
@@ -4986,7 +5090,7 @@
                 <td>${p.name}</td>
                 <td>${p.__age}</td>
                 <td>${p.overall || 0}</td>
-                <td style="color: var(--accent-color); font-weight:600;">${formatPotentialDisplay(p)}</td>
+                <td style="color: var(--accent-color); font-weight:600;">${formatPotentialDisplay(p, careerStatsMap && careerStatsMap.get(p.player_id))}</td>
                 <td>${formatMoney(p.__value)}</td>
               </tr>
             `).join('')}

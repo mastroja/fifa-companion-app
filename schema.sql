@@ -64,7 +64,18 @@ CREATE TABLE IF NOT EXISTS players (
     height TEXT,
     weight TEXT,
     preferred_foot TEXT,
-    photo_id INTEGER
+    photo_id INTEGER,
+    -- Youth Squad Career Mode's potential-reveal mechanic: the England
+    -- pyramid tier (1=Premier League ... 4=League Two, see
+    -- YOUTH_MODE_PYRAMID_TIERS in main.js) the club was playing in the
+    -- FIRST time this player was ever seen in player_season_stats — set
+    -- once and never changed afterward (see importFifaData), so a
+    -- player's reveal speed is locked to whatever scouting resources the
+    -- club had at the moment they were promoted, even if the club is
+    -- later promoted/relegated. NULL until Youth Mode is on and this
+    -- player has synced at least once. See YOUTH_REVEAL_SCHEDULE_BY_TIER
+    -- in index.html for what this actually controls.
+    youth_reveal_tier INTEGER
 );
 
 -- Seasonal player snapshots — the actual history table

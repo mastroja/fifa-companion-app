@@ -143,6 +143,15 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Youth Mode potential-reveal tier lock, added after some users already
+  // had a DB on disk — same ignore-already-exists migration pattern as
+  // above.
+  try {
+    db.run(`ALTER TABLE players ADD COLUMN youth_reveal_tier INTEGER;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -1613,12 +1622,42 @@ function importFifaData(jsonPayload) {
     playerStmt.free();
     statsStmt.free();
     db.run('COMMIT;');
+
+    // Youth Mode potential-reveal: lock each new-to-us player's reveal
+    // tier to whichever league the club is in RIGHT NOW, the first time
+    // we ever see them (youth_reveal_tier IS NULL) — never touched again
+    // after that, which is what makes the reveal speed "locked in" at
+    // promotion instead of drifting if the club is later promoted or
+    // relegated. Wrapped separately so a bug here can't roll back the
+    // real squad sync above.
+    try {
+      lockYouthRevealTiers(jsonPayload.players.map(p => p.player_id).filter(Boolean));
+    } catch (tierErr) {
+      console.error('[DB] Failed to lock youth reveal tiers:', tierErr);
+    }
+
     saveDatabaseToDisk();
     console.log(`[DB] Synced ${jsonPayload.players.length} players into season ${currentSeasonId} (history preserved).`);
   } catch (err) {
     db.run('ROLLBACK;');
     console.error('[DB] Transaction failed, rolled back changes:', err);
   }
+}
+
+function lockYouthRevealTiers(playerIds) {
+  if (!db || !currentSeasonId || !activeSaveId || playerIds.length === 0) return;
+
+  const youthEnabledRes = db.exec(`SELECT youth_mode_enabled FROM saves WHERE id = ${activeSaveId};`);
+  const youthModeEnabled = youthEnabledRes.length > 0 && youthEnabledRes[0].values.length > 0
+    && youthEnabledRes[0].values[0][0] === 1;
+  if (!youthModeEnabled) return;
+
+  const leagueNameRes = db.exec(`SELECT league_name FROM seasons WHERE id = ${currentSeasonId};`);
+  const leagueName = (leagueNameRes.length > 0 && leagueNameRes[0].values.length > 0) ? leagueNameRes[0].values[0][0] : null;
+  const tierInfo = findPyramidTierServer(leagueName);
+  const currentTier = tierInfo ? tierInfo.tier : 4; // unrecognized/below League Two treated as the slowest (League Two) baseline
+
+  db.run(`UPDATE players SET youth_reveal_tier = ${currentTier} WHERE youth_reveal_tier IS NULL AND player_id IN (${playerIds.join(',')});`);
 }
 
 // Youth academy roster — see export_all.lua's YOUTH ACADEMY EXPORT
@@ -1681,7 +1720,8 @@ function getSquadFromDB(seasonId = currentSeasonId) {
            s.on_loan, s.loan_team_from, s.loan_club_name, s.loan_date_end, s.is_loan_to_buy, s.wage,
            s.goals, s.assists, s.appearances, s.clean_sheets, s.saves,
            s.yellow_cards, s.red_cards, s.avg_rating, s.attributes_json, s.competitions_json,
-           s.traits_json, s.play_styles_json, s.updated_at, s.overall_delta, s.attribute_deltas_json
+           s.traits_json, s.play_styles_json, s.updated_at, s.overall_delta, s.attribute_deltas_json,
+           p.youth_reveal_tier
     FROM players p
     JOIN player_season_stats s ON s.player_id = p.player_id
     WHERE s.season_id = ${seasonId}
@@ -1732,7 +1772,8 @@ function getSquadFromDB(seasonId = currentSeasonId) {
     play_styles: JSON.parse(row[38] || '[]'),
     updated_at: row[39],
     overall_delta: row[40] || 0,
-    attribute_deltas: JSON.parse(row[41] || '{}')
+    attribute_deltas: JSON.parse(row[41] || '{}'),
+    youth_reveal_tier: row[42]
   }));
 }
 
@@ -1779,7 +1820,7 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
            SUM(s.clean_sheets) as t_cs, SUM(s.saves) as t_saves,
            SUM(s.yellow_cards) as t_yellow, SUM(s.red_cards) as t_red,
            SUM(s.avg_rating * s.appearances) as t_rating_weighted,
-           cur.updated_at
+           cur.updated_at, p.youth_reveal_tier
     FROM players p
     JOIN player_season_stats cur ON cur.player_id = p.player_id AND cur.season_id = ${seasonId}
     JOIN player_season_stats s ON s.player_id = p.player_id
@@ -1805,7 +1846,8 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
       goals: row[31] || 0, assists: row[32] || 0, appearances: totalApps,
       clean_sheets: row[34] || 0, saves: row[35] || 0, yellow_cards: row[36] || 0, red_cards: row[37] || 0,
       avg_rating: totalApps > 0 ? (row[38] || 0) / totalApps : 0,
-      updated_at: row[39]
+      updated_at: row[39],
+      youth_reveal_tier: row[40]
     };
   });
 }
