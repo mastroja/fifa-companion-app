@@ -1896,8 +1896,8 @@ function getPastPlayers(saveId = activeSaveId) {
   // se.save_id matters here — without it, a second save also involving
   // the same club would mix its past players into this one's list.
   const pastRes = db.exec(`
-    SELECT p.player_id, p.name, p.position_id, p.dob, s.overall, s.potential, s.wage,
-           s.club_id, se.year_label, s.season_id
+    SELECT p.player_id, p.name, p.position_id, p.dob, p.nationality, p.height, p.weight, p.alt_positions,
+           s.overall, s.potential, s.wage, s.club_id, se.year_label, s.season_id
     FROM player_season_stats s
     JOIN players p ON p.player_id = s.player_id
     JOIN seasons se ON se.id = s.season_id
@@ -1913,9 +1913,9 @@ function getPastPlayers(saveId = activeSaveId) {
   const lastKnown = new Map();
   const firstYearLabelByPlayer = new Map();
   pastRes[0].values.forEach(row => {
-    const [player_id, name, position_id, dob, overall, potential, wage, club_id, year_label, season_id] = row;
+    const [player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, club_id, year_label, season_id] = row;
     if (!firstYearLabelByPlayer.has(player_id)) firstYearLabelByPlayer.set(player_id, year_label);
-    lastKnown.set(player_id, { player_id, name, position_id, dob, overall, potential, wage, year_label, season_id });
+    lastKnown.set(player_id, { player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, year_label, season_id });
   });
 
   // year_label is "2026/2027" — the leading year is enough to measure a
@@ -1956,9 +1956,14 @@ function getPastPlayers(saveId = activeSaveId) {
       name: info.name,
       position_id: info.position_id,
       dob: info.dob,
+      nationality: info.nationality,
+      height: info.height,
+      weight: info.weight,
+      alt_positions: info.alt_positions,
       overall: live ? live.overall : info.overall,
       potential: live ? live.potential : info.potential,
       overall_is_live: !!live,
+      attributes: live ? live.attributes : null,
       wage_at_departure: info.wage,
       joined_season: joinedSeason,
       departed_season: info.year_label,
@@ -1973,9 +1978,45 @@ function getPastPlayers(saveId = activeSaveId) {
   // would clobber the active save's watchlist.
   if (saveId === activeSaveId) {
     writeWatchlistFile(results.map(r => r.player_id));
+    persistFormerPlayerSnapshots(saveId, currentSeasonForSave, watchlistStatus);
   }
 
   return results;
+}
+
+// Keeps a former player's career actually followed for as long as the
+// save continues, instead of freezing at their last known values from
+// the day they left — upserted every time getPastPlayers runs (i.e.
+// every time the Former Players tab loads) from whatever the watchlist
+// most recently found live in-game. See former_player_snapshots in
+// schema.sql and getPlayerHistory below, which unions this in.
+function persistFormerPlayerSnapshots(saveId, seasonId, watchlistStatus) {
+  if (!db || !seasonId || watchlistStatus.size === 0) return;
+  const stmt = db.prepare(`
+    INSERT INTO former_player_snapshots (player_id, season_id, overall, potential, club_id, club_name, attributes_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(player_id, season_id) DO UPDATE SET
+      overall=excluded.overall,
+      potential=excluded.potential,
+      club_id=excluded.club_id,
+      club_name=excluded.club_name,
+      attributes_json=excluded.attributes_json,
+      updated_at=CURRENT_TIMESTAMP;
+  `);
+  watchlistStatus.forEach(live => {
+    if (!live.attributes) return; // stale pre-attributes watchlist entry, skip until next real lookup
+    stmt.run([
+      live.player_id,
+      seasonId,
+      live.overall || 0,
+      live.potential || 0,
+      live.club_id || 0,
+      live.club_name || '',
+      JSON.stringify(live.attributes)
+    ]);
+  });
+  stmt.free();
+  saveDatabaseToDisk();
 }
 
 // Signed players: everyone currently under contract to the club (on the
@@ -2096,29 +2137,75 @@ function getSignedPlayers(saveId = activeSaveId) {
 // Full multi-season history for one player — this is the whole point.
 // Scoped to a save (player_id is a global EA FC id, so the same real
 // player could exist in more than one save's history).
+//
+// Unions two sources on one continuous season timeline: player_season_stats
+// (seasons actually on our books) and former_player_snapshots (seasons
+// after they left, tracked live via the watchlist — see
+// persistFormerPlayerSnapshots). A departed player's snapshot seasons are
+// left-joined against season_league_stats so real goals/assists/
+// appearances show up whenever they stayed within the tracked league;
+// otherwise those fields are honestly 0 rather than fabricated.
 function getPlayerHistory(playerId, saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const res = db.exec(`
-    SELECT se.year_label, s.overall, s.potential, s.goals, s.assists, s.appearances,
+    SELECT se.id, se.year_label, s.overall, s.potential, s.goals, s.assists, s.appearances,
            s.clean_sheets, s.avg_rating, s.attributes_json, s.competitions_json
     FROM player_season_stats s
     JOIN seasons se ON se.id = s.season_id
     WHERE s.player_id = ${playerId} AND se.save_id = ${saveId}
     ORDER BY se.id ASC;
   `);
-  if (res.length === 0) return [];
-  return res[0].values.map(row => ({
-    season: row[0],
-    overall: row[1],
-    potential: row[2],
-    goals: row[3],
-    assists: row[4],
-    appearances: row[5],
-    clean_sheets: row[6],
-    avg_rating: row[7],
-    attributes: JSON.parse(row[8] || '{}'),
-    competitions: JSON.parse(row[9] || '[]')
-  }));
+  const withUsRows = res.length > 0 ? res[0].values : [];
+  const coveredSeasonIds = new Set();
+
+  const combined = withUsRows.map(row => {
+    coveredSeasonIds.add(row[0]);
+    return {
+      seasonOrder: row[0],
+      season: row[1],
+      overall: row[2],
+      potential: row[3],
+      goals: row[4],
+      assists: row[5],
+      appearances: row[6],
+      clean_sheets: row[7],
+      avg_rating: row[8],
+      attributes: JSON.parse(row[9] || '{}'),
+      competitions: JSON.parse(row[10] || '[]')
+    };
+  });
+
+  const formerRes = db.exec(`
+    SELECT se.id, se.year_label, f.overall, f.potential, f.attributes_json,
+           l.goals, l.assists, l.appearances, l.clean_sheets
+    FROM former_player_snapshots f
+    JOIN seasons se ON se.id = f.season_id
+    LEFT JOIN season_league_stats l ON l.season_id = f.season_id AND l.player_id = f.player_id
+    WHERE f.player_id = ${playerId} AND se.save_id = ${saveId}
+    ORDER BY se.id ASC;
+  `);
+  if (formerRes.length > 0) {
+    formerRes[0].values.forEach(row => {
+      const [seasonId, yearLabel, overall, potential, attributesJson, goals, assists, appearances, cleanSheets] = row;
+      if (coveredSeasonIds.has(seasonId)) return; // already have a with-us row for this season
+      combined.push({
+        seasonOrder: seasonId,
+        season: yearLabel,
+        overall,
+        potential,
+        goals: goals || 0,
+        assists: assists || 0,
+        appearances: appearances || 0,
+        clean_sheets: cleanSheets || 0,
+        avg_rating: 0,
+        attributes: JSON.parse(attributesJson || '{}'),
+        competitions: []
+      });
+    });
+  }
+
+  combined.sort((a, b) => a.seasonOrder - b.seasonOrder);
+  return combined.map(({ seasonOrder, ...rest }) => rest);
 }
 
 // Career (all-season) totals per player, for the Home page's All-Time

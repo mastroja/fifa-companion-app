@@ -268,3 +268,28 @@ CREATE TABLE IF NOT EXISTS season_end_reviews (
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(season_id)
 );
+
+-- Season-by-season tracking for players who've LEFT the club, so their
+-- career keeps being followed for as long as the save continues instead
+-- of freezing at whatever they were worth the day they departed. Sourced
+-- from the watchlist lookup (see readWatchlistStatus/getPastPlayers in
+-- main.js and the PAST PLAYERS WATCHLIST LOOKUP block in export_all.lua)
+-- — the same safe "players" table walk export_squad.lua already uses,
+-- never the crash-prone "transfers" table. season_id uses this save's
+-- own season timeline (not the player's new club's), so a former
+-- player's seasons-with-us (player_season_stats) and seasons-since
+-- (this table) sit on one continuous axis — see getPlayerHistory, which
+-- unions both.
+CREATE TABLE IF NOT EXISTS former_player_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL,
+    overall INTEGER,
+    potential INTEGER,
+    club_id INTEGER,
+    club_name TEXT,
+    attributes_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(player_id, season_id)
+);

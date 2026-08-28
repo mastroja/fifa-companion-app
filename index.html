@@ -1591,6 +1591,24 @@
         }
       }
 
+      // Not on the squad or in the academy either — check the Former
+      // Players list before giving up. overall/potential/attributes come
+      // from the watchlist's live lookup when available (see
+      // persistFormerPlayerSnapshots in main.js) so the header shows how
+      // they're actually doing now, not just their stats from the day
+      // they left.
+      if (!player) {
+        const formerPlayer = (currentPastPlayers || []).find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+        if (formerPlayer) {
+          player = {
+            ...formerPlayer,
+            club_name: formerPlayer.current_club,
+            attributes: formerPlayer.attributes || {},
+            __isFormerPlayer: true
+          };
+        }
+      }
+
       if (!player) {
         player = { name: identifier };
       }
@@ -2052,16 +2070,25 @@
             </div>
 
             <div class="profile-card">
-              <h3>Contract & Financials</h3>
-              <div class="attr-list">
-                <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
-                <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
-                <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
-                <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
-                <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
-                <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
-                <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
-              </div>
+              <h3>${player.__isFormerPlayer ? 'Now Playing At' : 'Contract & Financials'}</h3>
+              ${player.__isFormerPlayer ? `
+                <div class="attr-list">
+                  <div class="attr-item"><span>Current Club:</span> <strong>${player.club_name || 'Unknown'}</strong></div>
+                  <div class="attr-item"><span>Departed:</span> <strong>${player.departed_season || '—'}</strong></div>
+                  <div class="attr-item"><span>Years at Club:</span> <strong>${player.years_active ?? '—'}</strong></div>
+                  <div class="attr-item"><span>Rating Source:</span> <strong>${player.overall_is_live ? 'Live' : 'Last known'}</strong></div>
+                </div>
+              ` : `
+                <div class="attr-list">
+                  <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
+                  <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
+                  <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
+                  <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
+                  <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
+                  <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
+                  <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
+                </div>
+              `}
             </div>
 
             <div class="profile-card">
