@@ -4435,6 +4435,7 @@
       const realNameByTier = {};
       d.league_history.forEach(h => { realNameByTier[h.tier] = h.tier_name; });
       const historyChart = d.league_history.length > 1 ? buildLeagueHistoryChartSvg(d.league_history, realNameByTier) : '';
+      const fullTable = (d.standings && d.standings.length > 0) ? buildStandingsTableHtml(d.standings, d.club_name) : '';
 
       return `
         <div class="season-overview-title" style="font-size:20px;">${l.comp_name}</div>
@@ -4443,7 +4444,8 @@
           ${d.team_record ? `<div class="season-overview-subtitle" style="margin:0;">${d.team_record.wins}W ${d.team_record.draws}D ${d.team_record.losses}L · ${d.team_record.goals_for}-${d.team_record.goals_against} GD</div>` : ''}
           ${statusHtml}
         </div>
-        ${historyChart ? `<div style="margin-top: 4px;"><div class="season-overview-subtitle" style="margin-bottom:4px;">League History</div>${historyChart}</div>` : ''}
+        ${fullTable ? `<div style="margin-top: 8px;"><div class="season-overview-subtitle" style="margin-bottom:4px;">League Table</div>${fullTable}</div>` : ''}
+        ${historyChart ? `<div style="margin-top: 16px;"><div class="season-overview-subtitle" style="margin-bottom:4px;">League History</div>${historyChart}</div>` : ''}
       `;
     }
 
@@ -4622,7 +4624,7 @@
         : list.slice(0, 3).map(x => x.name).join(', ') + (list.length > 3 ? ` +${list.length - 3} more` : '');
 
       const hasClubLeaders = s.goals[0] || s.assists[0] || s.appearances[0] || s.clean_sheets[0];
-      const hasLeagueLeaders = l.goals[0] || l.assists[0];
+      const hasLeagueLeaders = l.goals[0] || l.assists[0] || l.clean_sheets[0];
 
       return `
         <div class="season-overview-title" style="font-size:22px;">Season Summary</div>
@@ -4647,6 +4649,7 @@
               <h4>${(d.league && d.league.comp_name) || 'League'} Leaders</h4>
               ${l.goals[0] ? `<div class="season-overview-stat-row"><span>Golden Boot</span><span>${l.goals[0].name} (${l.goals[0].value})</span></div>` : ''}
               ${l.assists[0] ? `<div class="season-overview-stat-row"><span>Most Assists</span><span>${l.assists[0].name} (${l.assists[0].value})</span></div>` : ''}
+              ${l.clean_sheets[0] ? `<div class="season-overview-stat-row"><span>Golden Glove</span><span>${l.clean_sheets[0].name} (${l.clean_sheets[0].value})</span></div>` : ''}
               ${!hasLeagueLeaders ? `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>` : ''}
             </div>
 
@@ -4701,7 +4704,9 @@
       const btn = document.querySelector('#season-overview-pages .season-overview-page.current .home-toggle-btn');
       if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
-      const result = await window.api.exportSeasonOverviewPdf();
+      const cleanClub = String(d.club_name || 'Club').replace(/[^a-zA-Z0-9]/g, '');
+      const cleanYear = String(d.year_label || '').replace(/\//g, '-');
+      const result = await window.api.exportSeasonOverviewPdf(`${cleanClub}${cleanYear}summary.pdf`);
 
       if (btn) { btn.disabled = false; btn.textContent = '📄 Save/Download PDF'; }
       if (result && result.success) {

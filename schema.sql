@@ -189,6 +189,29 @@ CREATE TABLE IF NOT EXISTS season_league_stats (
     UNIQUE(season_id, player_id)
 );
 
+-- Every team's row in the primary league table, upserted every calendar
+-- sync exactly like season_league_stats — same reasoning: a season's
+-- full table is already captured by the time it ends. Rank isn't stored
+-- (computed on read, sorted by points/GD/GF) since it shifts as more
+-- fixtures complete within the same season. See persistSeasonStandings
+-- in main.js and the calendar export's "standings" array.
+CREATE TABLE IF NOT EXISTS season_standings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    team_id INTEGER NOT NULL,
+    team_name TEXT,
+    played INTEGER,
+    wins INTEGER,
+    draws INTEGER,
+    losses INTEGER,
+    goals_for INTEGER,
+    goals_against INTEGER,
+    points INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    UNIQUE(season_id, team_id)
+);
+
 CREATE TABLE IF NOT EXISTS season_competition_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     season_id INTEGER NOT NULL,
