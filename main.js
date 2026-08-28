@@ -1420,23 +1420,37 @@ function getPastPlayers(saveId = activeSaveId) {
   if (!currentSeasonForSave) return [];
 
   const currentRes = db.exec(`
-    SELECT player_id, club_id FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+    SELECT player_id, club_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
   `);
+  const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
+
+  // A departed player's row is never deleted (history is kept forever),
+  // and nothing overwrites its club_id once the squad export stops
+  // including them mid-season — so club_id alone can't tell "still ours"
+  // from "left ours" for anyone whose old club happens to still be the
+  // user's team id. The real signal is whether the row was actually
+  // touched by the most recent squad sync, same __clubStatus logic used
+  // client-side in index.html (transformPlayersForTable).
+  let maxUpdatedAt = null;
+  currentRows.forEach(([, , , updated_at]) => {
+    if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
+  });
+
   const currentClubById = new Map();
-  if (currentRes.length > 0) {
-    currentRes[0].values.forEach(([player_id, club_id]) => currentClubById.set(player_id, club_id));
-  }
+  const stillOnRosterIds = new Set();
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+    currentClubById.set(player_id, club_id);
+    // Out on loan is still "ours" (contracted here, just playing
+    // elsewhere) — only a row that's gone stale relative to the latest
+    // sync means the player actually left the club.
+    if (on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt)) stillOnRosterIds.add(player_id);
+  });
 
   // The user's own team id, same trick as getInferredTransfers: whichever
-  // club_id shows up on a non-loan row.
-  const bioRes = db.exec(`
-    SELECT player_id, club_id, on_loan FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
-  `);
+  // club_id shows up on a non-loan row that's still actually on the roster.
   let userTeamId = null;
-  if (bioRes.length > 0) {
-    for (const [, club_id, on_loan] of bioRes[0].values) {
-      if (!on_loan) { userTeamId = club_id; break; }
-    }
+  for (const [player_id, club_id, on_loan] of currentRows) {
+    if (!on_loan && stillOnRosterIds.has(player_id)) { userTeamId = club_id; break; }
   }
   if (userTeamId === null) return [];
 
@@ -1466,8 +1480,7 @@ function getPastPlayers(saveId = activeSaveId) {
 
   const results = [];
   lastKnown.forEach((info, playerId) => {
-    const stillOursNow = currentClubById.get(playerId) === userTeamId;
-    if (stillOursNow) return; // still on the current roster, not a "past" player
+    if (stillOnRosterIds.has(playerId)) return; // still on the roster (or out on loan), not a "past" player
 
     const currentClubId = currentClubById.get(playerId);
     let currentClub = 'Unknown';

@@ -321,10 +321,10 @@
   <div class="nav-tabs" id="main-nav-tabs">
     <button class="tab-btn active" onclick="switchTab('home')" id="btn-home">Home</button>
     <button class="tab-btn" onclick="switchTab('squad')" id="btn-squad">Squad</button>
-    <button class="tab-btn" onclick="switchTab('past-players')" id="btn-past-players">Past Players</button>
-    <button class="tab-btn" onclick="switchTab('transfers')" id="btn-transfers">Transfers Hub</button>
-    <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
     <button class="tab-btn" onclick="switchTab('league-stats')" id="btn-league-stats">League Stats</button>
+    <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
+    <button class="tab-btn" onclick="switchTab('transfers')" id="btn-transfers">Transfers Hub</button>
+    <button class="tab-btn" onclick="switchTab('past-players')" id="btn-past-players">Former Players</button>
   </div>
 
   <!-- Home Tab -->
@@ -491,7 +491,7 @@
 
   </div>
 
-  <!-- Past Players Tab -->
+  <!-- Former Players Tab -->
   <div id="past-players-tab" class="tab-content">
     <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 14px;">
       Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For has no data source since the game's transfer-history table crashes when read — see the "Departed" column for when they left instead.
@@ -511,7 +511,7 @@
           </tr>
         </thead>
         <tbody id="past-players-body">
-          <tr><td colspan="8" class="empty-state">No past players tracked yet.</td></tr>
+          <tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -2296,7 +2296,7 @@
       if (!tbody) return;
 
       if (!pastPlayers || pastPlayers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No past players tracked yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>`;
         return;
       }
 
@@ -3557,13 +3557,20 @@
       const container = document.getElementById('home-needs-watchlist-body');
       if (!container) return;
 
-      const appearancesList = currentPlayers.map(p => Number(p.appearances || 0));
+      // Excludes anyone not actually at the club right now — 'transferred'
+      // (left mid-season, see __clubStatus in transformPlayersForTable)
+      // and 'loan' (out playing elsewhere) shouldn't be flagged as a squad
+      // gap to replace, since they aren't occupying a spot in the squad
+      // being assessed.
+      const squadPlayers = currentPlayers.filter(p => p.__clubStatus === 'normal');
+
+      const appearancesList = squadPlayers.map(p => Number(p.appearances || 0));
       const avgSquadAppearances = appearancesList.length > 0
         ? appearancesList.reduce((sum, a) => sum + a, 0) / appearancesList.length
         : 0;
-      const medianSquadWage = computeMedian(currentPlayers.map(p => Number(p.wage || 0)));
+      const medianSquadWage = computeMedian(squadPlayers.map(p => Number(p.wage || 0)));
 
-      const flagged = currentPlayers.map(p => {
+      const flagged = squadPlayers.map(p => {
         const age = computeAge(p.dob || p.birthdate);
         const apps = Number(p.appearances || 0);
         const rating = Number(p.avg_rating || 0);
