@@ -209,6 +209,18 @@ do
 
                 if is_user_team or is_loaned_out then
                     local preferredposition1 = players_table:GetRecordFieldValue(current_record, "preferredposition1")
+                    -- Alternate positions the player can also play — up to 5
+                    -- more slots (preferredposition2..6), -1 meaning "not
+                    -- set". Built into a comma-separated string of just the
+                    -- real position ids (dropping -1s), same as export_squad.lua.
+                    local alt_position_ids = {}
+                    for i = 2, 6 do
+                        local alt_pos = players_table:GetRecordFieldValue(current_record, "preferredposition" .. i)
+                        if alt_pos and alt_pos ~= -1 then
+                            table.insert(alt_position_ids, tostring(alt_pos))
+                        end
+                    end
+                    local alt_positions = table.concat(alt_position_ids, ",")
                     local overall = players_table:GetRecordFieldValue(current_record, "overallrating") or 0
                     local potential = players_table:GetRecordFieldValue(current_record, "potential") or 0
                     local nationality_id = players_table:GetRecordFieldValue(current_record, "nationality") or 0
@@ -271,6 +283,7 @@ do
                     player.player_id = playerid
                     player.name = GetPlayerName(playerid)
                     player.position_id = preferredposition1
+                    player.alt_positions = alt_positions
                     player.overall = overall
                     player.potential = potential
                     player.nationality = nationality_id
@@ -417,8 +430,8 @@ do
         for i, p in ipairs(tbl) do
             local attr = p.attributes or {}
             json = json .. string.format(
-                '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"nationality":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
-                p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.nationality, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
+                '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"alt_positions":"%s","nationality":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
+                p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.alt_positions, p.nationality, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
                 p.dob, p.height, p.weight, p.preferred_foot, p.skill_moves, p.weak_foot, p.contract_expiry, p.playerjointeamdate,
                 p.wage, p.duration_months, p.contract_date, p.player_role_, p.last_status_change_date,
                 tostring(p.is_among_top_scorers), p.jersey_number, tostring(p.injury), p.league_goals_prev_three_matches, tostring(p.is_among_top_scorers_in_team), p.form,
@@ -475,13 +488,19 @@ do
 end
 
 -- ================= PAST PLAYERS WATCHLIST LOOKUP =================
--- Looks up current overall/potential/club for specific former-squad
--- player IDs the companion app asks about (written to
+-- Looks up current overall/potential/club/attributes for specific
+-- former-squad player IDs the companion app asks about (written to
 -- ea_fc_watchlist_input.json each time the app syncs). Deliberately uses
 -- the same "players" table export_squad.lua already iterates safely
 -- every refresh — NOT the "transfers" table, which is a confirmed,
 -- permanent crash (see feedback_live_editor_data_safety memory). If the
 -- watchlist file doesn't exist yet, this is a no-op.
+--
+-- Attributes are included (not just overall/potential) so a former
+-- player's profile can show a real current attribute breakdown, not just
+-- a single rating number, and so main.js can persist a season-by-season
+-- snapshot (former_player_snapshots) that keeps tracking them for as
+-- long as the save continues, same as it does for our own squad.
 do
     require 'imports/other/helpers'
     local JSON = require 'imports/external/json'
@@ -516,12 +535,51 @@ do
                 local team_id = GetTeamIdFromPlayerId(playerid)
                 local club_name = (team_id and team_id > 0) and (GetTeamName(team_id) or "") or ""
 
+                -- Same attribute field set/names as the main squad export
+                -- above, so the JS side can reuse its existing attribute
+                -- calculation/display code unchanged.
+                local attributes = {
+                    acceleration = players_table:GetRecordFieldValue(record, "acceleration") or 70,
+                    sprint_speed = players_table:GetRecordFieldValue(record, "sprintspeed") or 70,
+                    finishing = players_table:GetRecordFieldValue(record, "finishing") or 70,
+                    long_shots = players_table:GetRecordFieldValue(record, "longshots") or 70,
+                    shot_power = players_table:GetRecordFieldValue(record, "shotpower") or 70,
+                    positioning = players_table:GetRecordFieldValue(record, "positioning") or 70,
+                    penalties = players_table:GetRecordFieldValue(record, "penalties") or 70,
+                    volleys = players_table:GetRecordFieldValue(record, "volleys") or 70,
+                    short_passing = players_table:GetRecordFieldValue(record, "shortpassing") or 70,
+                    vision = players_table:GetRecordFieldValue(record, "vision") or 70,
+                    crossing = players_table:GetRecordFieldValue(record, "crossing") or 70,
+                    long_passing = players_table:GetRecordFieldValue(record, "longpassing") or 70,
+                    curve = players_table:GetRecordFieldValue(record, "curve") or 70,
+                    fk_accuracy = players_table:GetRecordFieldValue(record, "freekickaccuracy") or 70,
+                    dribbling = players_table:GetRecordFieldValue(record, "dribbling") or 70,
+                    ball_control = players_table:GetRecordFieldValue(record, "ballcontrol") or 70,
+                    agility = players_table:GetRecordFieldValue(record, "agility") or 70,
+                    balance = players_table:GetRecordFieldValue(record, "balance") or 70,
+                    marking = players_table:GetRecordFieldValue(record, "defensiveawareness") or players_table:GetRecordFieldValue(record, "marking") or 70,
+                    standing_tackle = players_table:GetRecordFieldValue(record, "standingtackle") or 70,
+                    interceptions = players_table:GetRecordFieldValue(record, "interceptions") or 70,
+                    heading_accuracy = players_table:GetRecordFieldValue(record, "headingaccuracy") or 70,
+                    sliding_tackle = players_table:GetRecordFieldValue(record, "slidingtackle") or 70,
+                    strength = players_table:GetRecordFieldValue(record, "strength") or 70,
+                    stamina = players_table:GetRecordFieldValue(record, "stamina") or 70,
+                    aggression = players_table:GetRecordFieldValue(record, "aggression") or 70,
+                    jumping = players_table:GetRecordFieldValue(record, "jumping") or 70,
+                    diving = players_table:GetRecordFieldValue(record, "gkdiving") or 70,
+                    handling = players_table:GetRecordFieldValue(record, "gkhandling") or 70,
+                    kicking = players_table:GetRecordFieldValue(record, "gkkicking") or 70,
+                    gk_positioning = players_table:GetRecordFieldValue(record, "gkpositioning") or 70,
+                    reflexes = players_table:GetRecordFieldValue(record, "gkreflexes") or 70
+                }
+
                 table.insert(results, {
                     player_id = playerid,
                     overall = overall,
                     potential = potential,
                     club_id = team_id or 0,
-                    club_name = club_name
+                    club_name = club_name,
+                    attributes = attributes
                 })
             end
             record = players_table:GetNextValidRecord()

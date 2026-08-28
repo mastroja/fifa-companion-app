@@ -225,6 +225,16 @@
     #youth-mode-btn.youth-mode-on { background: #1a2e22; border-color: #3fb950; color: #3fb950; cursor: default; }
     #youth-mode-btn.youth-mode-on:hover { background: #1a2e22; color: #3fb950; border-color: #3fb950; }
 
+    .refresh-controls { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .switch-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none; }
+    .switch-label:hover { color: var(--text-color); }
+    .switch { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch-slider { position: absolute; inset: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; transition: 0.2s; }
+    .switch-slider::before { content: ''; position: absolute; width: 10px; height: 10px; left: 2px; top: 2px; background: var(--text-dim); border-radius: 50%; transition: 0.2s; }
+    .switch input:checked + .switch-slider { background: #0d2e1f; border-color: var(--accent-color); }
+    .switch input:checked + .switch-slider::before { transform: translateX(14px); background: var(--accent-color); }
+
     .youth-mode-warning-banner {
       display: flex;
       flex-direction: column;
@@ -434,12 +444,16 @@
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <button class="refresh-btn" id="youth-mode-btn" onclick="onYouthModeButtonClick()">🎓 Youth Mode: Off</button>
-      <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); cursor: pointer;" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
-        <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" /> Auto-refresh
-      </label>
-      <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
-      <button class="refresh-btn" onclick="previewSeasonOverview()" title="Opens the End of Season Overview using whatever season data currently exists — for testing, doesn't mark anything as acknowledged">🏆 Preview Season Overview</button>
-      <button class="refresh-btn" onclick="previewSeasonOverview(true)" title="Same as Preview, but fakes a relegation and an EFL Cup win so you can see the celebration/relegation animations without actually needing that result — for testing only, doesn't touch any real data">🧪 Test Celebrations</button>
+      <div class="refresh-controls">
+        <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
+        <label class="switch-label" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
+          <span class="switch">
+            <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" />
+            <span class="switch-slider"></span>
+          </span>
+          Auto-refresh
+        </label>
+      </div>
     </div>
   </header>
 
@@ -606,6 +620,7 @@
             <th onclick="sortTable('appearances')">Apps ↕</th>
             <th onclick="sortTable('offensive_stat')">Goals ↕</th>
             <th onclick="sortTable('assists')">Assists ↕</th>
+            <th onclick="sortTable('ga')" title="Goal contributions: goals + assists">G+A ↕</th>
             <th onclick="sortTable('clean_sheets')">CS ↕</th>
             <th onclick="sortTable('yellow_cards')">🟨 ↕</th>
             <th onclick="sortTable('red_cards')">🟥 ↕</th>
@@ -613,7 +628,7 @@
           </tr>
         </thead>
         <tbody id="stats-body">
-          <tr><td colspan="11" class="empty-state">No squad data loaded.</td></tr>
+          <tr><td colspan="12" class="empty-state">No squad data loaded.</td></tr>
         </tbody>
       </table>
     </div>
@@ -631,16 +646,17 @@
           <tr>
             <th onclick="sortPastPlayers('name')">Player ↕</th>
             <th onclick="sortPastPlayers('position_id')">Pos ↕</th>
-            <th onclick="sortPastPlayers('years_active')">Years Active ↕</th>
             <th onclick="sortPastPlayers('overall')">Current OVR ↕</th>
             <th onclick="sortPastPlayers('current_club')">Current Club ↕</th>
             <th title="No data source for actual transfer fees — always shows Unknown, not sortable">Sold For</th>
             <th onclick="sortPastPlayers('__value')">Current Value ↕</th>
             <th onclick="sortPastPlayers('departed_season')">Departed ↕</th>
+            <th onclick="sortPastPlayers('joined_season')">Years Active ↕</th>
+            <th onclick="sortPastPlayers('years_active')">Years at Club ↕</th>
           </tr>
         </thead>
         <tbody id="past-players-body">
-          <tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>
+          <tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -1117,6 +1133,33 @@
       return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: ${bg}; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; font-size: ${fontSize}px; font-weight: 700; color: #fff;">${initials}</div>`;
     }
 
+    // Generic placeholder used for the player's own profile picture — no
+    // real face-photo source exists for EA FC squad players (see comment
+    // above buildInitialsAvatar), and a plain silhouette reads better than
+    // colored initials for a single large portrait.
+    function buildSilhouetteAvatar(sizePx, borderRadius) {
+      const iconSize = Math.round(sizePx * 0.62);
+      return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: #21262d; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; color: #4d5561; flex-shrink: 0;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.9-2.2 4.9-4.9S14.7 2.2 12 2.2 7.1 4.4 7.1 7.1 9.3 12 12 12zm0 2.4c-3.5 0-10.4 1.8-10.4 5.4v2.1h20.8v-2.1c0-3.6-6.9-5.4-10.4-5.4z"/></svg></div>`;
+    }
+
+    // Player height/weight come from the game as "183 cm" / "78 kg" —
+    // converted to feet'inches" and lbs for display.
+    function formatHeightImperial(heightStr) {
+      const cm = parseFloat(String(heightStr || '').replace(/[^\d.]/g, ''));
+      if (!cm) return heightStr || 'N/A';
+      const totalInches = cm / 2.54;
+      let feet = Math.floor(totalInches / 12);
+      let inches = Math.round(totalInches % 12);
+      if (inches === 12) { feet += 1; inches = 0; }
+      return `${feet}'${inches}"`;
+    }
+
+    function formatWeightImperial(weightStr) {
+      const kg = parseFloat(String(weightStr || '').replace(/[^\d.]/g, ''));
+      if (!kg) return weightStr || 'N/A';
+      return `${Math.round(kg * 2.20462262)} lbs`;
+    }
+
     let currentTransferSortColumn = 'fee';
     let transferSortAscending = false;
     let previousActiveTab = 'home';
@@ -1225,6 +1268,24 @@
       const iso = NATIONALITY_ISO_MAP[id];
       if (!iso) return '🏳️';
       return String.fromCodePoint(...iso.split('').map(c => 127397 + c.charCodeAt(0)));
+    }
+
+    // flagcdn.com codes for the subdivision "nations" that have no ISO
+    // 3166-1 code of their own (mirrors NATIONALITY_FLAG_OVERRIDES above).
+    const NATIONALITY_FLAG_CODE_OVERRIDES = {
+      14: 'gb-eng', // England
+      42: 'gb-sct', // Scotland
+      50: 'gb-wls'  // Wales
+    };
+
+    // Small flag images from flagcdn.com (free, no API key) — used instead
+    // of emoji because Windows fonts frequently render flag emoji as blank
+    // boxes. getFlagEmoji() above remains the onerror fallback.
+    function getFlagImageUrl(nationality) {
+      if (!nationality) return null;
+      const id = Number(String(nationality).replace(/\D/g, ''));
+      const code = NATIONALITY_FLAG_CODE_OVERRIDES[id] || (NATIONALITY_ISO_MAP[id] && NATIONALITY_ISO_MAP[id].toLowerCase());
+      return code ? `https://flagcdn.com/w80/${code}.png` : null;
     }
 
     // Small +N/-N badge for the attribute/overall watcher — the change
@@ -1460,6 +1521,17 @@
       return `${years} yr${years > 1 ? 's' : ''} (${remainingMonths} mo${remainingMonths > 1 ? 's' : ''})`;
     }
 
+    // year_label is "2025/2026" — turns a joined/departed pair into a
+    // "2025-2028" span (joined season's start year through departed
+    // season's END year, i.e. start year + 1), same convention as a
+    // player's "years played" range on a club history page.
+    function formatYearsActiveRange(joinedSeason, departedSeason) {
+      const startYear = parseInt(String(joinedSeason || '').split('/')[0], 10);
+      const departedStartYear = parseInt(String(departedSeason || '').split('/')[0], 10);
+      if (isNaN(startYear) || isNaN(departedStartYear)) return '—';
+      return `${startYear}-${departedStartYear + 1}`;
+    }
+
     function switchTab(tabName) {
       if (tabName !== 'profile') {
         previousActiveTab = tabName;
@@ -1479,6 +1551,15 @@
 
     function getPositionInfo(posId) {
       return POSITION_MAP[Number(posId)] || { label: 'SUB', group: 'MID' };
+    }
+
+    // player.alt_positions is a comma-separated string of raw position ids
+    // (EA's preferredposition2..6, with -1/"not set" slots already dropped
+    // at export time) — turned into a "CAM, RM, ST" label list for display.
+    function getAltPositionsLabel(altPositions) {
+      if (!altPositions) return '';
+      return String(altPositions).split(',').map(s => s.trim()).filter(Boolean)
+        .map(id => getPositionInfo(id).label).join(', ');
     }
 
     function formatMoney(amount) {
@@ -1530,9 +1611,40 @@
         if (academyPlayer) {
           player = {
             ...academyPlayer,
-            potential: `${academyPlayer.potential_low}-${academyPlayer.potential_high}`,
+            potential: formatAcademyPotentialDisplay(academyPlayer),
             club_name: 'Youth Academy',
             wage: 0
+          };
+        }
+      }
+
+      // Not on the squad or in the academy either — check the Former
+      // Players list before giving up. overall/potential/attributes come
+      // from the watchlist's live lookup when available (see
+      // persistFormerPlayerSnapshots in main.js) so the header shows how
+      // they're actually doing now — current club, crest included — not
+      // just their stats from the day they left.
+      if (!player) {
+        const findFormer = () => (currentPastPlayers || []).find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+        let formerPlayer = findFormer();
+        // currentPastPlayers is only populated once the Former Players
+        // tab (or Transfer Hub) has loaded this session — fetch fresh
+        // rather than showing a blank profile if a link is opened before
+        // that ever happened.
+        if (!formerPlayer && window.api && window.api.getPastPlayers) {
+          try {
+            currentPastPlayers = (await window.api.getPastPlayers(currentSaveId)) || [];
+            formerPlayer = findFormer();
+          } catch (e) {
+            console.error('Failed to load former players for profile lookup:', e);
+          }
+        }
+        if (formerPlayer) {
+          player = {
+            ...formerPlayer,
+            club_name: formerPlayer.current_club,
+            attributes: formerPlayer.attributes || {},
+            __isFormerPlayer: true
           };
         }
       }
@@ -1549,6 +1661,13 @@
           console.error('Failed to load player season history:', e);
         }
       }
+
+      // Career-cumulative stats (across every season, not just this
+      // one) feed the Youth Mode potential reveal — see
+      // formatPotentialDisplay/getCareerStatsMap.
+      const careerStats = (currentYouthModeEnabled && player.player_id)
+        ? (await getCareerStatsMap()).get(player.player_id)
+        : null;
 
       // club_name is always the player's actual current club now (see
       // export_squad.lua's loaned_out_destination resolution) — no need
@@ -1757,7 +1876,7 @@
              </div>`
         );
       }
-      if (player.on_loan && player.loan_club_name) {
+      if (player.__clubStatus === 'loan' && player.loan_club_name) {
         transferHistoryEntries.push(`
           <div class="timeline-item">
             <div class="timeline-title">On loan at ${player.loan_club_name}</div>
@@ -1790,51 +1909,67 @@
 
       const headAssetSrc = player.headasset || player.headasset_url || player.photo || '';
       const headAssetDisplay = headAssetSrc
-        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border-color); background: #21262d;" />`
-        : buildInitialsAvatar(player.name, 48, '50%');
+        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 72px; height: 72px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" />`
+        : buildSilhouetteAvatar(72, '10px');
+
+      const flagImageUrl = getFlagImageUrl(player.nationality);
+      const nationalityName = getNationalityName(player.nationality);
+      const altPositionsLabel = getAltPositionsLabel(player.alt_positions);
 
       const clubBadgeDisplay = clubBadgeUrl
-        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 1px solid var(--border-color); border-radius: 50%;" />`
+        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 2px solid var(--border-color); border-radius: 50%; padding: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.45); flex-shrink: 0;" />`
         : buildInitialsAvatar(displayClubName || 'N/A', 40, '50%');
+
+      // Faint flag watermark faded into the card background, sitting behind
+      // the player's details rather than shown as its own icon. `contain`
+      // (not `cover`) so every flag is shown whole at its own real aspect
+      // ratio instead of being cropped by varying amounts depending on how
+      // far its shape is from this box's — flagcdn serves each flag at its
+      // native ratio (e.g. Switzerland is square, England is ~5:3), so
+      // `cover` was zooming some flags in far more than others.
+      const flagWatermark = flagImageUrl
+        ? `<div style="position: absolute; top: -15%; right: -4%; width: 62%; height: 130%; background-image: url('${flagImageUrl}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.16; -webkit-mask-image: linear-gradient(to left, black 25%, transparent 95%); mask-image: linear-gradient(to left, black 25%, transparent 95%); pointer-events: none; z-index: 0;"></div>`
+        : '';
 
       const container = document.getElementById('profile-content-container');
       container.innerHTML = `
-        <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="width: 50px; height: 35px; background: #21262d; border: 1px solid var(--border-color); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 22px;" title="${getNationalityName(player.nationality)}">${getFlagEmoji(player.nationality)}</div>
-            ${clubBadgeDisplay}
-            ${buildInitialsAvatar(player.name, 45, '6px')}
-          </div>
-          <div style="text-align: right;">
-            <span style="font-size: 12px; color: var(--text-dim);">Market Value: <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></span>
-          </div>
-        </div>
-
-        <div class="profile-header">
-          <div class="profile-main-info">
-            <h2>
-              ${headAssetDisplay}
-              <span>${player.name || 'Unknown Player'}</span>
-              ${jerseyDisplay}
-              ${captainDisplay}
-            </h2>
-            <div class="profile-meta">
-              <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
-              <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
-              <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
-              <span>Nationality: <strong>${getNationalityName(player.nationality)}</strong></span>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-              <span class="badge">Height: ${player.height}</span>
-              <span class="badge">Weight: ${player.weight}</span>
-              ${player.on_loan ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
-              ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
+        <div class="profile-header" style="display: flex; align-items: center; gap: 20px;">
+          ${headAssetDisplay}
+          <div class="profile-main-info" style="position: relative; overflow: hidden; border-radius: 8px; flex: 1;">
+            ${flagWatermark}
+            <div style="position: relative; z-index: 1;">
+              <h2>
+                ${clubBadgeDisplay}
+                <span>${player.name || 'Unknown Player'}</span>
+                ${jerseyDisplay}
+                ${captainDisplay}
+              </h2>
+              <div class="profile-meta">
+                <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
+                <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
+                <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
+                ${altPositionsLabel ? `<span>Alternative Positions: <strong>${altPositionsLabel}</strong></span>` : ''}
+              </div>
+              <div class="profile-meta">
+                <span>Nationality: <strong>${nationalityName}</strong></span>
+                <span>Current Club: <strong>${displayClubName || 'Free Agent'}</strong></span>
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <span class="badge">Height: ${formatHeightImperial(player.height)}</span>
+                <span class="badge">Weight: ${formatWeightImperial(player.weight)}</span>
+                ${player.__clubStatus === 'loan' ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
+                ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
+              </div>
             </div>
           </div>
-          <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <div style="text-align: center; background: var(--expand-bg); padding: 16px 22px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
             <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
             <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}${deltaBadge(player.overall_delta, 16)}</strong>
-            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances })}</strong></span>
+            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${
+              typeof player.potential === 'string' && player.potential.includes('-')
+                ? player.potential
+                : formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances, position_id: player.position_id, youth_reveal_tier: player.youth_reveal_tier, overall: baseOvr }, careerStats)
+            }</strong></span>
           </div>
         </div>
 
@@ -1986,15 +2121,25 @@
             </div>
 
             <div class="profile-card">
-              <h3>Contact & Financials</h3>
-              <div class="attr-list">
-                <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
-                <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
-                <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
-                <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
-                <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
-                <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
-              </div>
+              <h3>${player.__isFormerPlayer ? 'Now Playing At' : 'Contract & Financials'}</h3>
+              ${player.__isFormerPlayer ? `
+                <div class="attr-list">
+                  <div class="attr-item"><span>Current Club:</span> <strong>${player.club_name || 'Unknown'}</strong></div>
+                  <div class="attr-item"><span>Departed:</span> <strong>${player.departed_season || '—'}</strong></div>
+                  <div class="attr-item"><span>Years at Club:</span> <strong>${player.years_active ?? '—'}</strong></div>
+                  <div class="attr-item"><span>Rating Source:</span> <strong>${player.overall_is_live ? 'Live' : 'Last known'}</strong></div>
+                </div>
+              ` : `
+                <div class="attr-list">
+                  <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
+                  <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
+                  <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
+                  <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
+                  <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
+                  <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
+                  <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
+                </div>
+              `}
             </div>
 
             <div class="profile-card">
@@ -2126,7 +2271,7 @@
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="empty-state">No players match your search criteria.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" class="empty-state">No players match your search criteria.</td></tr>`;
         return;
       }
 
@@ -2145,7 +2290,7 @@
               <span class="player-name">
                 <span class="expand-icon">▶</span>
                 ${p.name || 'Unknown'}
-                ${p.on_loan ? '<span class="loan-badge">ON LOAN</span>' : ''}
+                ${p.__clubStatus === 'loan' ? '<span class="loan-badge">ON LOAN</span>' : ''}
                 ${p.__clubStatus === 'transferred' ? '<span class="loan-badge">TRANSFERRED</span>' : ''}
                 ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
               </span>
@@ -2158,6 +2303,7 @@
           <td>${p.appearances || 0}</td>
           <td>${p.goals || 0}</td>
           <td>${p.assists || 0}</td>
+          <td><strong>${p.ga || 0}</strong></td>
           <td><span class="${Number(p.clean_sheets) > 0 ? 'stat-cs' : 'zero-stat'}">${p.clean_sheets || 0}</span></td>
           <td><span class="${Number(p.yellow_cards) > 0 ? 'stat-yellow' : 'zero-stat'}">${p.yellow_cards || 0}</span></td>
           <td><span class="${Number(p.red_cards) > 0 ? 'stat-red' : 'zero-stat'}">${p.red_cards || 0}</span></td>
@@ -2200,7 +2346,7 @@
           });
 
           subTableHTML += `</tbody></table></div>`;
-          detailRow.innerHTML = `<td colspan="11">${subTableHTML}</td>`;
+          detailRow.innerHTML = `<td colspan="12">${subTableHTML}</td>`;
           
           row.onclick = (e) => {
             if (e.target.classList.contains('clickable-name') || e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
@@ -2288,7 +2434,7 @@
       }
 
       if (view === 'loaned') {
-        return currentPlayers.filter(p => p.on_loan).map(p => ({
+        return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => ({
           player_id: p.player_id,
           player_name: p.name,
           from_team: ourClub,
@@ -2400,6 +2546,7 @@
           competitions: filteredCompetitions,
           goals, assists, appearances, clean_sheets, yellow_cards, red_cards,
           offensive_stat: goals,
+          ga: goals + assists,
           avg_rating: computedAvgRating
         };
       });
@@ -2411,17 +2558,29 @@
       // row's updated_at against the newest one in this set, since a
       // departed player's row simply stops being touched once they're
       // no longer exported — no new Live Editor data needed for this.
+      //
+      // A currently-active loan is re-detected fresh from the live game
+      // state on every export cycle (export_all.lua/export_squad.lua),
+      // so a genuinely-loaned player's row is refreshed right alongside
+      // everyone else's every sync — its updated_at always matches
+      // maxUpdatedAt too. That means on_loan must NOT override staleness:
+      // if a player is recalled and then released/sold before the app
+      // ever syncs the "recalled, not on loan" in-between state, their
+      // last-seen on_loan=1 would otherwise stick forever even though
+      // they've since left the club entirely. A stale row is always
+      // 'transferred', regardless of what on_loan last said.
       let maxUpdatedAt = null;
       mapped.forEach(p => {
         if (p.updated_at && (!maxUpdatedAt || p.updated_at > maxUpdatedAt)) maxUpdatedAt = p.updated_at;
       });
       mapped.forEach(p => {
-        if (p.on_loan) {
-          p.__clubStatus = 'loan';
-          p.__statusRank = 1;
-        } else if (maxUpdatedAt && p.updated_at && p.updated_at < maxUpdatedAt) {
+        const isCurrent = !maxUpdatedAt || !p.updated_at || p.updated_at === maxUpdatedAt;
+        if (!isCurrent) {
           p.__clubStatus = 'transferred';
           p.__statusRank = 2;
+        } else if (p.on_loan) {
+          p.__clubStatus = 'loan';
+          p.__statusRank = 1;
         } else {
           p.__clubStatus = 'normal';
           p.__statusRank = 0;
@@ -2521,7 +2680,7 @@
       if (!tbody) return;
 
       if (currentPastPlayers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>`;
         return;
       }
 
@@ -2560,12 +2719,13 @@
           <tr>
             <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
-            <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
             <td>${p.current_club}</td>
             <td style="color: var(--text-dim); font-style: italic;">Unknown</td>
             <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(p.__value)}</td>
             <td>${p.departed_season || '—'}</td>
+            <td>${formatYearsActiveRange(p.joined_season, p.departed_season)}</td>
+            <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
           </tr>
         `;
       }).join('');
@@ -3724,8 +3884,7 @@
       renderTopStatsWidgets();
     }
 
-    async function getStatSourceList(mode) {
-      if (mode === 'current') return currentPlayers;
+    async function ensureCareerTotalsCache() {
       if (!careerTotalsCache && window.api && window.api.getCareerTotals) {
         try {
           careerTotalsCache = await window.api.getCareerTotals();
@@ -3735,6 +3894,24 @@
         }
       }
       return careerTotalsCache || [];
+    }
+
+    async function getStatSourceList(mode) {
+      if (mode === 'current') return currentPlayers;
+      return ensureCareerTotalsCache();
+    }
+
+    // Career-cumulative goals/assists/appearances/clean_sheets per
+    // player, keyed by player_id — used by formatPotentialDisplay so the
+    // Youth Mode potential reveal is based on a player's whole senior
+    // career so far (across every season), not just this season's
+    // stats, which would otherwise make the "mystery" reset every
+    // pre-season for anyone who isn't brand new.
+    async function getCareerStatsMap() {
+      const totals = await ensureCareerTotalsCache();
+      const map = new Map();
+      totals.forEach(p => map.set(p.player_id, p));
+      return map;
     }
 
     // Home dashboard tables default to 5 rows with a "Show All" toggle so
@@ -4004,33 +4181,157 @@
 
     // Under Youth Squad Career Mode, an exact potential number gives the
     // manager metagame knowledge they wouldn't realistically have — shown
-    // as a range instead, centered on the real value. The range starts
-    // wide (±10 total width) for a player with no track record and
-    // narrows by 1 for every 8 first-team appearances, floored at a
-    // 3-wide range once someone's an established regular (you'd have a
-    // much clearer read on a player you've actually seen play a lot).
-    const YOUTH_MODE_POTENTIAL_RANGE_MAX = 10;
-    const YOUTH_MODE_POTENTIAL_RANGE_MIN = 3;
-    const YOUTH_MODE_APPS_PER_RANGE_STEP = 8;
+    // as a range instead. How narrow that range is depends on:
+    //   1. Total career appearances/goals/assists/clean sheets since
+    //      promotion (across every season, not reset each year — see
+    //      getCareerStatsMap), and
+    //   2. The scouting quality of whichever league the club was in the
+    //      moment this player was promoted — locked forever at that tier
+    //      (see youth_reveal_tier / lockYouthRevealTiers in main.js) even
+    //      if the club is later promoted or relegated.
+    //
+    // [threshold, width] pairs per pyramid tier (1=Premier League ... 4=
+    // League Two, see ENGLAND_PYRAMID) — width is how wide the displayed
+    // range is once cumulative appearances reach threshold. Better-
+    // resourced leagues need far fewer appearances for the same
+    // certainty; the Premier League's superior scouting means it skips
+    // the widest bands outright — a Premier League promotion starts
+    // already at a 10-wide read instead of the usual 20, in exchange for
+    // needing far fewer appearances to fully resolve after that.
+    const YOUTH_REVEAL_SCHEDULE_BY_TIER = {
+      4: [[0, 20], [10, 16], [25, 12], [40, 10], [50, 8], [60, 4], [70, 0]],
+      3: [[0, 20], [5, 16], [20, 12], [35, 10], [45, 8], [55, 4], [65, 0]],
+      2: [[0, 20], [0, 16], [15, 12], [30, 10], [40, 8], [50, 4], [60, 0]],
+      1: [[0, 10], [15, 8], [25, 4], [40, 0]]
+    };
 
-    function computeYouthModePotentialRangeWidth(appearances) {
-      const steps = Math.floor(Number(appearances || 0) / YOUTH_MODE_APPS_PER_RANGE_STEP);
-      return Math.max(YOUTH_MODE_POTENTIAL_RANGE_MIN, YOUTH_MODE_POTENTIAL_RANGE_MAX - steps);
+    function resolveRevealWidth(schedule, cumulativeAppearances) {
+      const apps = Number(cumulativeAppearances || 0);
+      let width = schedule[0][1];
+      for (const [threshold, w] of schedule) {
+        if (apps >= threshold) width = w;
+      }
+      return width;
     }
+
+    // Position-based "accelerated reveal" — consistently good performance
+    // narrows the range faster than raw appearances alone would. Each
+    // bucket's threshold is calibrated to how often that position
+    // actually racks up the relevant stat (a center-back scoring/
+    // assisting is far rarer than a striker doing the same, so it counts
+    // for more, sooner); CDM benefits from both, reflecting the modern
+    // "elite two-way #6" archetype.
+    const YOUTH_REVEAL_POSITION_BUCKET = {
+      0: 'GK',
+      1: 'CB', 4: 'CB', 5: 'CB', 6: 'CB',
+      2: 'FB', 3: 'FB', 7: 'FB', 8: 'FB',
+      9: 'CDM', 10: 'CDM', 11: 'CDM',
+      13: 'CM', 14: 'CM', 15: 'CM',
+      12: 'FWD', 16: 'FWD', 17: 'FWD', 18: 'FWD', 19: 'FWD',
+      20: 'FWD', 21: 'FWD', 22: 'FWD', 23: 'FWD', 24: 'FWD', 25: 'FWD', 26: 'FWD', 27: 'FWD'
+    };
+
+    const YOUTH_REVEAL_ACCELERATION = {
+      GK: { cleanSheetEvery: 4 },
+      CB: { cleanSheetEvery: 4, gaEvery: 2 },
+      FB: { cleanSheetEvery: 4, gaEvery: 3 },
+      CDM: { cleanSheetEvery: 4, gaEvery: 4 },
+      CM: { gaEvery: 4 },
+      FWD: { gaEvery: 10 }
+    };
+
+    function computeYouthRevealAccelerationShrink(positionId, goals, assists, cleanSheets) {
+      const config = YOUTH_REVEAL_ACCELERATION[YOUTH_REVEAL_POSITION_BUCKET[Number(positionId)]];
+      if (!config) return 0;
+      let shrink = 0;
+      if (config.gaEvery) shrink += Math.floor((Number(goals || 0) + Number(assists || 0)) / config.gaEvery) * 2;
+      if (config.cleanSheetEvery) shrink += Math.floor(Number(cleanSheets || 0) / config.cleanSheetEvery) * 2;
+      return shrink;
+    }
+
+    // The range is deliberately skewed, not centered — the upper bound
+    // sits much closer to the real potential than the lower bound does,
+    // so a wide early-career range doesn't just paint every prospect as
+    // "could be a 99"; it reads as "definitely at least decent, might
+    // still bust or might be special."
+    const YOUTH_REVEAL_HIGH_OFFSET_FRACTION = 0.2;
 
     // Only the DISPLAYED text changes here — every threshold/sort/filter
     // elsewhere in the app keeps using the real potential value, this is
     // purely cosmetic obfuscation for the human reading the screen.
-    function formatPotentialDisplay(player) {
+    // careerStats (cumulative goals/assists/appearances/clean_sheets
+    // since promotion, across every season — see getCareerStatsMap) is
+    // optional; falls back to the player object's own (season-scoped)
+    // fields if not given, which under-counts a multi-season veteran but
+    // degrades safely rather than erroring.
+    // A player whose overall has already caught up to (or passed) the
+    // low end of their displayed range would otherwise show a range that
+    // makes no sense (a "ceiling" below where they already stand) — and
+    // would itself leak metagame info, telling the manager "this player
+    // has basically nowhere left to grow." Shifting the whole window up
+    // so it starts at their overall (keeping the same width, so there's
+    // still real range above them) preserves the mystery instead.
+    function shiftRevealRangeAboveOverall(low, high, overall) {
+      const ovr = Number(overall || 0);
+      if (!ovr || low >= ovr) return [low, high];
+      const shift = ovr - low;
+      return [ovr, Math.min(99, high + shift)];
+    }
+
+    function formatPotentialDisplay(player, careerStats) {
       const potential = Number(player.potential || 0);
       if (!potential) return '—';
       if (!currentYouthModeEnabled) return String(potential);
 
-      const width = computeYouthModePotentialRangeWidth(player.appearances);
-      const lowOffset = Math.floor(width / 2);
-      const highOffset = Math.ceil(width / 2);
-      const low = Math.max(1, potential - lowOffset);
-      const high = Math.min(99, potential + highOffset);
+      const stats = careerStats || player;
+      const tier = player.youth_reveal_tier || 4;
+      const schedule = YOUTH_REVEAL_SCHEDULE_BY_TIER[tier] || YOUTH_REVEAL_SCHEDULE_BY_TIER[4];
+
+      const baseWidth = resolveRevealWidth(schedule, stats.appearances);
+      const accelShrink = computeYouthRevealAccelerationShrink(player.position_id, stats.goals, stats.assists, stats.clean_sheets);
+      const width = Math.max(0, baseWidth - accelShrink);
+      if (width === 0) return String(potential);
+
+      const highOffset = Math.round(width * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
+      const lowOffset = width - highOffset;
+      let low = Math.max(1, potential - lowOffset);
+      let high = Math.min(99, potential + highOffset);
+      [low, high] = shiftRevealRangeAboveOverall(low, high, player.overall);
+      return `${low}-${high}`;
+    }
+
+    // The academy's own potential_low/potential_high comes straight from
+    // the game's "potentialvariance" field, which turns out to often be
+    // small or zero in practice — nowhere near the wide, mysterious range
+    // the reveal system uses elsewhere, sometimes even collapsing to a
+    // single exact number. There's no way to get a wider TRUE range out
+    // of the game (potentialvariance is whatever EA's own scouting model
+    // says it is), so: trust the game's range when it's already at least
+    // as wide as a freshly-promoted senior player's starting band for the
+    // club's CURRENT league tier; otherwise fall back to that same
+    // starting band (skewed the same way, centered on the academy's own
+    // reported potential) so an academy prospect never looks more "known"
+    // than a player who's just been promoted.
+    function formatAcademyPotentialDisplay(academyPlayer) {
+      let low = Number(academyPlayer.potential_low || 0);
+      let high = Number(academyPlayer.potential_high || 0);
+      if (!low && !high) return '—';
+      if (!currentYouthModeEnabled) return `${low}-${high}`;
+
+      const gameWidth = high - low;
+      const tier = findPyramidTier(getPrimaryLeagueName());
+      const defaultWidth = (YOUTH_REVEAL_SCHEDULE_BY_TIER[tier ? tier.tier : 4] || YOUTH_REVEAL_SCHEDULE_BY_TIER[4])[0][1];
+      if (gameWidth < defaultWidth) {
+        // Clamping at the edges can shift the reported low/high off-center
+        // from the real potential — the midpoint is still the best
+        // estimate of it we have without exporting the raw (intentionally
+        // hidden) potential field itself.
+        const potential = Math.round((low + high) / 2);
+        const highOffset = Math.round(defaultWidth * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
+        low = Math.max(1, potential - (defaultWidth - highOffset));
+        high = Math.min(99, potential + highOffset);
+      }
+      [low, high] = shiftRevealRangeAboveOverall(low, high, academyPlayer.overall);
       return `${low}-${high}`;
     }
 
@@ -4816,7 +5117,7 @@
     // potential_low/potential_high range from the game (potentialvariance).
     // This table only ever gets one exact potential number since these
     // are already-promoted players, not academy prospects.
-    function renderPromisingYouthTable() {
+    async function renderPromisingYouthTable() {
       const potentialThreshold = getPromisingYouthThreshold();
 
       // Filtering/sorting always uses the real potential value — only the
@@ -4829,6 +5130,8 @@
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }))
         .sort((a, b) => Number(b.potential || 0) - Number(a.potential || 0));
 
+      const careerStatsMap = currentYouthModeEnabled ? await getCareerStatsMap() : null;
+
       const prefix = `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">Threshold: under 22, ${potentialThreshold}+ potential (${getPrimaryLeagueName() || 'league'})</div>`;
 
       renderExpandableList('home-youth-body', prospects, (visible) => `
@@ -4840,7 +5143,7 @@
                 <td>${p.name}</td>
                 <td>${p.__age}</td>
                 <td>${p.overall || 0}</td>
-                <td style="color: var(--accent-color); font-weight:600;">${formatPotentialDisplay(p)}</td>
+                <td style="color: var(--accent-color); font-weight:600;">${formatPotentialDisplay(p, careerStatsMap && careerStatsMap.get(p.player_id))}</td>
                 <td>${formatMoney(p.__value)}</td>
               </tr>
             `).join('')}
@@ -4872,7 +5175,7 @@
                 <td>${p.__age ?? '—'}</td>
                 <td><span class="pos-badge pos-${p.__posInfo.group}">${p.__posInfo.label}</span></td>
                 <td>${p.overall || 0}</td>
-                <td style="color: var(--accent-color); font-weight:600;">${p.potential_low}-${p.potential_high}</td>
+                <td style="color: var(--accent-color); font-weight:600;">${formatAcademyPotentialDisplay(p)}</td>
                 <td>${formatMoney(p.__value)}</td>
               </tr>
             `).join('')}
