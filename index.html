@@ -2821,6 +2821,17 @@
       return `${parts[0].slice(-2)}/${parts[1].slice(-2)}`;
     }
 
+    // The save has a stray/incomplete 2024/2025 season on record from
+    // before League Stats history was fully built out — mirrors
+    // EARLIEST_TRACKED_SEASON_YEAR in main.js. Only used to keep it out of
+    // the League Stats season selector; the season's data itself is
+    // untouched everywhere else in the app.
+    const EARLIEST_TRACKED_SEASON_YEAR = 2025;
+    function isSeasonYearLabelTracked(yearLabel) {
+      const year = parseInt(String(yearLabel || '').split('/')[0], 10);
+      return !isNaN(year) && year >= EARLIEST_TRACKED_SEASON_YEAR;
+    }
+
     function computeMedian(values) {
       if (values.length === 0) return 0;
       const sorted = values.slice().sort((a, b) => a - b);
@@ -3175,7 +3186,7 @@
       if (!select) return;
 
       const pastOptions = seasons
-        .filter(s => !s.is_current)
+        .filter(s => !s.is_current && isSeasonYearLabelTracked(s.year_label))
         .slice()
         .reverse()
         .map(s => `<option value="${s.id}" ${leagueStatsSelectedSeasonId === s.id ? 'selected' : ''}>${s.league_name || 'Unknown League'} ${shortenSeasonLabel(s.year_label)}</option>`)
@@ -4611,29 +4622,82 @@
       `;
     }
 
+    // Pulls one or two headline stats from every other page so this page
+    // alone represents the whole season at a glance — per the user's
+    // request, deliberately denser than a plain recap.
     function seasonOverviewPageSummary(d) {
-      const topScorer = d.squad_leaders.goals[0];
-      const topAssist = d.squad_leaders.assists[0];
-      const biggestGrowth = d.progression && d.progression.biggest_growth[0];
-      const positionLine = d.league
-        ? (d.league.won ? `🏆 Champions of ${d.league.comp_name}` : `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`)
-        : 'No league recorded';
+      const s = d.squad_leaders;
+      const l = d.league_leaders;
+      const p = d.progression;
+      const t = d.transfers;
       const otherWins = (d.other_competitions || []).filter(c => c.standing === 'Winner');
+      const otherResults = (d.other_competitions || []).filter(c => c.standing !== 'Winner');
+
+      const headline = d.league
+        ? (d.league.won ? `🏆 Champions of ${d.league.comp_name}`
+          : d.league.relegated ? `😞 Relegated — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`
+          : d.league.promoted ? `⬆️ Promoted — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`
+          : `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`)
+        : 'No league recorded this season';
+
+      const nameList = list => list.length === 0
+        ? 'None'
+        : list.slice(0, 3).map(x => x.name).join(', ') + (list.length > 3 ? ` +${list.length - 3} more` : '');
+
+      const hasClubLeaders = s.goals[0] || s.assists[0] || s.appearances[0] || s.clean_sheets[0];
+      const hasLeagueLeaders = l.goals[0] || l.assists[0];
 
       return `
         <div class="season-overview-title" style="font-size:22px;">Season Summary</div>
-        <div id="season-overview-summary-content" style="margin-top:20px;">
-          <div class="season-overview-stat-row"><span>League Finish</span><span>${positionLine}</span></div>
-          ${otherWins.map(c => `<div class="season-overview-stat-row"><span>🏆 ${c.comp_name}</span><span>Winner</span></div>`).join('')}
-          ${d.team_record ? `<div class="season-overview-stat-row"><span>Record</span><span>${d.team_record.wins}W ${d.team_record.draws}D ${d.team_record.losses}L</span></div>` : ''}
-          ${topScorer ? `<div class="season-overview-stat-row"><span>Top Scorer</span><span>${topScorer.name} (${topScorer.value})</span></div>` : ''}
-          ${topAssist ? `<div class="season-overview-stat-row"><span>Top Assists</span><span>${topAssist.name} (${topAssist.value})</span></div>` : ''}
-          ${biggestGrowth ? `<div class="season-overview-stat-row"><span>Most Improved</span><span>${biggestGrowth.name} (+${biggestGrowth.growth} OVR)</span></div>` : ''}
-          <div class="season-overview-stat-row"><span>Signed</span><span>${d.transfers.signed.length}</span></div>
-          <div class="season-overview-stat-row"><span>Sold</span><span>${d.transfers.sold.length}</span></div>
-          <div class="season-overview-stat-row"><span>Loaned Out</span><span>${d.transfers.loaned.length}</span></div>
+        <div id="season-overview-summary-content">
+          <div class="season-overview-center" style="height:auto; padding: 4px 0 20px;">
+            <div style="font-size:22px; font-weight:800;">${headline}</div>
+            ${d.team_record ? `<div class="season-overview-subtitle" style="margin:4px 0 0;">${d.team_record.wins}W ${d.team_record.draws}D ${d.team_record.losses}L · ${d.team_record.goals_for}-${d.team_record.goals_against} GD</div>` : ''}
+            ${otherWins.length > 0 ? `<div style="color:var(--accent-color); font-weight:700; margin-top:4px;">🏆 ${otherWins.map(c => c.comp_name).join(' · ')}</div>` : ''}
+          </div>
+
+          <div class="season-overview-grid2">
+            <div class="season-overview-stat-block">
+              <h4>Club Leaders</h4>
+              ${s.goals[0] ? `<div class="season-overview-stat-row"><span>Top Scorer</span><span>${s.goals[0].name} (${s.goals[0].value})</span></div>` : ''}
+              ${s.assists[0] ? `<div class="season-overview-stat-row"><span>Top Assists</span><span>${s.assists[0].name} (${s.assists[0].value})</span></div>` : ''}
+              ${s.appearances[0] ? `<div class="season-overview-stat-row"><span>Most Apps</span><span>${s.appearances[0].name} (${s.appearances[0].value})</span></div>` : ''}
+              ${s.clean_sheets[0] ? `<div class="season-overview-stat-row"><span>Clean Sheets</span><span>${s.clean_sheets[0].name} (${s.clean_sheets[0].value})</span></div>` : ''}
+              ${!hasClubLeaders ? `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>` : ''}
+            </div>
+
+            <div class="season-overview-stat-block">
+              <h4>${(d.league && d.league.comp_name) || 'League'} Leaders</h4>
+              ${l.goals[0] ? `<div class="season-overview-stat-row"><span>Golden Boot</span><span>${l.goals[0].name} (${l.goals[0].value})</span></div>` : ''}
+              ${l.assists[0] ? `<div class="season-overview-stat-row"><span>Most Assists</span><span>${l.assists[0].name} (${l.assists[0].value})</span></div>` : ''}
+              ${!hasLeagueLeaders ? `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>` : ''}
+            </div>
+
+            <div class="season-overview-stat-block">
+              <h4>Transfer Activity</h4>
+              <div class="season-overview-stat-row"><span>Signed (${t.signed.length})</span><span style="text-align:right; max-width:60%;">${nameList(t.signed)}</span></div>
+              <div class="season-overview-stat-row"><span>Sold (${t.sold.length})</span><span style="text-align:right; max-width:60%;">${nameList(t.sold)}</span></div>
+              <div class="season-overview-stat-row"><span>Loaned Out (${t.loaned.length})</span><span style="text-align:right; max-width:60%;">${nameList(t.loaned)}</span></div>
+            </div>
+
+            <div class="season-overview-stat-block">
+              <h4>Player Progression</h4>
+              ${p && p.highest_rated[0] ? `<div class="season-overview-stat-row"><span>Highest Rated</span><span>${p.highest_rated[0].name} (${p.highest_rated[0].overall})</span></div>` : ''}
+              ${p && p.biggest_growth[0] ? `<div class="season-overview-stat-row"><span>Most Improved</span><span>${p.biggest_growth[0].name} (+${p.biggest_growth[0].growth})</span></div>` : ''}
+              ${p && p.biggest_regression[0] && p.biggest_regression[0].growth < 0 ? `<div class="season-overview-stat-row"><span>Biggest Drop</span><span>${p.biggest_regression[0].name} (${p.biggest_regression[0].growth})</span></div>` : ''}
+              ${p && p.highest_potential[0] ? `<div class="season-overview-stat-row"><span>Highest Potential</span><span>${p.highest_potential[0].name} (${p.highest_potential[0].potential})</span></div>` : ''}
+              ${!p ? `<div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div>` : ''}
+            </div>
+          </div>
+
+          ${otherResults.length > 0 ? `
+            <div style="margin-top:16px;">
+              <h4 style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--accent-color); margin-bottom:8px;">Other Competitions</h4>
+              ${otherResults.map(c => `<div class="season-overview-stat-row"><span>${c.comp_name}</span><span>${c.standing}</span></div>`).join('')}
+            </div>
+          ` : ''}
         </div>
-        <button class="home-toggle-btn" style="margin-top:24px;" onclick="exportSeasonOverviewPdf()">📄 Export to PDF</button>
+        <button class="home-toggle-btn" style="margin-top:20px;" onclick="exportSeasonOverviewPdf()">📄 Save/Download PDF</button>
       `;
     }
 
@@ -4641,17 +4705,33 @@
     // pulling in a PDF library just for this one button. The @media
     // print stylesheet hides everything except #season-overview-print,
     // which this fills right before printing.
-    function exportSeasonOverviewPdf() {
+    // Fills the print-only element (see the @media print rules) with the
+    // summary content, then asks main.js to render the page straight to a
+    // PDF the user picks a save location for — Electron's own PDF
+    // renderer (webContents.printToPDF) already respects @media print, so
+    // this needs no OS print dialog and no external PDF library.
+    async function exportSeasonOverviewPdf() {
       const summaryContent = document.getElementById('season-overview-summary-content');
       const printEl = document.getElementById('season-overview-print');
-      if (!summaryContent || !printEl || !seasonOverviewData) return;
+      if (!summaryContent || !printEl || !seasonOverviewData || !window.api || !window.api.exportSeasonOverviewPdf) return;
       const d = seasonOverviewData;
       printEl.innerHTML = `
         <h1 style="margin-bottom:4px;">${d.club_name} — ${d.year_label} Season Summary</h1>
         <div style="margin-bottom:20px; color:#555;">Generated from EA FC Companion App</div>
         ${summaryContent.innerHTML}
       `;
-      window.print();
+
+      const btn = document.querySelector('#season-overview-pages .season-overview-page.current .home-toggle-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+      const result = await window.api.exportSeasonOverviewPdf();
+
+      if (btn) { btn.disabled = false; btn.textContent = '📄 Save/Download PDF'; }
+      if (result && result.success) {
+        alert(`Saved: ${result.filePath}`);
+      } else if (!result || !result.canceled) {
+        alert('Could not save the PDF — check the console log for details.');
+      }
     }
 
     // This is first-team-squad players who happen to be young/high-

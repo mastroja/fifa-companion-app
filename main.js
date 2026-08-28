@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const chokidar = require('chokidar');
@@ -503,8 +503,13 @@ function getSeasonPlayerProgression(saveId, seasonId) {
   const curRows = curRes.length > 0 ? curRes[0].values : [];
   if (curRows.length === 0) return null;
 
-  const prevSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id < ${seasonId} ORDER BY id DESC LIMIT 1;`);
-  const prevSeasonId = (prevSeasonRes.length > 0 && prevSeasonRes[0].values.length > 0) ? prevSeasonRes[0].values[0][0] : null;
+  // Skips past any untracked season (see EARLIEST_TRACKED_SEASON_YEAR) —
+  // if the season right before this one predates tracking, there's no
+  // valid "previous" to compare against, same as if this were the save's
+  // first season ever.
+  const prevSeasonRes = db.exec(`SELECT id, year_label FROM seasons WHERE save_id = ${saveId} AND id < ${seasonId} ORDER BY id DESC;`);
+  const prevSeasonRow = prevSeasonRes.length > 0 ? prevSeasonRes[0].values[0] : null;
+  const prevSeasonId = (prevSeasonRow && isSeasonYearLabelTracked(prevSeasonRow[1])) ? prevSeasonRow[0] : null;
 
   const prevOverallByPlayer = new Map();
   if (prevSeasonId) {
@@ -552,6 +557,7 @@ function getSquadProgressionHistory(saveId, seasonId) {
   const byPlayer = new Map();
   if (res.length > 0) {
     res[0].values.forEach(([player_id, name, year_label, overall]) => {
+      if (!isSeasonYearLabelTracked(year_label)) return; // see EARLIEST_TRACKED_SEASON_YEAR
       if (!byPlayer.has(player_id)) byPlayer.set(player_id, { player_id, name, points: [] });
       byPlayer.get(player_id).points.push({ year_label, overall });
     });
@@ -622,6 +628,7 @@ function getSeasonOverview(saveId, seasonId) {
   const leagueHistory = [];
   if (leagueHistoryRes.length > 0) {
     leagueHistoryRes[0].values.forEach(([comp_name, standing, year_label, sid]) => {
+      if (!isSeasonYearLabelTracked(year_label)) return; // see EARLIEST_TRACKED_SEASON_YEAR
       const tier = findPyramidTierServer(comp_name);
       if (tier) leagueHistory.push({ season_id: sid, year_label, tier: tier.tier, tier_name: tier.name, position: parseStandingPositionServer(standing) });
     });
@@ -691,15 +698,29 @@ function getSeasonOverview(saveId, seasonId) {
 // The most recent ended season (is_current = 0) that hasn't had its
 // overview acknowledged yet — null once every ended season has been
 // seen, or if this save has never had a season actually end.
+// The user's save has a stray/incomplete 2024/2025 season on record from
+// before season-scoped tracking (League Stats history, End of Season
+// Overview) was fully built out — rather than deleting that history
+// outright, these newer features just don't consider any season before
+// this one. Not a deletion: player_season_stats/matches/etc. for that
+// season are untouched, only these two entry points skip past it.
+const EARLIEST_TRACKED_SEASON_YEAR = 2025;
+
+function isSeasonYearLabelTracked(yearLabel) {
+  const year = parseInt(String(yearLabel || '').split('/')[0], 10);
+  return !isNaN(year) && year >= EARLIEST_TRACKED_SEASON_YEAR;
+}
+
 function getPendingSeasonOverview(saveId = activeSaveId) {
   if (!db || !saveId) return null;
   const res = db.exec(`
-    SELECT id FROM seasons
+    SELECT id, year_label FROM seasons
     WHERE save_id = ${saveId} AND is_current = 0 AND overview_acknowledged = 0
-    ORDER BY id DESC LIMIT 1;
+    ORDER BY id DESC;
   `);
-  if (res.length === 0 || res[0].values.length === 0) return null;
-  return getSeasonOverview(saveId, res[0].values[0][0]);
+  if (res.length === 0) return null;
+  const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+  return row ? getSeasonOverview(saveId, row[0]) : null;
 }
 
 function acknowledgeSeasonOverview(saveId, seasonId) {
@@ -715,9 +736,10 @@ function acknowledgeSeasonOverview(saveId, seasonId) {
 // boundary. Doesn't check/set overview_acknowledged at all.
 function getSeasonOverviewPreview(saveId = activeSaveId) {
   if (!db || !saveId) return null;
-  const endedRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND is_current = 0 ORDER BY id DESC LIMIT 1;`);
-  if (endedRes.length > 0 && endedRes[0].values.length > 0) {
-    return getSeasonOverview(saveId, endedRes[0].values[0][0]);
+  const endedRes = db.exec(`SELECT id, year_label FROM seasons WHERE save_id = ${saveId} AND is_current = 0 ORDER BY id DESC;`);
+  if (endedRes.length > 0) {
+    const row = endedRes[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+    if (row) return getSeasonOverview(saveId, row[0]);
   }
   const currentSeasonId = getCurrentSeasonForSave(saveId);
   return currentSeasonId ? getSeasonOverview(saveId, currentSeasonId) : null;
@@ -2256,6 +2278,30 @@ function triggerLiveEditorRefresh() {
   });
 }
 
+// Renders the CURRENT page's print-media styles (see #season-overview-print
+// and its @media print rules in index.html — the renderer fills that
+// element with the summary content right before calling this) straight to
+// a PDF file the user picks, via Electron's own PDF renderer — no external
+// PDF library, and no OS print dialog detour either.
+async function exportSeasonOverviewPdf() {
+  if (!mainWindow) return { success: false };
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: 'Save Season Overview PDF',
+    defaultPath: 'season-overview.pdf',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  });
+  if (canceled || !filePath) return { success: false, canceled: true };
+
+  try {
+    const pdfBuffer = await mainWindow.webContents.printToPDF({ printBackground: true, landscape: false });
+    fs.writeFileSync(filePath, pdfBuffer);
+    return { success: true, filePath };
+  } catch (err) {
+    console.error('[PDF Export] Failed to generate/save PDF:', err.message);
+    return { success: false };
+  }
+}
+
 // ------------------------------------------------------------------
 // Electron boilerplate
 // ------------------------------------------------------------------
@@ -2303,6 +2349,7 @@ ipcMain.handle('backfill-academy-for-current-squad', (_event, saveId) => backfil
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
+ipcMain.handle('export-season-overview-pdf', () => exportSeasonOverviewPdf());
 
 app.whenReady().then(async () => {
   await initDatabase();
