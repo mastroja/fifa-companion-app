@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS players (
     player_id INTEGER PRIMARY KEY,  -- matches EA FC internal playerid
     name TEXT NOT NULL,
     position_id INTEGER,
+    -- Comma-separated position ids (same numbering as position_id) the
+    -- player can also play, from EA's preferredposition2..6 fields —
+    -- empty string if none are set. See export_all.lua/export_squad.lua.
+    alt_positions TEXT,
     nationality TEXT,
     dob TEXT,
     height TEXT,

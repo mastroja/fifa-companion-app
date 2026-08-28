@@ -1117,6 +1117,33 @@
       return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: ${bg}; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; font-size: ${fontSize}px; font-weight: 700; color: #fff;">${initials}</div>`;
     }
 
+    // Generic placeholder used for the player's own profile picture — no
+    // real face-photo source exists for EA FC squad players (see comment
+    // above buildInitialsAvatar), and a plain silhouette reads better than
+    // colored initials for a single large portrait.
+    function buildSilhouetteAvatar(sizePx, borderRadius) {
+      const iconSize = Math.round(sizePx * 0.62);
+      return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: #21262d; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; color: #4d5561; flex-shrink: 0;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.9-2.2 4.9-4.9S14.7 2.2 12 2.2 7.1 4.4 7.1 7.1 9.3 12 12 12zm0 2.4c-3.5 0-10.4 1.8-10.4 5.4v2.1h20.8v-2.1c0-3.6-6.9-5.4-10.4-5.4z"/></svg></div>`;
+    }
+
+    // Player height/weight come from the game as "183 cm" / "78 kg" —
+    // converted to feet'inches" and lbs for display.
+    function formatHeightImperial(heightStr) {
+      const cm = parseFloat(String(heightStr || '').replace(/[^\d.]/g, ''));
+      if (!cm) return heightStr || 'N/A';
+      const totalInches = cm / 2.54;
+      let feet = Math.floor(totalInches / 12);
+      let inches = Math.round(totalInches % 12);
+      if (inches === 12) { feet += 1; inches = 0; }
+      return `${feet}'${inches}"`;
+    }
+
+    function formatWeightImperial(weightStr) {
+      const kg = parseFloat(String(weightStr || '').replace(/[^\d.]/g, ''));
+      if (!kg) return weightStr || 'N/A';
+      return `${Math.round(kg * 2.20462262)} lbs`;
+    }
+
     let currentTransferSortColumn = 'fee';
     let transferSortAscending = false;
     let previousActiveTab = 'home';
@@ -1225,6 +1252,24 @@
       const iso = NATIONALITY_ISO_MAP[id];
       if (!iso) return '🏳️';
       return String.fromCodePoint(...iso.split('').map(c => 127397 + c.charCodeAt(0)));
+    }
+
+    // flagcdn.com codes for the subdivision "nations" that have no ISO
+    // 3166-1 code of their own (mirrors NATIONALITY_FLAG_OVERRIDES above).
+    const NATIONALITY_FLAG_CODE_OVERRIDES = {
+      14: 'gb-eng', // England
+      42: 'gb-sct', // Scotland
+      50: 'gb-wls'  // Wales
+    };
+
+    // Small flag images from flagcdn.com (free, no API key) — used instead
+    // of emoji because Windows fonts frequently render flag emoji as blank
+    // boxes. getFlagEmoji() above remains the onerror fallback.
+    function getFlagImageUrl(nationality) {
+      if (!nationality) return null;
+      const id = Number(String(nationality).replace(/\D/g, ''));
+      const code = NATIONALITY_FLAG_CODE_OVERRIDES[id] || (NATIONALITY_ISO_MAP[id] && NATIONALITY_ISO_MAP[id].toLowerCase());
+      return code ? `https://flagcdn.com/w80/${code}.png` : null;
     }
 
     // Small +N/-N badge for the attribute/overall watcher — the change
@@ -1479,6 +1524,15 @@
 
     function getPositionInfo(posId) {
       return POSITION_MAP[Number(posId)] || { label: 'SUB', group: 'MID' };
+    }
+
+    // player.alt_positions is a comma-separated string of raw position ids
+    // (EA's preferredposition2..6, with -1/"not set" slots already dropped
+    // at export time) — turned into a "CAM, RM, ST" label list for display.
+    function getAltPositionsLabel(altPositions) {
+      if (!altPositions) return '';
+      return String(altPositions).split(',').map(s => s.trim()).filter(Boolean)
+        .map(id => getPositionInfo(id).label).join(', ');
     }
 
     function formatMoney(amount) {
@@ -1757,7 +1811,7 @@
              </div>`
         );
       }
-      if (player.on_loan && player.loan_club_name) {
+      if (player.__clubStatus === 'loan' && player.loan_club_name) {
         transferHistoryEntries.push(`
           <div class="timeline-item">
             <div class="timeline-title">On loan at ${player.loan_club_name}</div>
@@ -1790,48 +1844,60 @@
 
       const headAssetSrc = player.headasset || player.headasset_url || player.photo || '';
       const headAssetDisplay = headAssetSrc
-        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--border-color); background: #21262d;" />`
-        : buildInitialsAvatar(player.name, 48, '50%');
+        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 72px; height: 72px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" />`
+        : buildSilhouetteAvatar(72, '10px');
+
+      const flagImageUrl = getFlagImageUrl(player.nationality);
+      const nationalityName = getNationalityName(player.nationality);
+      const altPositionsLabel = getAltPositionsLabel(player.alt_positions);
 
       const clubBadgeDisplay = clubBadgeUrl
-        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 1px solid var(--border-color); border-radius: 50%;" />`
+        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 2px solid var(--border-color); border-radius: 50%; padding: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.45); flex-shrink: 0;" />`
         : buildInitialsAvatar(displayClubName || 'N/A', 40, '50%');
+
+      // Faint flag watermark faded into the card background, sitting behind
+      // the player's details rather than shown as its own icon. `contain`
+      // (not `cover`) so every flag is shown whole at its own real aspect
+      // ratio instead of being cropped by varying amounts depending on how
+      // far its shape is from this box's — flagcdn serves each flag at its
+      // native ratio (e.g. Switzerland is square, England is ~5:3), so
+      // `cover` was zooming some flags in far more than others.
+      const flagWatermark = flagImageUrl
+        ? `<div style="position: absolute; top: -15%; right: -4%; width: 62%; height: 130%; background-image: url('${flagImageUrl}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.16; -webkit-mask-image: linear-gradient(to left, black 25%, transparent 95%); mask-image: linear-gradient(to left, black 25%, transparent 95%); pointer-events: none; z-index: 0;"></div>`
+        : '';
 
       const container = document.getElementById('profile-content-container');
       container.innerHTML = `
-        <div style="background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="width: 50px; height: 35px; background: #21262d; border: 1px solid var(--border-color); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 22px;" title="${getNationalityName(player.nationality)}">${getFlagEmoji(player.nationality)}</div>
-            ${clubBadgeDisplay}
-            ${buildInitialsAvatar(player.name, 45, '6px')}
-          </div>
-          <div style="text-align: right;">
-            <span style="font-size: 12px; color: var(--text-dim);">Market Value: <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></span>
-          </div>
-        </div>
-
-        <div class="profile-header">
-          <div class="profile-main-info">
-            <h2>
-              ${headAssetDisplay}
-              <span>${player.name || 'Unknown Player'}</span>
-              ${jerseyDisplay}
-              ${captainDisplay}
-            </h2>
-            <div class="profile-meta">
-              <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
-              <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
-              <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
-              <span>Nationality: <strong>${getNationalityName(player.nationality)}</strong></span>
-            </div>
-            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-              <span class="badge">Height: ${player.height}</span>
-              <span class="badge">Weight: ${player.weight}</span>
-              ${player.on_loan ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
-              ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
+        <div class="profile-header" style="display: flex; align-items: center; gap: 20px;">
+          ${headAssetDisplay}
+          <div class="profile-main-info" style="position: relative; overflow: hidden; border-radius: 8px; flex: 1;">
+            ${flagWatermark}
+            <div style="position: relative; z-index: 1;">
+              <h2>
+                ${clubBadgeDisplay}
+                <span>${player.name || 'Unknown Player'}</span>
+                ${jerseyDisplay}
+                ${captainDisplay}
+              </h2>
+              <div class="profile-meta">
+                <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
+                <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
+                <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
+                ${altPositionsLabel ? `<span>Alternative Positions: <strong>${altPositionsLabel}</strong></span>` : ''}
+              </div>
+              <div class="profile-meta">
+                <span>Nationality: <strong>${nationalityName}</strong></span>
+                <span>Current Club: <strong>${displayClubName || 'Free Agent'}</strong></span>
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <span class="badge">Height: ${formatHeightImperial(player.height)}</span>
+                <span class="badge">Weight: ${formatWeightImperial(player.weight)}</span>
+                ${player.__clubStatus === 'loan' ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
+                ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
+              </div>
             </div>
           </div>
-          <div style="text-align: center; background: var(--expand-bg); padding: 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+          <div style="text-align: center; background: var(--expand-bg); padding: 16px 22px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
             <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
             <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}${deltaBadge(player.overall_delta, 16)}</strong>
             <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances })}</strong></span>
@@ -1986,8 +2052,9 @@
             </div>
 
             <div class="profile-card">
-              <h3>Contact & Financials</h3>
+              <h3>Contract & Financials</h3>
               <div class="attr-list">
+                <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
                 <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
                 <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
                 <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
@@ -2145,7 +2212,7 @@
               <span class="player-name">
                 <span class="expand-icon">▶</span>
                 ${p.name || 'Unknown'}
-                ${p.on_loan ? '<span class="loan-badge">ON LOAN</span>' : ''}
+                ${p.__clubStatus === 'loan' ? '<span class="loan-badge">ON LOAN</span>' : ''}
                 ${p.__clubStatus === 'transferred' ? '<span class="loan-badge">TRANSFERRED</span>' : ''}
                 ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
               </span>
@@ -2288,7 +2355,7 @@
       }
 
       if (view === 'loaned') {
-        return currentPlayers.filter(p => p.on_loan).map(p => ({
+        return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => ({
           player_id: p.player_id,
           player_name: p.name,
           from_team: ourClub,
@@ -2411,17 +2478,29 @@
       // row's updated_at against the newest one in this set, since a
       // departed player's row simply stops being touched once they're
       // no longer exported — no new Live Editor data needed for this.
+      //
+      // A currently-active loan is re-detected fresh from the live game
+      // state on every export cycle (export_all.lua/export_squad.lua),
+      // so a genuinely-loaned player's row is refreshed right alongside
+      // everyone else's every sync — its updated_at always matches
+      // maxUpdatedAt too. That means on_loan must NOT override staleness:
+      // if a player is recalled and then released/sold before the app
+      // ever syncs the "recalled, not on loan" in-between state, their
+      // last-seen on_loan=1 would otherwise stick forever even though
+      // they've since left the club entirely. A stale row is always
+      // 'transferred', regardless of what on_loan last said.
       let maxUpdatedAt = null;
       mapped.forEach(p => {
         if (p.updated_at && (!maxUpdatedAt || p.updated_at > maxUpdatedAt)) maxUpdatedAt = p.updated_at;
       });
       mapped.forEach(p => {
-        if (p.on_loan) {
-          p.__clubStatus = 'loan';
-          p.__statusRank = 1;
-        } else if (maxUpdatedAt && p.updated_at && p.updated_at < maxUpdatedAt) {
+        const isCurrent = !maxUpdatedAt || !p.updated_at || p.updated_at === maxUpdatedAt;
+        if (!isCurrent) {
           p.__clubStatus = 'transferred';
           p.__statusRank = 2;
+        } else if (p.on_loan) {
+          p.__clubStatus = 'loan';
+          p.__statusRank = 1;
         } else {
           p.__clubStatus = 'normal';
           p.__statusRank = 0;

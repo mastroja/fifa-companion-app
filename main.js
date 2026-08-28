@@ -135,6 +135,14 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Alternate positions, added after some users already had a DB on disk —
+  // same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE players ADD COLUMN alt_positions TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -542,9 +550,17 @@ function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
 }
 
 // Every player_id currently under contract to the save's club — touched
-// by the latest squad sync, or out on loan (still ours). Shared by
+// by the latest squad sync (whether out on loan or not). Shared by
 // getSeasonPlayerProgression to keep a season review's highlights to
 // players still actually with the club, not ones who've since departed.
+//
+// on_loan is NOT trusted on its own: a currently-active loan is
+// re-detected from live game state every export cycle, so it's refreshed
+// (fresh updated_at) right alongside everyone else. Only a player who's
+// stopped being exported entirely — recalled and then released/sold
+// before an in-between sync ever captured them back at the club — would
+// have a stale row, and staleness alone must mean "no longer ours",
+// regardless of what on_loan last said.
 function getCurrentActivePlayerIds(saveId) {
   const currentSeasonForSave = getCurrentSeasonForSave(saveId);
   if (!currentSeasonForSave) return new Set();
@@ -553,8 +569,8 @@ function getCurrentActivePlayerIds(saveId) {
   let maxUpdatedAt = null;
   rows.forEach(([, , updated_at]) => { if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at; });
   const ids = new Set();
-  rows.forEach(([player_id, on_loan, updated_at]) => {
-    if (on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt)) ids.add(player_id);
+  rows.forEach(([player_id, , updated_at]) => {
+    if (!maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt) ids.add(player_id);
   });
   return ids;
 }
@@ -1480,11 +1496,12 @@ function importFifaData(jsonPayload) {
   db.run('BEGIN TRANSACTION;');
   try {
     const playerStmt = db.prepare(`
-      INSERT INTO players (player_id, name, position_id, nationality, dob, height, weight, preferred_foot, photo_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO players (player_id, name, position_id, alt_positions, nationality, dob, height, weight, preferred_foot, photo_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(player_id) DO UPDATE SET
         name=excluded.name,
         position_id=excluded.position_id,
+        alt_positions=excluded.alt_positions,
         nationality=excluded.nationality,
         dob=excluded.dob,
         height=excluded.height,
@@ -1546,6 +1563,7 @@ function importFifaData(jsonPayload) {
         p.player_id,
         p.name || 'Unknown',
         p.position_id || 0,
+        p.alt_positions || '',
         p.nationality || '',
         p.dob || '',
         p.height || '',
@@ -1656,7 +1674,7 @@ function getSquadFromDB(seasonId = currentSeasonId) {
   if (!db || !seasonId) return [];
 
   const res = db.exec(`
-    SELECT p.player_id, p.name, p.position_id, p.nationality, p.dob, p.height, p.weight,
+    SELECT p.player_id, p.name, p.position_id, p.alt_positions, p.nationality, p.dob, p.height, p.weight,
            p.preferred_foot, p.photo_id,
            s.overall, s.potential, s.skill_moves, s.weak_foot, s.club_id, s.club_name, s.contract_expiry,
            s.contract_date, s.duration_months, s.player_role_, s.last_status_change_date,
@@ -1676,44 +1694,45 @@ function getSquadFromDB(seasonId = currentSeasonId) {
     player_id: row[0],
     name: row[1],
     position_id: row[2],
-    nationality: row[3],
-    dob: row[4],
-    height: row[5],
-    weight: row[6],
-    preferred_foot: row[7],
-    photo_id: row[8],
-    overall: row[9],
-    potential: row[10],
-    skill_moves: row[11],
-    weak_foot: row[12],
-    club_id: row[13],
-    club_name: row[14],
-    contract_expiry: row[15],
-    contract_date: row[16],
-    duration_months: row[17],
-    player_role_: row[18],
-    last_status_change_date: row[19],
-    on_loan: row[20] === 1,
-    loan_team_from: row[21],
-    loan_club_name: row[22],
-    loan_date_end: row[23],
-    is_loan_to_buy: row[24] === 1,
-    wage: row[25],
-    goals: row[26],
-    assists: row[27],
-    appearances: row[28],
-    clean_sheets: row[29],
-    saves: row[30],
-    yellow_cards: row[31],
-    red_cards: row[32],
-    avg_rating: row[33],
-    attributes: JSON.parse(row[34] || '{}'),
-    competitions: JSON.parse(row[35] || '[]'),
-    traits: JSON.parse(row[36] || '[]'),
-    play_styles: JSON.parse(row[37] || '[]'),
-    updated_at: row[38],
-    overall_delta: row[39] || 0,
-    attribute_deltas: JSON.parse(row[40] || '{}')
+    alt_positions: row[3],
+    nationality: row[4],
+    dob: row[5],
+    height: row[6],
+    weight: row[7],
+    preferred_foot: row[8],
+    photo_id: row[9],
+    overall: row[10],
+    potential: row[11],
+    skill_moves: row[12],
+    weak_foot: row[13],
+    club_id: row[14],
+    club_name: row[15],
+    contract_expiry: row[16],
+    contract_date: row[17],
+    duration_months: row[18],
+    player_role_: row[19],
+    last_status_change_date: row[20],
+    on_loan: row[21] === 1,
+    loan_team_from: row[22],
+    loan_club_name: row[23],
+    loan_date_end: row[24],
+    is_loan_to_buy: row[25] === 1,
+    wage: row[26],
+    goals: row[27],
+    assists: row[28],
+    appearances: row[29],
+    clean_sheets: row[30],
+    saves: row[31],
+    yellow_cards: row[32],
+    red_cards: row[33],
+    avg_rating: row[34],
+    attributes: JSON.parse(row[35] || '{}'),
+    competitions: JSON.parse(row[36] || '[]'),
+    traits: JSON.parse(row[37] || '[]'),
+    play_styles: JSON.parse(row[38] || '[]'),
+    updated_at: row[39],
+    overall_delta: row[40] || 0,
+    attribute_deltas: JSON.parse(row[41] || '{}')
   }));
 }
 
@@ -1750,7 +1769,7 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
   if (!seasonId) return [];
 
   const res = db.exec(`
-    SELECT p.player_id, p.name, p.position_id, p.nationality, p.dob, p.height, p.weight,
+    SELECT p.player_id, p.name, p.position_id, p.alt_positions, p.nationality, p.dob, p.height, p.weight,
            p.preferred_foot, p.photo_id,
            cur.overall, cur.potential, cur.skill_moves, cur.weak_foot, cur.club_id, cur.club_name, cur.contract_expiry,
            cur.contract_date, cur.duration_months, cur.player_role_, cur.last_status_change_date,
@@ -1772,21 +1791,21 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
   if (res.length === 0) return [];
 
   return res[0].values.map(row => {
-    const totalApps = row[32] || 0;
+    const totalApps = row[33] || 0;
     return {
-      player_id: row[0], name: row[1], position_id: row[2], nationality: row[3], dob: row[4],
-      height: row[5], weight: row[6], preferred_foot: row[7], photo_id: row[8],
-      overall: row[9], potential: row[10], skill_moves: row[11], weak_foot: row[12],
-      club_id: row[13], club_name: row[14], contract_expiry: row[15], contract_date: row[16],
-      duration_months: row[17], player_role_: row[18], last_status_change_date: row[19],
-      on_loan: row[20] === 1, loan_team_from: row[21], loan_club_name: row[22], loan_date_end: row[23],
-      is_loan_to_buy: row[24] === 1, wage: row[25],
-      attributes: JSON.parse(row[26] || '{}'), competitions: JSON.parse(row[27] || '[]'),
-      traits: JSON.parse(row[28] || '[]'), play_styles: JSON.parse(row[29] || '[]'),
-      goals: row[30] || 0, assists: row[31] || 0, appearances: totalApps,
-      clean_sheets: row[33] || 0, saves: row[34] || 0, yellow_cards: row[35] || 0, red_cards: row[36] || 0,
-      avg_rating: totalApps > 0 ? (row[37] || 0) / totalApps : 0,
-      updated_at: row[38]
+      player_id: row[0], name: row[1], position_id: row[2], alt_positions: row[3], nationality: row[4], dob: row[5],
+      height: row[6], weight: row[7], preferred_foot: row[8], photo_id: row[9],
+      overall: row[10], potential: row[11], skill_moves: row[12], weak_foot: row[13],
+      club_id: row[14], club_name: row[15], contract_expiry: row[16], contract_date: row[17],
+      duration_months: row[18], player_role_: row[19], last_status_change_date: row[20],
+      on_loan: row[21] === 1, loan_team_from: row[22], loan_club_name: row[23], loan_date_end: row[24],
+      is_loan_to_buy: row[25] === 1, wage: row[26],
+      attributes: JSON.parse(row[27] || '{}'), competitions: JSON.parse(row[28] || '[]'),
+      traits: JSON.parse(row[29] || '[]'), play_styles: JSON.parse(row[30] || '[]'),
+      goals: row[31] || 0, assists: row[32] || 0, appearances: totalApps,
+      clean_sheets: row[34] || 0, saves: row[35] || 0, yellow_cards: row[36] || 0, red_cards: row[37] || 0,
+      avg_rating: totalApps > 0 ? (row[38] || 0) / totalApps : 0,
+      updated_at: row[39]
     };
   });
 }
@@ -1852,12 +1871,15 @@ function getPastPlayers(saveId = activeSaveId) {
 
   const currentClubById = new Map();
   const stillOnRosterIds = new Set();
-  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+  currentRows.forEach(([player_id, club_id, , updated_at]) => {
     currentClubById.set(player_id, club_id);
-    // Out on loan is still "ours" (contracted here, just playing
-    // elsewhere) — only a row that's gone stale relative to the latest
-    // sync means the player actually left the club.
-    if (on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt)) stillOnRosterIds.add(player_id);
+    // A currently-active loan is re-detected from live game state every
+    // export cycle, so its row is refreshed right alongside everyone
+    // else's — on_loan is never stale while the loan is still real. Only
+    // staleness (row untouched by the latest sync) means the player
+    // actually left the club — trusting a stale on_loan flag on its own
+    // would wrongly keep a recalled-then-sold player listed as "ours".
+    if (!maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt) stillOnRosterIds.add(player_id);
   });
 
   // The user's own team id, same trick as getInferredTransfers: whichever
@@ -1981,12 +2003,14 @@ function getSignedPlayers(saveId = activeSaveId) {
     if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
   });
 
-  // Signed = currently under contract: touched by the latest sync
-  // (on the pitch for us) or out on loan (still ours, just away).
+  // Signed = currently under contract: touched by the latest sync (on
+  // the pitch for us, or out on loan and re-detected fresh this cycle —
+  // see getCurrentActivePlayerIds for why on_loan can't override
+  // staleness on its own).
   const activeIds = [];
   let userTeamId = null;
   currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
-    const isActive = on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt);
+    const isActive = !maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt;
     if (isActive) {
       activeIds.push(player_id);
       if (!on_loan && userTeamId === null) userTeamId = club_id;

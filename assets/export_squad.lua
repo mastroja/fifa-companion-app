@@ -164,6 +164,18 @@ function get_squad_data()
 
             if is_user_team or is_loaned_out then
                 local preferredposition1 = players_table:GetRecordFieldValue(current_record, "preferredposition1")
+                -- Alternate positions the player can also play — up to 5 more
+                -- slots (preferredposition2..6), -1 meaning "not set". Built
+                -- into a comma-separated string of just the real position ids
+                -- (dropping -1s) since that's all the UI needs to display them.
+                local alt_position_ids = {}
+                for i = 2, 6 do
+                    local alt_pos = players_table:GetRecordFieldValue(current_record, "preferredposition" .. i)
+                    if alt_pos and alt_pos ~= -1 then
+                        table.insert(alt_position_ids, tostring(alt_pos))
+                    end
+                end
+                local alt_positions = table.concat(alt_position_ids, ",")
                 local overall = players_table:GetRecordFieldValue(current_record, "overallrating") or 0
                 local potential = players_table:GetRecordFieldValue(current_record, "potential") or 0
                 local nationality_id = players_table:GetRecordFieldValue(current_record, "nationality") or 0
@@ -226,6 +238,7 @@ function get_squad_data()
                 player.player_id = playerid
                 player.name = GetPlayerName(playerid)
                 player.position_id = preferredposition1
+                player.alt_positions = alt_positions
                 player.overall = overall
                 player.potential = potential
                 player.nationality = nationality_id
@@ -372,8 +385,8 @@ local function serialize_to_json(tbl, save_uid, current_date)
     for i, p in ipairs(tbl) do
         local attr = p.attributes or {}
         json = json .. string.format(
-            '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"nationality":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
-            p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.nationality, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
+            '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"alt_positions":"%s","nationality":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
+            p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.alt_positions, p.nationality, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
             p.dob, p.height, p.weight, p.preferred_foot, p.skill_moves, p.weak_foot, p.contract_expiry, p.playerjointeamdate,
             p.wage, p.duration_months, p.contract_date, p.player_role_, p.last_status_change_date,
             tostring(p.is_among_top_scorers), p.jersey_number, tostring(p.injury), p.league_goals_prev_three_matches, tostring(p.is_among_top_scorers_in_team), p.form,
