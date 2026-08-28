@@ -127,6 +127,14 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // End of Season Overview splash, added after some users already had a
+  // DB on disk — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN overview_acknowledged INTEGER DEFAULT 0;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -439,6 +447,280 @@ function getSeasonCompetitionResults(seasonId) {
   `);
   if (res.length === 0) return [];
   return res[0].values.map(row => ({ comp_name: row[0], standing: row[1] }));
+}
+
+// ------------------------------------------------------------------
+// End of Season Overview — the season-boundary splash screen
+// ------------------------------------------------------------------
+//
+// Everything below is computed fresh from already-persisted tables
+// (season_competition_results, player_season_stats, season_league_stats,
+// matches) rather than snapshotted once at rollover — a past season's
+// overview can always be regenerated on demand (see getSeasonOverview
+// and the Preview button in index.html), and there's no risk of racing
+// the exact rollover moment the way a point-in-time snapshot would.
+
+// Whichever competition recorded for this season matches the English
+// pyramid — same lookup used for Youth Squad Career Mode.
+function getSeasonPrimaryLeagueResult(seasonId) {
+  const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
+  const compRows = compRes.length > 0 ? compRes[0].values : [];
+  for (const [comp_name, standing] of compRows) {
+    const tier = findPyramidTierServer(comp_name);
+    if (tier) return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+  }
+  return null;
+}
+
+function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
+  const signed = getSignedPlayers(saveId).filter(p => p.signed_season === yearLabel);
+  const sold = getPastPlayers(saveId).filter(p => p.departed_season === yearLabel);
+
+  const loanRes = db.exec(`
+    SELECT s.player_id, p.name, p.position_id, s.overall, s.loan_club_name, s.loan_date_end
+    FROM player_season_stats s
+    JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId} AND s.on_loan = 1;
+  `);
+  const loaned = loanRes.length > 0 ? loanRes[0].values.map(
+    ([player_id, name, position_id, overall, loan_club_name, loan_date_end]) =>
+      ({ player_id, name, position_id, overall, loan_club_name, loan_date_end })
+  ) : [];
+
+  return { signed, sold, loaned };
+}
+
+// Highest/lowest rated, biggest growth/regression, highest/lowest
+// potential — growth is this season's overall minus the immediately
+// preceding season's, null (excluded from the growth lists) for anyone
+// with no prior-season row to compare against (their first season).
+function getSeasonPlayerProgression(saveId, seasonId) {
+  const curRes = db.exec(`
+    SELECT s.player_id, p.name, s.overall, s.potential
+    FROM player_season_stats s JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId};
+  `);
+  const curRows = curRes.length > 0 ? curRes[0].values : [];
+  if (curRows.length === 0) return null;
+
+  const prevSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id < ${seasonId} ORDER BY id DESC LIMIT 1;`);
+  const prevSeasonId = (prevSeasonRes.length > 0 && prevSeasonRes[0].values.length > 0) ? prevSeasonRes[0].values[0][0] : null;
+
+  const prevOverallByPlayer = new Map();
+  if (prevSeasonId) {
+    const prevRes = db.exec(`SELECT player_id, overall FROM player_season_stats WHERE season_id = ${prevSeasonId};`);
+    if (prevRes.length > 0) prevRes[0].values.forEach(([pid, ovr]) => prevOverallByPlayer.set(pid, ovr));
+  }
+
+  const players = curRows.map(([player_id, name, overall, potential]) => {
+    const prevOverall = prevOverallByPlayer.get(player_id);
+    const growth = (prevOverall !== undefined) ? overall - prevOverall : null;
+    return { player_id, name, overall, potential, growth };
+  });
+
+  const withGrowth = players.filter(p => p.growth !== null);
+  const byDesc = field => [...players].sort((a, b) => b[field] - a[field]).slice(0, 5);
+  const byAsc = field => [...players].sort((a, b) => a[field] - b[field]).slice(0, 5);
+
+  return {
+    highest_rated: byDesc('overall'),
+    lowest_rated: byAsc('overall'),
+    highest_potential: byDesc('potential'),
+    lowest_potential: byAsc('potential'),
+    biggest_growth: [...withGrowth].sort((a, b) => b.growth - a.growth).slice(0, 5),
+    biggest_regression: [...withGrowth].sort((a, b) => a.growth - b.growth).slice(0, 5)
+  };
+}
+
+// Each current squad player's overall across every season with the club
+// up to and including this one — feeds the progression page's line
+// chart. Capped to players who were actually on the books THIS season
+// (not everyone who's ever passed through), to keep the chart readable.
+function getSquadProgressionHistory(saveId, seasonId) {
+  const activeRes = db.exec(`SELECT DISTINCT player_id FROM player_season_stats WHERE season_id = ${seasonId};`);
+  const activeIds = activeRes.length > 0 ? activeRes[0].values.map(r => r[0]) : [];
+  if (activeIds.length === 0) return [];
+
+  const res = db.exec(`
+    SELECT s.player_id, p.name, se.year_label, s.overall
+    FROM player_season_stats s
+    JOIN players p ON p.player_id = s.player_id
+    JOIN seasons se ON se.id = s.season_id
+    WHERE se.save_id = ${saveId} AND s.player_id IN (${activeIds.join(',')}) AND se.id <= ${seasonId}
+    ORDER BY se.id ASC;
+  `);
+  const byPlayer = new Map();
+  if (res.length > 0) {
+    res[0].values.forEach(([player_id, name, year_label, overall]) => {
+      if (!byPlayer.has(player_id)) byPlayer.set(player_id, { player_id, name, points: [] });
+      byPlayer.get(player_id).points.push({ year_label, overall });
+    });
+  }
+  return Array.from(byPlayer.values());
+}
+
+function seasonTopN(seasonId, field, limit) {
+  const res = db.exec(`
+    SELECT p.player_id, p.name, s.overall, s.${field}
+    FROM player_season_stats s JOIN players p ON p.player_id = s.player_id
+    WHERE s.season_id = ${seasonId} AND s.${field} > 0
+    ORDER BY s.${field} DESC LIMIT ${limit};
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([player_id, name, overall, value]) => ({ player_id, name, overall, value }));
+}
+
+function seasonLeagueTopN(seasonId, field, limit) {
+  const res = db.exec(`
+    SELECT player_id, name, team_name, ${field}
+    FROM season_league_stats
+    WHERE season_id = ${seasonId} AND ${field} > 0
+    ORDER BY ${field} DESC LIMIT ${limit};
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([player_id, name, team_name, value]) => ({ player_id, name, team_name, value }));
+}
+
+// The full aggregate payload for one season's End of Season Overview —
+// everything every page of the splash needs, in one round trip.
+function getSeasonOverview(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return null;
+
+  const seasonRes = db.exec(`SELECT year_label FROM seasons WHERE id = ${seasonId} AND save_id = ${saveId};`);
+  if (seasonRes.length === 0 || seasonRes[0].values.length === 0) return null;
+  const yearLabel = seasonRes[0].values[0][0];
+
+  const saveRes = db.exec(`SELECT club_name FROM saves WHERE id = ${saveId};`);
+  const clubName = (saveRes.length > 0 && saveRes[0].values.length > 0 && saveRes[0].values[0][0]) ? saveRes[0].values[0][0] : 'My Club';
+
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  const leaguePosition = leagueResult ? parseStandingPositionServer(leagueResult.standing) : null;
+  const wonLeague = !!leagueResult && leagueResult.standing === 'Winner';
+
+  // Promotion/relegation compares this season's tier against whichever
+  // season directly followed it — only known once THAT season has
+  // recorded at least one recognized-league result of its own, which may
+  // not be true yet immediately after rollover (hence "unknown" is a
+  // valid, honest outcome here, not just win/promoted/relegated/stayed).
+  let relegated = false, promoted = false;
+  if (leagueResult) {
+    const nextSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id > ${seasonId} ORDER BY id ASC LIMIT 1;`);
+    if (nextSeasonRes.length > 0 && nextSeasonRes[0].values.length > 0) {
+      const nextResult = getSeasonPrimaryLeagueResult(nextSeasonRes[0].values[0][0]);
+      if (nextResult) {
+        relegated = nextResult.tier > leagueResult.tier;
+        promoted = nextResult.tier < leagueResult.tier;
+      }
+    }
+  }
+
+  const leagueHistoryRes = db.exec(`
+    SELECT r.comp_name, r.standing, se.year_label, se.id
+    FROM season_competition_results r JOIN seasons se ON se.id = r.season_id
+    WHERE se.save_id = ${saveId} ORDER BY se.id ASC;
+  `);
+  const leagueHistory = [];
+  if (leagueHistoryRes.length > 0) {
+    leagueHistoryRes[0].values.forEach(([comp_name, standing, year_label, sid]) => {
+      const tier = findPyramidTierServer(comp_name);
+      if (tier) leagueHistory.push({ season_id: sid, year_label, tier: tier.tier, tier_name: tier.name, position: parseStandingPositionServer(standing) });
+    });
+  }
+
+  const recordRes = db.exec(`
+    SELECT COUNT(*), SUM(CASE WHEN result='W' THEN 1 ELSE 0 END), SUM(CASE WHEN result='D' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN result='L' THEN 1 ELSE 0 END), SUM(user_score), SUM(opponent_score)
+    FROM matches WHERE season_id = ${seasonId};
+  `);
+  let teamRecord = null;
+  if (recordRes.length > 0 && recordRes[0].values.length > 0 && recordRes[0].values[0][0] > 0) {
+    const [played, wins, draws, losses, gf, ga] = recordRes[0].values[0];
+    teamRecord = { played, wins: wins || 0, draws: draws || 0, losses: losses || 0, goals_for: gf || 0, goals_against: ga || 0 };
+  }
+
+  const allCompsRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
+  const otherCompetitions = [];
+  const wonCompetitions = wonLeague ? [leagueResult.comp_name] : [];
+  if (allCompsRes.length > 0) {
+    allCompsRes[0].values.forEach(([comp_name, standing]) => {
+      if (leagueResult && comp_name === leagueResult.comp_name) return; // shown separately
+      otherCompetitions.push({ comp_name, standing });
+      if (standing === 'Winner') wonCompetitions.push(comp_name);
+    });
+  }
+
+  return {
+    save_id: saveId,
+    season_id: seasonId,
+    year_label: yearLabel,
+    club_name: clubName,
+    league: leagueResult ? {
+      comp_name: leagueResult.comp_name,
+      standing_text: leagueResult.standing,
+      position: leaguePosition,
+      won: wonLeague,
+      relegated,
+      promoted
+    } : null,
+    league_history: leagueHistory,
+    team_record: teamRecord,
+    other_competitions: otherCompetitions,
+    won_competitions: wonCompetitions,
+    squad_leaders: {
+      goals: seasonTopN(seasonId, 'goals', 5),
+      assists: seasonTopN(seasonId, 'assists', 5),
+      appearances: seasonTopN(seasonId, 'appearances', 5),
+      clean_sheets: seasonTopN(seasonId, 'clean_sheets', 5),
+      yellow_cards: seasonTopN(seasonId, 'yellow_cards', 5),
+      red_cards: seasonTopN(seasonId, 'red_cards', 5)
+    },
+    league_leaders: {
+      goals: seasonLeagueTopN(seasonId, 'goals', 5),
+      assists: seasonLeagueTopN(seasonId, 'assists', 5),
+      appearances: seasonLeagueTopN(seasonId, 'appearances', 5),
+      clean_sheets: seasonLeagueTopN(seasonId, 'clean_sheets', 5),
+      yellow_cards: seasonLeagueTopN(seasonId, 'yellow_cards', 5),
+      red_cards: seasonLeagueTopN(seasonId, 'red_cards', 5)
+    },
+    transfers: getSeasonTransfersForSeason(saveId, seasonId, yearLabel),
+    progression: getSeasonPlayerProgression(saveId, seasonId),
+    progression_history: getSquadProgressionHistory(saveId, seasonId)
+  };
+}
+
+// The most recent ended season (is_current = 0) that hasn't had its
+// overview acknowledged yet — null once every ended season has been
+// seen, or if this save has never had a season actually end.
+function getPendingSeasonOverview(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const res = db.exec(`
+    SELECT id FROM seasons
+    WHERE save_id = ${saveId} AND is_current = 0 AND overview_acknowledged = 0
+    ORDER BY id DESC LIMIT 1;
+  `);
+  if (res.length === 0 || res[0].values.length === 0) return null;
+  return getSeasonOverview(saveId, res[0].values[0][0]);
+}
+
+function acknowledgeSeasonOverview(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return { success: false };
+  db.run('UPDATE seasons SET overview_acknowledged = 1 WHERE id = ? AND save_id = ?;', [seasonId, saveId]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// For the "Preview" test button — the most recent ended season if one
+// exists, otherwise the current in-progress season, so there's always
+// something to preview even before a save has ever crossed a season
+// boundary. Doesn't check/set overview_acknowledged at all.
+function getSeasonOverviewPreview(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const endedRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND is_current = 0 ORDER BY id DESC LIMIT 1;`);
+  if (endedRes.length > 0 && endedRes[0].values.length > 0) {
+    return getSeasonOverview(saveId, endedRes[0].values[0][0]);
+  }
+  const currentSeasonId = getCurrentSeasonForSave(saveId);
+  return currentSeasonId ? getSeasonOverview(saveId, currentSeasonId) : null;
 }
 
 // Current youth academy roster for a save — see importYouthAcademy.
@@ -2018,6 +2300,9 @@ ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSea
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
 ipcMain.handle('backfill-academy-for-current-squad', (_event, saveId) => backfillAcademyForCurrentSquad(saveId));
+ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
+ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
+ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 
 app.whenReady().then(async () => {
   await initDatabase();

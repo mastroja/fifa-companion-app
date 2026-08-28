@@ -302,6 +302,133 @@
     .timeline-item::before { content: ''; position: absolute; left: -5px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-color); }
     .timeline-year { font-size: 12px; color: var(--text-dim); }
     .timeline-title { font-weight: 600; font-size: 14px; }
+
+    /* ================= End of Season Overview ================= */
+    .season-overview-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(4, 6, 10, 0);
+      pointer-events: none;
+      transition: background 0.35s ease;
+    }
+    .season-overview-overlay.active {
+      background: rgba(4, 6, 10, 0.82);
+      pointer-events: auto;
+    }
+    .season-overview-card {
+      position: relative;
+      width: min(880px, 92vw);
+      height: min(640px, 88vh);
+      background: linear-gradient(160deg, var(--card-bg), var(--bg-color));
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transform: scale(0.9) translateY(24px);
+      opacity: 0;
+      transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.35s ease;
+    }
+    .season-overview-overlay.active .season-overview-card {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+    .season-overview-skip {
+      position: absolute; top: 16px; right: 20px; z-index: 5;
+      background: none; border: none; color: var(--text-dim);
+      font-weight: 700; font-size: 13px; cursor: pointer; letter-spacing: 0.4px;
+    }
+    .season-overview-skip:hover { color: var(--text-color); }
+    .season-overview-dots { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 5; }
+    .season-overview-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-color); transition: background 0.2s ease, transform 0.2s ease; }
+    .season-overview-dot.active { background: var(--accent-color); transform: scale(1.3); }
+    .season-overview-pages { flex: 1; position: relative; overflow: hidden; }
+    .season-overview-page {
+      position: absolute; inset: 0;
+      padding: 56px 48px 84px;
+      overflow-y: auto;
+      opacity: 0;
+      transform: translateX(24px);
+      transition: opacity 0.32s ease, transform 0.32s ease;
+      pointer-events: none;
+    }
+    .season-overview-page.current {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+    .season-overview-page.leaving {
+      opacity: 0;
+      transform: translateX(-24px);
+    }
+    .season-overview-title { font-size: 28px; font-weight: 800; text-align: center; margin-bottom: 6px; }
+    .season-overview-subtitle { font-size: 15px; color: var(--text-dim); text-align: center; margin-bottom: 24px; }
+    .season-overview-center { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; text-align: center; gap: 8px; }
+    .season-overview-nav {
+      position: absolute; bottom: 22px; right: 24px; z-index: 5;
+      width: 46px; height: 46px; border-radius: 50%;
+      background: var(--accent-color); color: #05130b;
+      border: none; display: flex; align-items: center; justify-content: center;
+      font-size: 20px; font-weight: 900; cursor: pointer;
+      box-shadow: 0 6px 18px rgba(0, 255, 135, 0.35);
+      transition: transform 0.15s ease;
+    }
+    .season-overview-nav:hover { transform: scale(1.08); }
+    .season-overview-nav.final { width: auto; height: auto; border-radius: 24px; padding: 12px 22px; font-size: 14px; letter-spacing: 0.3px; }
+
+    .season-overview-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    .season-overview-stat-block h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent-color); margin-bottom: 8px; }
+    .season-overview-stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; border-bottom: 1px solid var(--border-color); }
+    .season-overview-stat-row:last-child { border-bottom: none; }
+    .season-overview-comp-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: var(--hover-color); border-radius: 8px; margin-bottom: 10px; }
+    .season-overview-comp-row .won { color: var(--accent-color); font-weight: 700; }
+
+    .season-overview-trophy {
+      font-size: 72px; margin: 6px 0;
+      animation: trophyPop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes trophyPop {
+      0% { transform: scale(0) rotate(-20deg); opacity: 0; }
+      60% { transform: scale(1.25) rotate(8deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+    .season-overview-sad {
+      font-size: 60px; margin: 6px 0;
+      animation: sadShake 0.6s ease;
+    }
+    @keyframes sadShake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-6px) rotate(-4deg); }
+      40% { transform: translateX(6px) rotate(4deg); }
+      60% { transform: translateX(-4px) rotate(-2deg); }
+      80% { transform: translateX(4px) rotate(2deg); }
+    }
+    .season-overview-promoted { color: var(--accent-color); font-weight: 700; }
+    .season-overview-relegated { color: var(--attr-red); font-weight: 700; }
+
+    .confetti-piece {
+      position: absolute; top: -12px; width: 8px; height: 14px; opacity: 0.9;
+      animation: confettiFall linear forwards;
+      z-index: 6;
+    }
+    @keyframes confettiFall {
+      0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(640px) rotate(540deg); opacity: 0; }
+    }
+
+    #season-overview-print { display: none; }
+    @media print {
+      body * { visibility: hidden; }
+      #season-overview-print { display: block; }
+      #season-overview-print, #season-overview-print * { visibility: visible; }
+      #season-overview-print {
+        position: absolute; top: 0; left: 0; width: 100%;
+        background: #fff; color: #111; padding: 24px;
+      }
+      #season-overview-print .season-overview-stat-row { border-bottom: 1px solid #ccc; }
+      #season-overview-print h4 { color: #111; }
+    }
   </style>
 </head>
 <body>
@@ -317,6 +444,7 @@
         <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" /> Auto-refresh
       </label>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
+      <button class="refresh-btn" onclick="previewSeasonOverview()" title="Opens the End of Season Overview using whatever season data currently exists — for testing, doesn't mark anything as acknowledged">🏆 Preview Season Overview</button>
     </div>
   </header>
 
@@ -713,6 +841,19 @@
     <div id="youth-warning-popup-body"></div>
     <button class="back-btn" style="margin-top: 16px; width: 100%; justify-content: center;" onclick="dismissYouthWarningPopup()">Got it</button>
   </dialog>
+
+  <!-- End of Season Overview — see openSeasonOverview() in the script.
+       A plain overlay div (not <dialog>) so the pop-in/slide animations
+       and the print-only summary trick both work cleanly. -->
+  <div id="season-overview-overlay" class="season-overview-overlay">
+    <div class="season-overview-card">
+      <button class="season-overview-skip" id="season-overview-skip-btn" onclick="seasonOverviewSkip()">SKIP</button>
+      <div class="season-overview-dots" id="season-overview-dots"></div>
+      <div class="season-overview-pages" id="season-overview-pages"></div>
+      <button class="season-overview-nav" id="season-overview-nav-btn" onclick="seasonOverviewNext()">➜</button>
+    </div>
+  </div>
+  <div id="season-overview-print"></div>
 
   <script>
     let currentCalendar = [];
@@ -2497,7 +2638,10 @@
         currentYouthModeEnabled = !!selected.youth_mode_enabled;
         updateYouthModeButton();
         renderYouthModeWarning();
-        checkPendingSeasonReview();
+        // Sequenced, not parallel — avoids popping the season overview
+        // splash on top of the youth-mode season review dialog if both
+        // happen to be pending at the same season boundary.
+        checkPendingSeasonReview().then(shown => { if (!shown) checkPendingSeasonOverview(); });
       }
     }
 
@@ -4118,10 +4262,396 @@
       pendingSeasonReviewId = null;
     }
 
+    // Returns whether it actually showed something — lets the caller avoid
+    // popping the End of Season Overview on top of this dialog when both
+    // happen to be pending at the same season boundary.
     async function checkPendingSeasonReview() {
-      if (!currentSaveId || !window.api || !window.api.getPendingSeasonReview) return;
+      if (!currentSaveId || !window.api || !window.api.getPendingSeasonReview) return false;
       const review = await window.api.getPendingSeasonReview(currentSaveId);
-      if (review) renderSeasonReviewDialog(review);
+      if (review) { renderSeasonReviewDialog(review); return true; }
+      return false;
+    }
+
+    // ------------------------------------------------------------------
+    // End of Season Overview — multi-page splash shown once a season ends
+    // (see getPendingSeasonOverview/getSeasonOverview in main.js for how
+    // the payload is built). Page order below matches the wireframes:
+    // title, league position, other competitions, squad stats, league-
+    // wide leaders, transfers, player progression, then a summary with
+    // a PDF export.
+    // ------------------------------------------------------------------
+    let seasonOverviewData = null;
+    let seasonOverviewIsPreview = false;
+    let seasonOverviewPageIndex = 0;
+
+    async function checkPendingSeasonOverview() {
+      if (!currentSaveId || !window.api || !window.api.getPendingSeasonOverview) return;
+      const overview = await window.api.getPendingSeasonOverview(currentSaveId);
+      if (overview) openSeasonOverview(overview, false);
+    }
+
+    // Test/demo entry point — the header's "Preview Season Overview"
+    // button. Uses whatever season data currently exists (the most
+    // recently ended season, or the in-progress current one if no season
+    // has ended yet) and never marks anything acknowledged, so it can be
+    // run repeatedly without disturbing the real auto-trigger's state.
+    async function previewSeasonOverview() {
+      if (!currentSaveId || !window.api || !window.api.getSeasonOverviewPreview) {
+        alert('No save selected yet.');
+        return;
+      }
+      const overview = await window.api.getSeasonOverviewPreview(currentSaveId);
+      if (overview) {
+        openSeasonOverview(overview, true);
+      } else {
+        alert('No season data yet to preview — sync at least one squad export first.');
+      }
+    }
+
+    function openSeasonOverview(overview, isPreview) {
+      seasonOverviewData = overview;
+      seasonOverviewIsPreview = isPreview;
+      seasonOverviewPageIndex = 0;
+      document.getElementById('season-overview-pages').innerHTML = '';
+      renderSeasonOverviewPage(null);
+      document.getElementById('season-overview-overlay').classList.add('active');
+    }
+
+    const SEASON_OVERVIEW_PAGES = [
+      { key: 'title', build: seasonOverviewPageTitle },
+      { key: 'league', build: seasonOverviewPageLeague },
+      { key: 'competitions', build: seasonOverviewPageCompetitions },
+      { key: 'squad_stats', build: seasonOverviewPageSquadStats },
+      { key: 'league_leaders', build: seasonOverviewPageLeagueLeaders },
+      { key: 'transfers', build: seasonOverviewPageTransfers },
+      { key: 'progression', build: seasonOverviewPageProgression },
+      { key: 'summary', build: seasonOverviewPageSummary }
+    ];
+
+    function renderSeasonOverviewDots() {
+      const el = document.getElementById('season-overview-dots');
+      if (!el) return;
+      el.innerHTML = SEASON_OVERVIEW_PAGES.map((_, i) =>
+        `<div class="season-overview-dot ${i === seasonOverviewPageIndex ? 'active' : ''}"></div>`
+      ).join('');
+    }
+
+    function updateSeasonOverviewNavButton() {
+      const btn = document.getElementById('season-overview-nav-btn');
+      const skipBtn = document.getElementById('season-overview-skip-btn');
+      const isLast = seasonOverviewPageIndex === SEASON_OVERVIEW_PAGES.length - 1;
+      btn.classList.toggle('final', isLast);
+      btn.textContent = isLast ? 'Proceed to Next Season' : '➜';
+      skipBtn.style.display = isLast ? 'none' : '';
+    }
+
+    // previousEl is the outgoing page's element (null for the very first
+    // page) — kept on-screen briefly with a "leaving" class so the slide/
+    // fade transition actually plays instead of the content just jumping.
+    function renderSeasonOverviewPage(previousEl) {
+      const container = document.getElementById('season-overview-pages');
+      const page = SEASON_OVERVIEW_PAGES[seasonOverviewPageIndex];
+      const pageEl = document.createElement('div');
+      pageEl.className = 'season-overview-page';
+      pageEl.innerHTML = page.build(seasonOverviewData);
+
+      if (previousEl) {
+        previousEl.classList.add('leaving');
+        previousEl.classList.remove('current');
+      }
+      container.appendChild(pageEl);
+      void pageEl.offsetWidth; // force reflow so the transition plays
+      pageEl.classList.add('current');
+      if (previousEl) setTimeout(() => previousEl.remove(), 340);
+
+      renderSeasonOverviewDots();
+      updateSeasonOverviewNavButton();
+      triggerSeasonOverviewCelebration(page.key);
+    }
+
+    function seasonOverviewNext() {
+      const container = document.getElementById('season-overview-pages');
+      const current = container.querySelector('.season-overview-page.current');
+      if (seasonOverviewPageIndex >= SEASON_OVERVIEW_PAGES.length - 1) {
+        finishSeasonOverview();
+        return;
+      }
+      seasonOverviewPageIndex++;
+      renderSeasonOverviewPage(current);
+    }
+
+    function seasonOverviewSkip() {
+      finishSeasonOverview();
+    }
+
+    async function finishSeasonOverview() {
+      document.getElementById('season-overview-overlay').classList.remove('active');
+      const data = seasonOverviewData;
+      const wasPreview = seasonOverviewIsPreview;
+      seasonOverviewData = null;
+      setTimeout(() => { document.getElementById('season-overview-pages').innerHTML = ''; }, 400);
+      if (!wasPreview && data && window.api && window.api.acknowledgeSeasonOverview) {
+        await window.api.acknowledgeSeasonOverview(data.save_id, data.season_id);
+      }
+    }
+
+    function triggerSeasonOverviewCelebration(pageKey) {
+      const d = seasonOverviewData;
+      if (!d) return;
+      if (pageKey === 'league' && d.league && d.league.won) spawnSeasonOverviewConfetti();
+      if (pageKey === 'competitions' && (d.other_competitions || []).some(c => c.standing === 'Winner')) spawnSeasonOverviewConfetti();
+    }
+
+    function spawnSeasonOverviewConfetti() {
+      const card = document.querySelector('.season-overview-card');
+      if (!card) return;
+      const colors = ['#00ff87', '#e3b341', '#58a6ff', '#f778ba', '#ffa657'];
+      for (let i = 0; i < 40; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.background = colors[i % colors.length];
+        piece.style.animationDuration = `${1.2 + Math.random() * 1}s`;
+        piece.style.animationDelay = `${Math.random() * 0.4}s`;
+        card.appendChild(piece);
+        setTimeout(() => piece.remove(), 2600);
+      }
+    }
+
+    // ---- Page builders ----
+
+    function seasonOverviewPageTitle(d) {
+      return `
+        <div class="season-overview-center" style="height:100%;">
+          <div class="season-overview-title">${d.club_name}</div>
+          <div class="season-overview-title" style="font-size:22px; color:var(--accent-color);">${d.year_label}</div>
+          <div class="season-overview-subtitle" style="margin-top:10px;">Season Overview</div>
+        </div>
+      `;
+    }
+
+    function seasonOverviewPageLeague(d) {
+      if (!d.league) {
+        return `<div class="season-overview-center" style="height:100%;"><div class="season-overview-subtitle">No recognized league competition recorded for this season.</div></div>`;
+      }
+      const l = d.league;
+      let statusHtml = '';
+      if (l.won) {
+        statusHtml = `<div class="season-overview-trophy">🏆</div><div style="font-size:20px; font-weight:700; color: var(--accent-color);">Champions!</div>`;
+      } else if (l.relegated) {
+        statusHtml = `<div class="season-overview-sad">😞</div><div class="season-overview-relegated" style="font-size:18px;">Relegated</div>`;
+      } else if (l.promoted) {
+        statusHtml = `<div class="season-overview-trophy" style="font-size:56px;">⬆️</div><div class="season-overview-promoted" style="font-size:18px;">Promoted!</div>`;
+      }
+
+      const realNameByTier = {};
+      d.league_history.forEach(h => { realNameByTier[h.tier] = h.tier_name; });
+      const historyChart = d.league_history.length > 1 ? buildLeagueHistoryChartSvg(d.league_history, realNameByTier) : '';
+
+      return `
+        <div class="season-overview-title" style="font-size:20px;">${l.comp_name}</div>
+        <div class="season-overview-center" style="height:auto; padding: 4px 0 12px;">
+          <div style="font-size:40px; font-weight:800;">${l.position ? ordinal(l.position) : l.standing_text}</div>
+          ${d.team_record ? `<div class="season-overview-subtitle" style="margin:0;">${d.team_record.wins}W ${d.team_record.draws}D ${d.team_record.losses}L · ${d.team_record.goals_for}-${d.team_record.goals_against} GD</div>` : ''}
+          ${statusHtml}
+        </div>
+        ${historyChart ? `<div style="margin-top: 4px;"><div class="season-overview-subtitle" style="margin-bottom:4px;">League History</div>${historyChart}</div>` : ''}
+      `;
+    }
+
+    function seasonOverviewPageCompetitions(d) {
+      if (!d.other_competitions || d.other_competitions.length === 0) {
+        return `<div class="season-overview-center" style="height:100%;"><div class="season-overview-subtitle">No other competitions recorded this season.</div></div>`;
+      }
+      return `
+        <div class="season-overview-title" style="font-size:22px;">Other Competitions</div>
+        <div style="margin-top: 28px;">
+          ${d.other_competitions.map(c => `
+            <div class="season-overview-comp-row">
+              <span>${c.comp_name}</span>
+              <span class="${c.standing === 'Winner' ? 'won' : ''}">${c.standing === 'Winner' ? '🏆 Winner' : c.standing}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function seasonOverviewStatBlock(title, rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="season-overview-stat-block"><h4>${title}</h4><div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div></div>`;
+      }
+      return `
+        <div class="season-overview-stat-block">
+          <h4>${title}</h4>
+          ${rows.map((r, i) => `<div class="season-overview-stat-row"><span>${i + 1}. ${r.name}</span><span>${r.value}</span></div>`).join('')}
+        </div>
+      `;
+    }
+
+    function seasonOverviewPageSquadStats(d) {
+      const s = d.squad_leaders;
+      return `
+        <div class="season-overview-title" style="font-size:20px;">${d.club_name} ${d.year_label} Player Stats</div>
+        <div class="season-overview-grid2" style="margin-top:24px;">
+          ${seasonOverviewStatBlock('Top Scorer', s.goals)}
+          ${seasonOverviewStatBlock('Top Assists', s.assists)}
+          ${seasonOverviewStatBlock('Most Appearances', s.appearances)}
+          ${seasonOverviewStatBlock('Clean Sheets', s.clean_sheets)}
+          ${seasonOverviewStatBlock('Yellow Cards', s.yellow_cards)}
+          ${seasonOverviewStatBlock('Red Cards', s.red_cards)}
+        </div>
+      `;
+    }
+
+    function seasonOverviewLeagueStatBlock(title, rows) {
+      if (!rows || rows.length === 0) {
+        return `<div class="season-overview-stat-block"><h4>${title}</h4><div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div></div>`;
+      }
+      return `
+        <div class="season-overview-stat-block">
+          <h4>${title}</h4>
+          ${rows.map((r, i) => `<div class="season-overview-stat-row"><span>${i + 1}. ${r.name} <span style="color:var(--text-dim);">(${r.team_name})</span></span><span>${r.value}</span></div>`).join('')}
+        </div>
+      `;
+    }
+
+    function seasonOverviewPageLeagueLeaders(d) {
+      const l = d.league_leaders;
+      const leagueName = (d.league && d.league.comp_name) || 'League';
+      return `
+        <div class="season-overview-title" style="font-size:20px;">${leagueName} ${d.year_label} Leaders</div>
+        <div class="season-overview-grid2" style="margin-top:24px;">
+          ${seasonOverviewLeagueStatBlock('Top Scorer', l.goals)}
+          ${seasonOverviewLeagueStatBlock('Top Assists', l.assists)}
+          ${seasonOverviewLeagueStatBlock('Most Appearances', l.appearances)}
+          ${seasonOverviewLeagueStatBlock('Clean Sheets', l.clean_sheets)}
+          ${seasonOverviewLeagueStatBlock('Yellow Cards', l.yellow_cards)}
+          ${seasonOverviewLeagueStatBlock('Red Cards', l.red_cards)}
+        </div>
+      `;
+    }
+
+    function seasonOverviewPageTransfers(d) {
+      const t = d.transfers;
+      const rowsHtml = (list, rowFn) => (!list || list.length === 0)
+        ? `<div class="season-overview-subtitle" style="text-align:left; margin:4px 0 16px;">None.</div>`
+        : list.map(rowFn).join('');
+
+      return `
+        <div class="season-overview-title" style="font-size:22px;">Transfers</div>
+        <h4 style="margin-top:20px; color:var(--accent-color);">Signed</h4>
+        ${rowsHtml(t.signed, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>From ${p.from_team}</span></div>`)}
+        <h4 style="margin-top:16px; color:var(--accent-color);">Sold</h4>
+        ${rowsHtml(t.sold, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>To ${p.current_club || 'Unknown'}</span></div>`)}
+        <h4 style="margin-top:16px; color:var(--accent-color);">Loaned</h4>
+        ${rowsHtml(t.loaned, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>${p.loan_club_name || 'Unknown'} · until ${p.loan_date_end || '—'}</span></div>`)}
+      `;
+    }
+
+    function seasonOverviewProgressionBlock(title, rows, valueFn) {
+      if (!rows || rows.length === 0) {
+        return `<div class="season-overview-stat-block"><h4>${title}</h4><div class="season-overview-subtitle" style="text-align:left; margin:0;">No data.</div></div>`;
+      }
+      return `
+        <div class="season-overview-stat-block">
+          <h4>${title}</h4>
+          ${rows.map((r, i) => `<div class="season-overview-stat-row"><span>${i + 1}. ${r.name}</span><span>${valueFn(r)}</span></div>`).join('')}
+        </div>
+      `;
+    }
+
+    // Overall rating across every season a player's been with the club,
+    // capped to the longest-tenured players for legibility — a full
+    // squad's worth of lines would be unreadable. year_label sorts
+    // correctly as a plain string ("2024/2025" < "2025/2026") since the
+    // leading year is always 4 digits.
+    function buildSeasonOverviewProgressionChartSvg(history) {
+      if (!history || history.length === 0) return '';
+      const capped = [...history].sort((a, b) => b.points.length - a.points.length).slice(0, 8);
+      const years = Array.from(new Set(capped.flatMap(p => p.points.map(pt => pt.year_label)))).sort();
+      if (years.length < 2) return '';
+
+      const width = 700, height = 220, padL = 30, padR = 16, padT = 14, padB = 26;
+      const xFor = year => padL + (years.indexOf(year) / (years.length - 1)) * (width - padL - padR);
+      const yFor = ovr => padT + (1 - (Math.max(50, Math.min(99, ovr)) - 50) / 49) * (height - padT - padB);
+      const colors = ['#00ff87', '#58a6ff', '#f85149', '#e3b341', '#d2a8ff', '#79c0ff', '#56d364', '#ffa657'];
+
+      const lines = capped.map((p, i) => {
+        const pts = p.points.map(pt => `${xFor(pt.year_label).toFixed(1)},${yFor(pt.overall).toFixed(1)}`).join(' ');
+        return `<polyline points="${pts}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="2.5" opacity="0.9" />`;
+      }).join('');
+
+      const yearLabels = years.map(y => `<text x="${xFor(y).toFixed(1)}" y="${height - 6}" font-size="10" text-anchor="middle" style="fill: var(--text-dim);">${shortenSeasonLabel(y)}</text>`).join('');
+
+      const legend = capped.map((p, i) => `<span style="color:${colors[i % colors.length]}; margin-right:12px; font-size:11px;">● ${p.name}</span>`).join('');
+
+      return `
+        <svg viewBox="0 0 ${width} ${height}" style="width:100%; height:auto;">${lines}${yearLabels}</svg>
+        <div style="margin-top:8px; line-height:1.8;">${legend}</div>
+      `;
+    }
+
+    function seasonOverviewPageProgression(d) {
+      const p = d.progression;
+      if (!p) {
+        return `<div class="season-overview-center" style="height:100%;"><div class="season-overview-subtitle">No squad data recorded for this season.</div></div>`;
+      }
+      const chart = buildSeasonOverviewProgressionChartSvg(d.progression_history);
+      return `
+        <div class="season-overview-title" style="font-size:20px;">Player Progression</div>
+        <div class="season-overview-grid2" style="margin-top:20px;">
+          ${seasonOverviewProgressionBlock('Highest Rated', p.highest_rated, r => r.overall)}
+          ${seasonOverviewProgressionBlock('Lowest Rated', p.lowest_rated, r => r.overall)}
+          ${seasonOverviewProgressionBlock('Biggest Growth', p.biggest_growth, r => `+${r.growth}`)}
+          ${seasonOverviewProgressionBlock('Least Growth / Regression', p.biggest_regression, r => (r.growth > 0 ? `+${r.growth}` : r.growth))}
+          ${seasonOverviewProgressionBlock('Highest Potential', p.highest_potential, r => r.potential)}
+          ${seasonOverviewProgressionBlock('Lowest Potential', p.lowest_potential, r => r.potential)}
+        </div>
+        ${chart ? `<div style="margin-top:20px;"><div class="season-overview-subtitle" style="margin-bottom:4px;">Squad Overall Progression</div>${chart}</div>` : ''}
+      `;
+    }
+
+    function seasonOverviewPageSummary(d) {
+      const topScorer = d.squad_leaders.goals[0];
+      const topAssist = d.squad_leaders.assists[0];
+      const biggestGrowth = d.progression && d.progression.biggest_growth[0];
+      const positionLine = d.league
+        ? (d.league.won ? `🏆 Champions of ${d.league.comp_name}` : `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`)
+        : 'No league recorded';
+      const otherWins = (d.other_competitions || []).filter(c => c.standing === 'Winner');
+
+      return `
+        <div class="season-overview-title" style="font-size:22px;">Season Summary</div>
+        <div id="season-overview-summary-content" style="margin-top:20px;">
+          <div class="season-overview-stat-row"><span>League Finish</span><span>${positionLine}</span></div>
+          ${otherWins.map(c => `<div class="season-overview-stat-row"><span>🏆 ${c.comp_name}</span><span>Winner</span></div>`).join('')}
+          ${d.team_record ? `<div class="season-overview-stat-row"><span>Record</span><span>${d.team_record.wins}W ${d.team_record.draws}D ${d.team_record.losses}L</span></div>` : ''}
+          ${topScorer ? `<div class="season-overview-stat-row"><span>Top Scorer</span><span>${topScorer.name} (${topScorer.value})</span></div>` : ''}
+          ${topAssist ? `<div class="season-overview-stat-row"><span>Top Assists</span><span>${topAssist.name} (${topAssist.value})</span></div>` : ''}
+          ${biggestGrowth ? `<div class="season-overview-stat-row"><span>Most Improved</span><span>${biggestGrowth.name} (+${biggestGrowth.growth} OVR)</span></div>` : ''}
+          <div class="season-overview-stat-row"><span>Signed</span><span>${d.transfers.signed.length}</span></div>
+          <div class="season-overview-stat-row"><span>Sold</span><span>${d.transfers.sold.length}</span></div>
+          <div class="season-overview-stat-row"><span>Loaned Out</span><span>${d.transfers.loaned.length}</span></div>
+        </div>
+        <button class="home-toggle-btn" style="margin-top:24px;" onclick="exportSeasonOverviewPdf()">📄 Export to PDF</button>
+      `;
+    }
+
+    // window.print()'s dialog offers "Save as PDF" on every OS — avoids
+    // pulling in a PDF library just for this one button. The @media
+    // print stylesheet hides everything except #season-overview-print,
+    // which this fills right before printing.
+    function exportSeasonOverviewPdf() {
+      const summaryContent = document.getElementById('season-overview-summary-content');
+      const printEl = document.getElementById('season-overview-print');
+      if (!summaryContent || !printEl || !seasonOverviewData) return;
+      const d = seasonOverviewData;
+      printEl.innerHTML = `
+        <h1 style="margin-bottom:4px;">${d.club_name} — ${d.year_label} Season Summary</h1>
+        <div style="margin-bottom:20px; color:#555;">Generated from EA FC Companion App</div>
+        ${summaryContent.innerHTML}
+      `;
+      window.print();
     }
 
     // This is first-team-squad players who happen to be young/high-

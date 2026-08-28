@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS seasons (
     -- Set from export_all.lua's LEAGUE STATS EXPORT (see persistLeagueStats
     -- in main.js), updated on every sync while this is the current season.
     league_name TEXT,
+    -- 1 once the End of Season Overview splash for the season THAT
+    -- FOLLOWED this one has been shown and dismissed — tracked on the
+    -- season that just ENDED, not the new one, since the overview reviews
+    -- the ended season. See getPendingSeasonOverview in main.js.
+    overview_acknowledged INTEGER DEFAULT 0,
     FOREIGN KEY(save_id) REFERENCES saves(id),
     UNIQUE(save_id, year_label)
 );
