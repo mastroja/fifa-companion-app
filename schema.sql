@@ -193,6 +193,7 @@ CREATE TABLE IF NOT EXISTS season_end_reviews (
     league_name TEXT,
     league_tier INTEGER,
     league_average_overall INTEGER,
+    league_average_margin INTEGER,
     allowed_overrated_count INTEGER,
     overrated_count INTEGER,
     overrated_players_json TEXT,

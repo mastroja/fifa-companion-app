@@ -614,6 +614,9 @@
 
   <!-- League Stats Tab -->
   <div id="league-stats-tab" class="tab-content">
+    <div class="home-header-strip">
+      <h2 id="league-stats-league-name">League Stats</h2>
+    </div>
     <div class="home-dashboard-grid home-grid-top">
       <div class="profile-card home-widget">
         <h3><span>Top 10 Scorers</span></h3>
@@ -2431,6 +2434,7 @@
         currentTransfers = [];
         leagueStandings = null;
         currentLeaguePlayerStats = [];
+        currentLeagueStatsLeagueName = null;
         renderTableRows();
         renderPastPlayersTable();
         renderHomeDashboard();
@@ -2808,8 +2812,21 @@
     // up yet" placeholder from an empty currentLeaguePlayerStats until
     // that's done.
     let currentLeaguePlayerStats = [];
+    // The real competition name resolved server-side by export_all.lua's
+    // LEAGUE STATS EXPORT block (same primary-league fixture aggregation
+    // as the Home dashboard's league table). Falls back to the client-side
+    // getPrimaryLeagueName() heuristic for a save synced before this field
+    // existed, so the header still shows something sensible.
+    let currentLeagueStatsLeagueName = null;
+
+    function renderLeagueStatsTabHeader() {
+      const el = document.getElementById('league-stats-league-name');
+      if (!el) return;
+      el.textContent = currentLeagueStatsLeagueName || getPrimaryLeagueName() || 'League Stats';
+    }
 
     function renderLeagueStatsTab() {
+      renderLeagueStatsTabHeader();
       renderLeagueStatsTeamExtremes();
       renderLeaguePlayerStatSection('goals', 'league-stats-top-scorers-body', 10, null);
       renderLeaguePlayerStatSection('assists', 'league-stats-top-assists-body', 10, null);
@@ -3378,6 +3395,8 @@
     function renderExpiringContractsTable() {
       const ranked = currentPlayers
         .filter(p => p.contract_expiry)
+        .map(p => ({ ...p, __monthsLeft: computeMonthsUntilExpiry(p.contract_expiry) }))
+        .filter(p => p.__monthsLeft !== null && p.__monthsLeft <= 18)
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, computeAge(p.dob || p.birthdate), p.wage) }))
         .sort((a, b) => String(a.contract_expiry).localeCompare(String(b.contract_expiry)));
 
@@ -3386,7 +3405,7 @@
           <thead><tr><th>Player</th><th>Expires</th><th>Months Left</th><th>Wage</th><th>Value</th></tr></thead>
           <tbody>
             ${visible.map(p => {
-              const monthsLeft = computeMonthsUntilExpiry(p.contract_expiry);
+              const monthsLeft = p.__monthsLeft;
               return `
                 <tr class="clickable-name" onclick="openPlayerProfile('${p.player_id ?? p.name}')">
                   <td>${p.name}</td>
@@ -3542,15 +3561,36 @@
     // Youth Squad Career Mode — gameplay balancing
     // ------------------------------------------------------------------
     //
-    // Static per-tier baseline overalls, same reasoning and pattern as
+    // Static per-tier baseline overalls, same reasoning as
     // YOUTH_POTENTIAL_THRESHOLD_BY_TIER above (a real live average would
     // need every rival team's roster exported — see main.js's matching
     // constants, which these must stay in sync with). A squad is
     // "overrated" for its league once more players than the tier allows
-    // sit more than YOUTH_MODE_OVERALL_MARGIN above that baseline.
-    const YOUTH_MODE_AVG_OVERALL_BY_TIER = { 1: 80, 2: 76, 3: 72, 4: 68 };
-    const YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER = { 1: Infinity, 2: 4, 3: 3, 4: 2 };
-    const YOUTH_MODE_OVERALL_MARGIN = 2;
+    // sit more than the tier's margin above that baseline.
+    const YOUTH_MODE_TIER_CONFIG = {
+      2: { leagueAverage: 72, allowance: 3, margin: 3 }, // Championship
+      3: { leagueAverage: 67, allowance: 3, margin: 3 }, // League One
+      4: { leagueAverage: 63, allowance: 2, margin: 3 }  // League Two
+    };
+
+    // Premier League scales with CURRENT table position instead of a flat
+    // baseline — a mid-table or relegation-threatened squad gets held to
+    // a tighter cap than a title-chasing top-5 side, which faces no cap
+    // at all. Bands checked in order; the first whose position <= maxPos
+    // applies. Keep in sync with main.js's YOUTH_MODE_PREMIER_LEAGUE_BANDS
+    // (same bands, applied there to the FINAL season position instead of
+    // this live one).
+    const YOUTH_MODE_PREMIER_LEAGUE_BANDS = [
+      { maxPos: 5, leagueAverage: 80, allowance: Infinity, margin: 0 },
+      { maxPos: 8, leagueAverage: 78, allowance: 4, margin: 5 },
+      { maxPos: 14, leagueAverage: 76, allowance: 3, margin: 4 },
+      { maxPos: Infinity, leagueAverage: 74, allowance: 3, margin: 3 }
+    ];
+
+    function getYouthModePremierLeagueBand(position) {
+      return YOUTH_MODE_PREMIER_LEAGUE_BANDS.find(b => position <= b.maxPos)
+        || YOUTH_MODE_PREMIER_LEAGUE_BANDS[YOUTH_MODE_PREMIER_LEAGUE_BANDS.length - 1];
+    }
 
     // Under Youth Squad Career Mode, an exact potential number gives the
     // manager metagame knowledge they wouldn't realistically have — shown
@@ -3623,18 +3663,27 @@
       const tier = findPyramidTier(getPrimaryLeagueName());
       if (!tier) return null;
 
-      const allowance = YOUTH_MODE_OVERRATED_ALLOWANCE_BY_TIER[tier.tier];
-      if (allowance === Infinity || allowance === undefined) return null;
+      let rule, tierName = tier.name;
+      if (tier.tier === 1) {
+        const teamName = getMostCommonClubName();
+        const standing = leagueStandings ? leagueStandings.find(t => t.team_name === teamName) : null;
+        if (!standing) return null; // no live table position yet — can't band it
+        rule = getYouthModePremierLeagueBand(standing.rank);
+        tierName = `${tier.name} (${ordinal(standing.rank)})`;
+      } else {
+        rule = YOUTH_MODE_TIER_CONFIG[tier.tier];
+      }
+      if (!rule || rule.allowance === Infinity) return null;
 
-      const leagueAverage = YOUTH_MODE_AVG_OVERALL_BY_TIER[tier.tier];
-      const cutoff = leagueAverage + YOUTH_MODE_OVERALL_MARGIN;
+      const { leagueAverage, allowance, margin } = rule;
+      const cutoff = leagueAverage + margin;
 
       const overrated = currentPlayers
         .filter(p => p.__clubStatus === 'normal' && Number(p.overall) > cutoff)
         .slice()
         .sort((a, b) => b.overall - a.overall);
 
-      return { tier: tier.tier, tierName: tier.name, leagueAverage, cutoff, allowance, overrated };
+      return { tier: tier.tier, tierName, leagueAverage, cutoff, allowance, margin, overrated };
     }
 
     // Dismissing the warning only clears it for the current violation —
@@ -3648,15 +3697,58 @@
     // triggered the attention-grabbing popup (see showYouthWarningPopup)
     // — resets on app restart. The inline banner stays up the whole time
     // a violation exists; the popup is the occasional, harder-to-miss
-    // nudge, shown once per distinct violation rather than every render.
+    // nudge, normally shown once per distinct violation rather than every
+    // render (see isYouthWarningPopupDueThisMonth below for the extra,
+    // persisted re-trigger that keeps nagging a standing violation).
     const youthWarningPopupShownSignatures = new Set();
 
+    // Includes the cutoff so a Premier League band change (position
+    // crossing 5th/8th/14th) counts as a fresh violation even when the
+    // same players are over the new, different limit.
     function youthWarningSignature(result) {
-      return result.overrated.map(p => p.player_id).sort((a, b) => a - b).join(',') + '|' + result.tier;
+      return result.overrated.map(p => p.player_id).sort((a, b) => a - b).join(',') + '|' + result.tier + '|' + result.cutoff;
     }
 
     function youthWarningMessage(result) {
-      return `You have ${result.overrated.length} players more than ${YOUTH_MODE_OVERALL_MARGIN} OVR above the ${result.tierName} average — you're allowed up to ${result.cutoff} OVR at this level (only ${result.allowance} players above that).`;
+      return `You have ${result.overrated.length} players more than ${result.margin} OVR above the ${result.tierName} average — you're allowed up to ${result.cutoff} OVR at this level (only ${result.allowance} players above that).`;
+    }
+
+    // A violation that's been sitting untouched for months would otherwise
+    // only ever get the one-time popup above and then go quiet forever.
+    // This adds a persisted (survives app restart), per-save monthly
+    // re-trigger instead of tracking transfer-window state separately —
+    // June/July/August and January (the FC career mode windows) are
+    // already calendar months, so nagging once per in-game month
+    // automatically re-surfaces the popup during every transfer window
+    // too, on top of the plain monthly reminder outside of one.
+    function currentIngameMonthKey() {
+      const d = currentIngameDate ? new Date(currentIngameDate) : null;
+      if (!d || isNaN(d.getTime())) return null;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    function youthWarningPopupMonthStorageKey() {
+      return `youthWarningPopupLastShownMonth:${currentSaveId}`;
+    }
+
+    function isYouthWarningPopupDueThisMonth() {
+      const monthKey = currentIngameMonthKey();
+      if (!monthKey || !currentSaveId) return false;
+      try {
+        return localStorage.getItem(youthWarningPopupMonthStorageKey()) !== monthKey;
+      } catch (e) {
+        return false; // localStorage unavailable — fall back to the one-time-per-signature popup only
+      }
+    }
+
+    function markYouthWarningPopupShownThisMonth() {
+      const monthKey = currentIngameMonthKey();
+      if (!monthKey || !currentSaveId) return;
+      try {
+        localStorage.setItem(youthWarningPopupMonthStorageKey(), monthKey);
+      } catch (e) {
+        // localStorage unavailable — popup just won't persist the monthly cadence across restarts
+      }
     }
 
     function dismissYouthWarning() {
@@ -3707,8 +3799,9 @@
       }
       youthWarningDismissedSignature = null; // stale dismissal from a since-changed squad
 
-      if (!youthWarningPopupShownSignatures.has(signature)) {
+      if (!youthWarningPopupShownSignatures.has(signature) || isYouthWarningPopupDueThisMonth()) {
         youthWarningPopupShownSignatures.add(signature);
+        markYouthWarningPopupShownThisMonth();
         showYouthWarningPopup(result);
       }
 
@@ -3745,7 +3838,7 @@
       const body = document.getElementById('season-review-body');
       if (body) {
         body.innerHTML = `
-          <p style="margin: 0 0 4px;">You have <strong>${review.overrated_count}</strong> players who are more than ${YOUTH_MODE_OVERALL_MARGIN} OVR above the ${review.league_name} average.</p>
+          <p style="margin: 0 0 4px;">You have <strong>${review.overrated_count}</strong> players who are more than ${review.league_average_margin} OVR above the ${review.league_name} average.</p>
           <p style="margin: 0 0 4px; color: var(--text-dim); font-size: 13px;">You're only allowed <strong>${review.allowed_overrated_count}</strong> at this level — please consider selling ${review.overrated_count - review.allowed_overrated_count} from the list below.</p>
           <ul class="season-review-players">
             ${review.overrated_players.map(p => `<li><span>${p.name}</span><span class="ovr">${p.overall} OVR</span></li>`).join('')}
@@ -3953,6 +4046,7 @@
         await populateSaveSelector();
         if (currentSaveId !== envelope.save_id) return;
         currentLeaguePlayerStats = envelope.data || [];
+        currentLeagueStatsLeagueName = envelope.league_name || null;
         renderLeagueStatsTab();
       });
 
