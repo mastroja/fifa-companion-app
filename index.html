@@ -631,16 +631,17 @@
           <tr>
             <th onclick="sortPastPlayers('name')">Player ↕</th>
             <th onclick="sortPastPlayers('position_id')">Pos ↕</th>
-            <th onclick="sortPastPlayers('years_active')">Years Active ↕</th>
+            <th onclick="sortPastPlayers('joined_season')">Years Active ↕</th>
             <th onclick="sortPastPlayers('overall')">Current OVR ↕</th>
             <th onclick="sortPastPlayers('current_club')">Current Club ↕</th>
             <th title="No data source for actual transfer fees — always shows Unknown, not sortable">Sold For</th>
             <th onclick="sortPastPlayers('__value')">Current Value ↕</th>
             <th onclick="sortPastPlayers('departed_season')">Departed ↕</th>
+            <th onclick="sortPastPlayers('years_active')">Years at Club ↕</th>
           </tr>
         </thead>
         <tbody id="past-players-body">
-          <tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>
+          <tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -1505,6 +1506,17 @@
       return `${years} yr${years > 1 ? 's' : ''} (${remainingMonths} mo${remainingMonths > 1 ? 's' : ''})`;
     }
 
+    // year_label is "2025/2026" — turns a joined/departed pair into a
+    // "2025-2028" span (joined season's start year through departed
+    // season's END year, i.e. start year + 1), same convention as a
+    // player's "years played" range on a club history page.
+    function formatYearsActiveRange(joinedSeason, departedSeason) {
+      const startYear = parseInt(String(joinedSeason || '').split('/')[0], 10);
+      const departedStartYear = parseInt(String(departedSeason || '').split('/')[0], 10);
+      if (isNaN(startYear) || isNaN(departedStartYear)) return '—';
+      return `${startYear}-${departedStartYear + 1}`;
+    }
+
     function switchTab(tabName) {
       if (tabName !== 'profile') {
         previousActiveTab = tabName;
@@ -1595,10 +1607,23 @@
       // Players list before giving up. overall/potential/attributes come
       // from the watchlist's live lookup when available (see
       // persistFormerPlayerSnapshots in main.js) so the header shows how
-      // they're actually doing now, not just their stats from the day
-      // they left.
+      // they're actually doing now — current club, crest included — not
+      // just their stats from the day they left.
       if (!player) {
-        const formerPlayer = (currentPastPlayers || []).find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+        const findFormer = () => (currentPastPlayers || []).find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
+        let formerPlayer = findFormer();
+        // currentPastPlayers is only populated once the Former Players
+        // tab (or Transfer Hub) has loaded this session — fetch fresh
+        // rather than showing a blank profile if a link is opened before
+        // that ever happened.
+        if (!formerPlayer && window.api && window.api.getPastPlayers) {
+          try {
+            currentPastPlayers = (await window.api.getPastPlayers(currentSaveId)) || [];
+            formerPlayer = findFormer();
+          } catch (e) {
+            console.error('Failed to load former players for profile lookup:', e);
+          }
+        }
         if (formerPlayer) {
           player = {
             ...formerPlayer,
@@ -2627,7 +2652,7 @@
       if (!tbody) return;
 
       if (currentPastPlayers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No former players tracked yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>`;
         return;
       }
 
@@ -2666,12 +2691,13 @@
           <tr>
             <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
-            <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
+            <td>${formatYearsActiveRange(p.joined_season, p.departed_season)}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
             <td>${p.current_club}</td>
             <td style="color: var(--text-dim); font-style: italic;">Unknown</td>
             <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(p.__value)}</td>
             <td>${p.departed_season || '—'}</td>
+            <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
           </tr>
         `;
       }).join('');
