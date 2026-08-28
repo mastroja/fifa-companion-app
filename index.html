@@ -1610,7 +1610,7 @@
         if (academyPlayer) {
           player = {
             ...academyPlayer,
-            potential: `${academyPlayer.potential_low}-${academyPlayer.potential_high}`,
+            potential: formatAcademyPotentialDisplay(academyPlayer),
             club_name: 'Youth Academy',
             wage: 0
           };
@@ -4282,6 +4282,39 @@
       return `${low}-${high}`;
     }
 
+    // The academy's own potential_low/potential_high comes straight from
+    // the game's "potentialvariance" field, which turns out to often be
+    // small or zero in practice — nowhere near the wide, mysterious range
+    // the reveal system uses elsewhere, sometimes even collapsing to a
+    // single exact number. There's no way to get a wider TRUE range out
+    // of the game (potentialvariance is whatever EA's own scouting model
+    // says it is), so: trust the game's range when it's already at least
+    // as wide as a freshly-promoted senior player's starting band for the
+    // club's CURRENT league tier; otherwise fall back to that same
+    // starting band (skewed the same way, centered on the academy's own
+    // reported potential) so an academy prospect never looks more "known"
+    // than a player who's just been promoted.
+    function formatAcademyPotentialDisplay(academyPlayer) {
+      const low = Number(academyPlayer.potential_low || 0);
+      const high = Number(academyPlayer.potential_high || 0);
+      if (!low && !high) return '—';
+      if (!currentYouthModeEnabled) return `${low}-${high}`;
+
+      const gameWidth = high - low;
+      const tier = findPyramidTier(getPrimaryLeagueName());
+      const defaultWidth = (YOUTH_REVEAL_SCHEDULE_BY_TIER[tier ? tier.tier : 4] || YOUTH_REVEAL_SCHEDULE_BY_TIER[4])[0][1];
+      if (gameWidth >= defaultWidth) return `${low}-${high}`;
+
+      // Clamping at the edges can shift the reported low/high off-center
+      // from the real potential — the midpoint is still the best estimate
+      // of it we have without exporting the raw (intentionally hidden)
+      // potential field itself.
+      const potential = Math.round((low + high) / 2);
+      const highOffset = Math.round(defaultWidth * YOUTH_REVEAL_HIGH_OFFSET_FRACTION);
+      const lowOffset = defaultWidth - highOffset;
+      return `${Math.max(1, potential - lowOffset)}-${Math.min(99, potential + highOffset)}`;
+    }
+
     let currentYouthModeEnabled = false;
     let currentSaveId = null;
 
@@ -5122,7 +5155,7 @@
                 <td>${p.__age ?? '—'}</td>
                 <td><span class="pos-badge pos-${p.__posInfo.group}">${p.__posInfo.label}</span></td>
                 <td>${p.overall || 0}</td>
-                <td style="color: var(--accent-color); font-weight:600;">${p.potential_low}-${p.potential_high}</td>
+                <td style="color: var(--accent-color); font-weight:600;">${formatAcademyPotentialDisplay(p)}</td>
                 <td>${formatMoney(p.__value)}</td>
               </tr>
             `).join('')}
