@@ -521,18 +521,18 @@
   <div id="transfers-tab" class="tab-content">
     <div class="filter-container">
       <div style="display: flex; align-items: center; gap: 10px;">
-        <label for="transfer-filter" style="font-weight: bold; font-size: 14px;">Filter View:</label>
+        <label for="transfer-filter" style="font-weight: bold; font-size: 14px;">View:</label>
         <select id="transfer-filter" onchange="filterAndRenderTransfers()">
-          <option value="my_team">My Team</option>
-          <option value="league">Around the League</option>
-          <option value="big_money">Big Money Moves (&gt;€60M)</option>
+          <option value="signed">Signed</option>
+          <option value="sold">Sold</option>
+          <option value="loaned">Loaned</option>
         </select>
       </div>
-      <input 
-        type="text" 
-        id="transfer-search" 
-        class="search-input" 
-        placeholder="Search player, from club, or to club..." 
+      <input
+        type="text"
+        id="transfer-search"
+        class="search-input"
+        placeholder="Search player, from club, or to club..."
         oninput="filterAndRenderTransfers()"
       />
     </div>
@@ -544,7 +544,7 @@
             <th onclick="sortTransfers('player_name')">Player ↕</th>
             <th onclick="sortTransfers('from_team')">From ↕</th>
             <th onclick="sortTransfers('to_team')">To ↕</th>
-            <th onclick="sortTransfers('fee')">Transfer Fee ↕</th>
+            <th id="transfer-detail-header" onclick="sortTransfers('detail')">Signed ↕</th>
           </tr>
         </thead>
         <tbody id="transfers-tbody">
@@ -924,6 +924,8 @@
     let currentSaveIsSnapshot = false;
     let currentSnapshotSyncedAt = null;
     let currentTransfers = [];
+    // Transfer Hub's Signed view (see getTransferHubRows/refreshSignedPlayers).
+    let currentSignedPlayers = [];
     let currentYouthAcademy = [];
     // Populated fresh each time a player profile opens (see
     // openPlayerProfile) — backs the profile's "Stats" card's Season/
@@ -1588,25 +1590,49 @@
         careerCS = fallbackComps.reduce((sum, c) => sum + (Number(c.clean_sheets) || 0), 0);
       }
 
-      const playerTransfers = currentTransfers.filter(t =>
-        (t.player_name || '').toLowerCase() === (player.name || '').toLowerCase()
-      );
-      const transferHistoryHtml = playerTransfers.length > 0
-        ? playerTransfers.map(t => {
-            if (t.transfer_type === 'Academy Graduate') {
-              return `
-                <div class="timeline-item">
-                  <div class="timeline-title">${t.to_team || 'Unknown'} Academy Graduate</div>
-                </div>
-              `;
-            }
-            return `
-              <div class="timeline-item">
-                <div class="timeline-title">${t.from_team || 'Unknown'} → ${t.to_team || 'Unknown'}</div>
-                <div style="font-size: 13px; color: var(--accent-color);">${t.transfer_type || formatMoney(t.fee)}</div>
-              </div>
-            `;
-          }).join('')
+      // Signed/Sold come from the same sources backing the Transfer Hub's
+      // Signed and Sold views (see getTransferHubRows) rather than the old
+      // season-boundary-only currentTransfers, which would silently lose
+      // a player's arrival/departure record once enough seasons passed
+      // that it fell out of the "current vs previous season" comparison.
+      const matchesPlayer = t => t.player_id === player.player_id
+        || (t.name || '').toLowerCase() === (player.name || '').toLowerCase();
+      const signedInfo = currentSignedPlayers.find(matchesPlayer);
+      const soldInfo = currentPastPlayers.find(matchesPlayer);
+      const ourClub = getMostCommonClubName() || 'My Club';
+
+      const transferHistoryEntries = [];
+      if (signedInfo) {
+        transferHistoryEntries.push(signedInfo.is_academy
+          ? `<div class="timeline-item">
+               <div class="timeline-title">Academy Graduate</div>
+               ${signedInfo.signed_season ? `<div style="font-size: 13px; color: var(--accent-color);">${signedInfo.signed_season}</div>` : ''}
+             </div>`
+          : `<div class="timeline-item">
+               <div class="timeline-title">${signedInfo.from_team || 'Unknown Club'} → ${ourClub}</div>
+               <div style="font-size: 13px; color: var(--accent-color);">Signed${signedInfo.signed_season ? ` (${signedInfo.signed_season})` : ''}</div>
+             </div>`
+        );
+      }
+      if (player.on_loan && player.loan_club_name) {
+        transferHistoryEntries.push(`
+          <div class="timeline-item">
+            <div class="timeline-title">On loan at ${player.loan_club_name}</div>
+            ${player.loan_date_end ? `<div style="font-size: 13px; color: var(--accent-color);">Until ${player.loan_date_end}</div>` : ''}
+          </div>
+        `);
+      }
+      if (soldInfo) {
+        transferHistoryEntries.push(`
+          <div class="timeline-item">
+            <div class="timeline-title">${ourClub} → ${soldInfo.current_club || 'Unknown'}</div>
+            <div style="font-size: 13px; color: var(--accent-color);">Departed${soldInfo.departed_season ? ` (${soldInfo.departed_season})` : ''}</div>
+          </div>
+        `);
+      }
+
+      const transferHistoryHtml = transferHistoryEntries.length > 0
+        ? transferHistoryEntries.join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
 
       const traitsHtml = (player.traits && player.traits.length > 0)
@@ -2090,71 +2116,101 @@
       renderTableRows();
     }
 
+    // Transfer Hub's three views, each built from a different existing
+    // data source rather than one shared "transfers" list — there's no
+    // single feed that has fee/date/direction for all of these:
+    //  - Signed: getSignedPlayers (main.js) — everyone currently under
+    //    contract, tagged 'Academy' if ever in the youth academy.
+    //  - Sold: currentPastPlayers, the SAME source as the Former Players
+    //    tab (continuously-accurate departure detection) — never includes
+    //    a loanee, since getPastPlayers already treats "out on loan" as
+    //    still on the books.
+    //  - Loaned: currentPlayers filtered to on_loan, straight from the
+    //    live squad data (loan_club_name/loan_date_end already synced).
+    // Normalized to one {player_id, player_name, from_team, to_team,
+    // detail} shape so sorting/searching/rendering only needs one path.
+    const TRANSFER_HUB_DETAIL_LABELS = { signed: 'Signed', sold: 'Departed', loaned: 'Loan Ends' };
+
+    function getTransferHubRows(view) {
+      const ourClub = getMostCommonClubName() || 'My Club';
+
+      if (view === 'sold') {
+        return currentPastPlayers.map(p => ({
+          player_id: p.player_id,
+          player_name: p.name,
+          from_team: ourClub,
+          to_team: p.current_club || 'Unknown',
+          detail: p.departed_season || '—'
+        }));
+      }
+
+      if (view === 'loaned') {
+        return currentPlayers.filter(p => p.on_loan).map(p => ({
+          player_id: p.player_id,
+          player_name: p.name,
+          from_team: ourClub,
+          to_team: p.loan_club_name || 'Unknown Club',
+          detail: p.loan_date_end || '—'
+        }));
+      }
+
+      // 'signed' (default)
+      return currentSignedPlayers.map(p => ({
+        player_id: p.player_id,
+        player_name: p.name,
+        from_team: p.from_team,
+        to_team: ourClub,
+        detail: p.signed_season || '—'
+      }));
+    }
+
     function sortTransfers(column) {
       if (currentTransferSortColumn === column) {
         transferSortAscending = !transferSortAscending;
       } else {
         currentTransferSortColumn = column;
-        transferSortAscending = column !== 'fee';
+        transferSortAscending = true;
       }
-
-      currentTransfers.sort((a, b) => {
-        let valA = a[column];
-        let valB = b[column];
-
-        if (typeof valA === 'string') {
-          return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
-        } else {
-          valA = Number(valA || 0);
-          valB = Number(valB || 0);
-          return transferSortAscending ? valA - valB : valB - valA;
-        }
-      });
-
       filterAndRenderTransfers();
     }
 
     function filterAndRenderTransfers() {
-      const filterValue = document.getElementById('transfer-filter').value;
+      const filterEl = document.getElementById('transfer-filter');
+      const view = filterEl ? filterEl.value : 'signed';
       const searchQuery = document.getElementById('transfer-search').value.toLowerCase().trim();
       const tbody = document.getElementById('transfers-tbody');
-      tbody.innerHTML = '';
+      const detailHeader = document.getElementById('transfer-detail-header');
+      if (detailHeader) detailHeader.textContent = `${TRANSFER_HUB_DETAIL_LABELS[view] || 'Detail'} ↕`;
 
-      let filtered = currentTransfers.filter(t => {
-        let matchesTab = true;
-        if (filterValue === 'my_team') matchesTab = t.is_user;
-        else if (filterValue === 'league') matchesTab = t.is_league;
-        else if (filterValue === 'big_money') matchesTab = t.is_big_money;
+      let rows = getTransferHubRows(view);
 
-        if (!matchesTab) return false;
-
-        if (searchQuery) {
-          const playerName = (t.player_name || '').toLowerCase();
-          const fromTeam = (t.from_team || '').toLowerCase();
-          const toTeam = (t.to_team || '').toLowerCase();
-          
-          return playerName.includes(searchQuery) || fromTeam.includes(searchQuery) || toTeam.includes(searchQuery);
-        }
-
-        return true;
+      rows.sort((a, b) => {
+        const valA = String(a[currentTransferSortColumn] || '');
+        const valB = String(b[currentTransferSortColumn] || '');
+        return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
       });
 
-      if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No transfers found matching your criteria.</td></tr>`;
+      if (searchQuery) {
+        rows = rows.filter(t =>
+          (t.player_name || '').toLowerCase().includes(searchQuery) ||
+          (t.from_team || '').toLowerCase().includes(searchQuery) ||
+          (t.to_team || '').toLowerCase().includes(searchQuery)
+        );
+      }
+
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No ${view} players found.</td></tr>`;
         return;
       }
 
-      filtered.forEach(t => {
-        const row = document.createElement('tr');
-        row.className = 'transfer-row';
-        row.innerHTML = `
-          <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_name}')">${t.player_name}</strong></td>
+      tbody.innerHTML = rows.map(t => `
+        <tr class="transfer-row">
+          <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_id ?? t.player_name}')">${t.player_name}</strong></td>
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
-          <td style="color: var(--accent-color); font-weight: 600;">${t.transfer_type || formatMoney(t.fee)}</td>
-        `;
-        tbody.appendChild(row);
-      });
+          <td style="color: var(--accent-color); font-weight: 600;">${t.detail}</td>
+        </tr>
+      `).join('');
     }
 
     function transformPlayersForTable(rawList) {
@@ -2243,6 +2299,7 @@
 
       careerTotalsCache = null;
       renderHomeDashboard();
+      filterAndRenderTransfers(); // Loaned view reads currentPlayers directly
     }
 
     // Squad Stats season selector — 'current' mirrors the live squad
@@ -2289,9 +2346,16 @@
       `;
     }
 
+    // Cached so the Transfer Hub's Sold view and a player's profile page
+    // (Transfer History) can reuse this same fetch instead of each making
+    // their own round trip — refreshed alongside the Former Players table.
+    let currentPastPlayers = [];
+
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
-      const pastPlayers = await window.api.getPastPlayers();
+      const pastPlayers = await window.api.getPastPlayers(currentSaveId);
+      currentPastPlayers = pastPlayers || [];
+      filterAndRenderTransfers(); // Sold view reads currentPastPlayers directly
       const tbody = document.getElementById('past-players-body');
       if (!tbody) return;
 
@@ -2322,9 +2386,12 @@
       }).join('');
     }
 
+    // No longer feeds the Transfer Hub table (see getTransferHubRows) —
+    // that's now Signed/Sold/Loaned from their own dedicated sources.
+    // Kept only for whatever still reads currentTransfers/userClubName
+    // bookkeeping server-side (see correctTransferFlags in main.js).
     function processIncomingTransfers(data) {
       currentTransfers = Array.isArray(data) ? data : (data?.transfers || []);
-      sortTransfers(currentTransferSortColumn);
       renderHomeDashboard();
     }
 
@@ -2341,6 +2408,15 @@
       window.api.getInferredTransfers(currentSaveId).then((data) => {
         if (data && Array.isArray(data.transfers)) processIncomingTransfers(data);
       });
+    }
+
+    // Feeds the Transfer Hub's Signed view (see getTransferHubRows) —
+    // self-refreshes the visible table once the fetch resolves so callers
+    // don't each need to remember to re-render afterward.
+    async function refreshSignedPlayers() {
+      if (!window.api || !window.api.getSignedPlayers) return;
+      currentSignedPlayers = (await window.api.getSignedPlayers(currentSaveId)) || [];
+      filterAndRenderTransfers();
     }
 
     // Multi-save support: auto-detect updates this list/selection on its
@@ -2408,6 +2484,7 @@
 
       populateSquadSeasonSelector();
       renderPastPlayersTable();
+      refreshSignedPlayers();
 
       currentYouthAcademy = bundle.youth_academy || [];
       renderYouthAcademyTable();
@@ -2447,11 +2524,14 @@
         leagueStatsSelectedSeasonId = null;
         leagueStatsHistoricalPlayers = [];
         leagueStatsHistoricalLeagueName = null;
+        currentSignedPlayers = [];
+        currentPastPlayers = [];
         renderTableRows();
         renderPastPlayersTable();
         renderHomeDashboard();
         renderLeagueStatsTab();
         populateLeagueStatsSeasonSelector();
+        filterAndRenderTransfers();
       }
     }
 
@@ -4113,6 +4193,7 @@
         refreshInferredTransfers();
         populateSquadSeasonSelector();
         renderPastPlayersTable();
+        refreshSignedPlayers();
         refreshYouthAcademy();
       });
       window.api.onCareerStatsUpdated((data) => processIncomingPlayers(data));

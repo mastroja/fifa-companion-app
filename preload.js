@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('api', {
   getPlayerHonours: (playerId, saveId) => ipcRenderer.invoke('get-player-honours', playerId, saveId),
   acknowledgeSeasonReview: (reviewId) => ipcRenderer.invoke('acknowledge-season-review', reviewId),
   getLeagueStatsForSeason: (seasonId) => ipcRenderer.invoke('get-league-stats-for-season', seasonId),
+  getSignedPlayers: (saveId) => ipcRenderer.invoke('get-signed-players', saveId),
 
   onSquadUpdated: (callback) => ipcRenderer.on('squad-updated', (_event, data) => callback(data)),
   onCareerStatsUpdated: (callback) => ipcRenderer.on('career-stats-updated', (_event, data) => callback(data)),

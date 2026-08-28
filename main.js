@@ -1521,6 +1521,119 @@ function getPastPlayers(saveId = activeSaveId) {
   return results;
 }
 
+// Signed players: everyone currently under contract to the club (on the
+// active roster or out on loan — a loanee is still "signed" here, the
+// Loaned tab covers where they currently are) with where they came from.
+// "Academy" if they were ever tracked in this save's youth academy,
+// otherwise the most recent club season_league_stats shows them at
+// BEFORE they first appeared on our books (a rival team's rival, if
+// they were playing in this same league) — 'Unknown Club' when neither
+// applies, same honesty-about-missing-data philosophy as the rest of
+// this app (player_season_stats only ever records OUR OWN roster, so
+// there's no direct "previous club" field to read for an outside signing).
+function getSignedPlayers(saveId = activeSaveId) {
+  if (!db || !saveId) return [];
+  const currentSeasonForSave = getCurrentSeasonForSave(saveId);
+  if (!currentSeasonForSave) return [];
+
+  const currentRes = db.exec(`
+    SELECT player_id, club_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+  `);
+  const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
+
+  let maxUpdatedAt = null;
+  currentRows.forEach(([, , , updated_at]) => {
+    if (updated_at && (!maxUpdatedAt || updated_at > maxUpdatedAt)) maxUpdatedAt = updated_at;
+  });
+
+  // Signed = currently under contract: touched by the latest sync
+  // (on the pitch for us) or out on loan (still ours, just away).
+  const activeIds = [];
+  let userTeamId = null;
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+    const isActive = on_loan || (maxUpdatedAt && updated_at === maxUpdatedAt);
+    if (isActive) {
+      activeIds.push(player_id);
+      if (!on_loan && userTeamId === null) userTeamId = club_id;
+    }
+  });
+  if (userTeamId === null || activeIds.length === 0) return [];
+
+  const ourClubNameRes = db.exec(`SELECT club_name FROM player_season_stats WHERE club_id = ${userTeamId} AND club_name IS NOT NULL LIMIT 1;`);
+  const ourClubName = (ourClubNameRes.length > 0 && ourClubNameRes[0].values.length > 0) ? ourClubNameRes[0].values[0][0] : null;
+
+  const everInAcademy = new Set();
+  const academyRes = db.exec(`
+    SELECT DISTINCT y.player_id FROM youth_academy_snapshot y
+    JOIN seasons se ON se.id = y.season_id
+    WHERE se.save_id = ${saveId};
+  `);
+  if (academyRes.length > 0) academyRes[0].values.forEach(([pid]) => everInAcademy.add(pid));
+
+  // Earliest season_id each active player_id has ever had a row for on
+  // our books this save — that's "when" they signed. Computed in JS from
+  // a flat, ASC-ordered scan rather than a nested SQL query.
+  const allOursRes = db.exec(`
+    SELECT s.player_id, s.season_id, se.year_label
+    FROM player_season_stats s
+    JOIN seasons se ON se.id = s.season_id
+    WHERE se.save_id = ${saveId}
+    ORDER BY s.season_id ASC;
+  `);
+  const earliestSeasonByPlayer = new Map();
+  if (allOursRes.length > 0) {
+    allOursRes[0].values.forEach(([player_id, season_id, year_label]) => {
+      if (!earliestSeasonByPlayer.has(player_id)) {
+        earliestSeasonByPlayer.set(player_id, { season_id, year_label });
+      }
+    });
+  }
+
+  const bioRes = db.exec(`SELECT player_id, name, position_id, dob FROM players;`);
+  const bioById = new Map();
+  if (bioRes.length > 0) bioRes[0].values.forEach(([player_id, name, position_id, dob]) => bioById.set(player_id, { name, position_id, dob }));
+
+  const results = [];
+  activeIds.forEach(playerId => {
+    const earliest = earliestSeasonByPlayer.get(playerId);
+    const isAcademy = everInAcademy.has(playerId);
+
+    let fromTeam = 'Unknown Club';
+    if (isAcademy) {
+      fromTeam = 'Academy';
+    } else if (earliest) {
+      // A rival team's row for this same player_id from a season BEFORE
+      // they first appeared on our own books — the closest thing to a
+      // real "signed from" club this app can honestly know.
+      const priorRes = db.exec(`
+        SELECT team_name FROM season_league_stats
+        WHERE player_id = ${playerId} AND season_id < ${earliest.season_id}
+        ORDER BY season_id DESC LIMIT 1;
+      `);
+      if (priorRes.length > 0 && priorRes[0].values.length > 0) {
+        const priorTeamName = priorRes[0].values[0][0];
+        // Guards against a same-club false positive (e.g. a promoted
+        // academy player whose earliest player_season_stats row lags one
+        // sync behind their earliest season_league_stats row).
+        if (priorTeamName && priorTeamName !== ourClubName) fromTeam = priorTeamName;
+      }
+    }
+
+    const bio = bioById.get(playerId) || {};
+    results.push({
+      player_id: playerId,
+      name: bio.name || 'Unknown',
+      position_id: bio.position_id || 0,
+      dob: bio.dob || '',
+      from_team: fromTeam,
+      is_academy: isAcademy,
+      signed_season: earliest ? earliest.year_label : null
+    });
+  });
+
+  return results;
+}
+
 // Full multi-season history for one player — this is the whole point.
 // Scoped to a save (player_id is a global EA FC id, so the same real
 // player could exist in more than one save's history).
@@ -1829,6 +1942,7 @@ ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeason
 ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
+ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
 
 app.whenReady().then(async () => {
   await initDatabase();
