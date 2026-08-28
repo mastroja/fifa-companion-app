@@ -595,7 +595,6 @@
         </label>
       </div>
       <button class="home-toggle-btn" onclick="sortTable('club_status')">Sort by Club Status</button>
-      <button class="home-toggle-btn" onclick="onBackfillAcademyClick()" title="Marks every player currently on your senior squad as an academy graduate in the database — for a save where the youth academy wasn't tracked in time to catch these signings naturally.">Mark Current Squad as Academy Graduates</button>
     </div>
 
     <div class="table-container">
@@ -4044,28 +4043,6 @@
         currentYouthModeEnabled = true;
         updateYouthModeButton();
         renderYouthModeWarning();
-      }
-    }
-
-    // One-time manual fix for a save where the youth academy wasn't being
-    // tracked yet when today's senior players were actually promoted —
-    // see backfillAcademyForCurrentSquad in main.js for why this writes to
-    // the earliest season on record rather than the current one.
-    async function onBackfillAcademyClick() {
-      if (!currentSaveId || !window.api || !window.api.backfillAcademyForCurrentSquad) return;
-
-      const confirmed = confirm(
-        'Mark every player currently on your senior squad as an academy graduate?\n\n' +
-        'This permanently updates the database — use it only if the youth academy genuinely wasn\'t being tracked when these players were promoted.'
-      );
-      if (!confirmed) return;
-
-      const result = await window.api.backfillAcademyForCurrentSquad(currentSaveId);
-      if (result && result.success) {
-        alert(`Marked ${result.marked} player${result.marked === 1 ? '' : 's'} as academy graduates.`);
-        refreshSignedPlayers();
-      } else {
-        alert('Nothing to mark — no current squad data found for this save yet.');
       }
     }
 

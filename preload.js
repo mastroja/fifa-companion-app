@@ -23,7 +23,6 @@ contextBridge.exposeInMainWorld('api', {
   acknowledgeSeasonReview: (reviewId) => ipcRenderer.invoke('acknowledge-season-review', reviewId),
   getLeagueStatsForSeason: (seasonId) => ipcRenderer.invoke('get-league-stats-for-season', seasonId),
   getSignedPlayers: (saveId) => ipcRenderer.invoke('get-signed-players', saveId),
-  backfillAcademyForCurrentSquad: (saveId) => ipcRenderer.invoke('backfill-academy-for-current-squad', saveId),
   getPendingSeasonOverview: (saveId) => ipcRenderer.invoke('get-pending-season-overview', saveId),
   acknowledgeSeasonOverview: (saveId, seasonId) => ipcRenderer.invoke('acknowledge-season-overview', saveId, seasonId),
   getSeasonOverviewPreview: (saveId) => ipcRenderer.invoke('get-season-overview-preview', saveId),
