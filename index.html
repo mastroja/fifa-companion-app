@@ -225,6 +225,16 @@
     #youth-mode-btn.youth-mode-on { background: #1a2e22; border-color: #3fb950; color: #3fb950; cursor: default; }
     #youth-mode-btn.youth-mode-on:hover { background: #1a2e22; color: #3fb950; border-color: #3fb950; }
 
+    .refresh-controls { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .switch-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none; }
+    .switch-label:hover { color: var(--text-color); }
+    .switch { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch-slider { position: absolute; inset: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; transition: 0.2s; }
+    .switch-slider::before { content: ''; position: absolute; width: 10px; height: 10px; left: 2px; top: 2px; background: var(--text-dim); border-radius: 50%; transition: 0.2s; }
+    .switch input:checked + .switch-slider { background: #0d2e1f; border-color: var(--accent-color); }
+    .switch input:checked + .switch-slider::before { transform: translateX(14px); background: var(--accent-color); }
+
     .youth-mode-warning-banner {
       display: flex;
       flex-direction: column;
@@ -434,12 +444,16 @@
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <button class="refresh-btn" id="youth-mode-btn" onclick="onYouthModeButtonClick()">🎓 Youth Mode: Off</button>
-      <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); cursor: pointer;" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
-        <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" /> Auto-refresh
-      </label>
-      <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
-      <button class="refresh-btn" onclick="previewSeasonOverview()" title="Opens the End of Season Overview using whatever season data currently exists — for testing, doesn't mark anything as acknowledged">🏆 Preview Season Overview</button>
-      <button class="refresh-btn" onclick="previewSeasonOverview(true)" title="Same as Preview, but fakes a relegation and an EFL Cup win so you can see the celebration/relegation animations without actually needing that result — for testing only, doesn't touch any real data">🧪 Test Celebrations</button>
+      <div class="refresh-controls">
+        <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
+        <label class="switch-label" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
+          <span class="switch">
+            <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" />
+            <span class="switch-slider"></span>
+          </span>
+          Auto-refresh
+        </label>
+      </div>
     </div>
   </header>
 
