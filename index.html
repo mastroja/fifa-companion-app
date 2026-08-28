@@ -620,6 +620,7 @@
             <th onclick="sortTable('appearances')">Apps ↕</th>
             <th onclick="sortTable('offensive_stat')">Goals ↕</th>
             <th onclick="sortTable('assists')">Assists ↕</th>
+            <th onclick="sortTable('ga')" title="Goal contributions: goals + assists">G+A ↕</th>
             <th onclick="sortTable('clean_sheets')">CS ↕</th>
             <th onclick="sortTable('yellow_cards')">🟨 ↕</th>
             <th onclick="sortTable('red_cards')">🟥 ↕</th>
@@ -627,7 +628,7 @@
           </tr>
         </thead>
         <tbody id="stats-body">
-          <tr><td colspan="11" class="empty-state">No squad data loaded.</td></tr>
+          <tr><td colspan="12" class="empty-state">No squad data loaded.</td></tr>
         </tbody>
       </table>
     </div>
@@ -2270,7 +2271,7 @@
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="11" class="empty-state">No players match your search criteria.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="12" class="empty-state">No players match your search criteria.</td></tr>`;
         return;
       }
 
@@ -2302,6 +2303,7 @@
           <td>${p.appearances || 0}</td>
           <td>${p.goals || 0}</td>
           <td>${p.assists || 0}</td>
+          <td><strong>${p.ga || 0}</strong></td>
           <td><span class="${Number(p.clean_sheets) > 0 ? 'stat-cs' : 'zero-stat'}">${p.clean_sheets || 0}</span></td>
           <td><span class="${Number(p.yellow_cards) > 0 ? 'stat-yellow' : 'zero-stat'}">${p.yellow_cards || 0}</span></td>
           <td><span class="${Number(p.red_cards) > 0 ? 'stat-red' : 'zero-stat'}">${p.red_cards || 0}</span></td>
@@ -2344,7 +2346,7 @@
           });
 
           subTableHTML += `</tbody></table></div>`;
-          detailRow.innerHTML = `<td colspan="11">${subTableHTML}</td>`;
+          detailRow.innerHTML = `<td colspan="12">${subTableHTML}</td>`;
           
           row.onclick = (e) => {
             if (e.target.classList.contains('clickable-name') || e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
@@ -2544,6 +2546,7 @@
           competitions: filteredCompetitions,
           goals, assists, appearances, clean_sheets, yellow_cards, red_cards,
           offensive_stat: goals,
+          ga: goals + assists,
           avg_rating: computedAvgRating
         };
       });
