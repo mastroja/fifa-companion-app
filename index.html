@@ -222,10 +222,27 @@
     .refresh-btn:disabled { opacity: 0.6; cursor: default; }
     .refresh-btn.spinning { color: var(--accent-color); }
 
-    #youth-mode-btn.youth-mode-on { background: #1a2e22; border-color: #3fb950; color: #3fb950; cursor: default; }
-    #youth-mode-btn.youth-mode-on:hover { background: #1a2e22; color: #3fb950; border-color: #3fb950; }
+    .youth-mode-header-badge { background: #1a2e22; border-color: #3fb950; color: #3fb950; }
 
-    .refresh-controls { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+    .settings-wrap { position: relative; }
+    .settings-gear-btn { font-size: 15px; padding: 6px 12px; }
+    .settings-gear-btn.open { background: var(--hover-color); color: var(--accent-color); border-color: var(--accent-color); }
+    .settings-panel {
+      display: none;
+      position: absolute; top: calc(100% + 10px); right: 0; z-index: 60;
+      width: 270px;
+      background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px;
+      padding: 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    }
+    .settings-panel.open { display: block; }
+    .settings-section { margin-bottom: 16px; }
+    .settings-section:last-child { margin-bottom: 0; }
+    .settings-section h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px; }
+    .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+    .settings-row + .settings-row { margin-top: 10px; }
+    .settings-row select { font-size: 13px; padding: 5px 8px; }
+    .settings-row .refresh-btn { padding: 4px 10px; font-size: 12px; }
+
     .switch-label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); cursor: pointer; user-select: none; }
     .switch-label:hover { color: var(--text-color); }
     .switch { position: relative; display: inline-block; width: 30px; height: 16px; flex-shrink: 0; }
@@ -424,14 +441,31 @@
 
     #season-overview-print { display: none; }
     @media print {
+      /* No margin option is passed to Electron's printToPDF (see
+         exportSeasonOverviewPdf in main.js), so this padding is the ONLY
+         page margin — that's deliberate: it keeps everything under one
+         control point instead of stacking our padding on top of Chromium's
+         own default print margins, which is what was pushing a trailing
+         sliver of content onto a second page. zoom + the tightened sizes
+         below give it headroom to fit a full summary on one Letter page
+         even when every stat block has content. */
+      @page { size: letter; margin: 0; }
       body * { visibility: hidden; }
       #season-overview-print { display: block; }
       #season-overview-print, #season-overview-print * { visibility: visible; }
       #season-overview-print {
         position: absolute; top: 0; left: 0; width: 100%;
-        background: #fff; color: #111; padding: 24px;
+        background: #fff; color: #111; padding: 36px;
+        zoom: 0.82;
       }
-      #season-overview-print .season-overview-stat-row { border-bottom: 1px solid #ccc; }
+      #season-overview-print h1 { font-size: 20px; margin: 0 0 2px; }
+      #season-overview-print .season-overview-title { font-size: 16px; margin-bottom: 2px; }
+      #season-overview-print .season-overview-subtitle { font-size: 11px; margin-bottom: 8px; }
+      #season-overview-print .season-overview-center { gap: 2px; padding: 4px 0 10px !important; }
+      #season-overview-print .season-overview-grid2 { gap: 12px; }
+      #season-overview-print .season-overview-stat-block { page-break-inside: avoid; break-inside: avoid; }
+      #season-overview-print .season-overview-stat-block h4 { font-size: 11px; margin-bottom: 4px; }
+      #season-overview-print .season-overview-stat-row { font-size: 11px; padding: 2px 0; border-bottom: 1px solid #ccc; }
       #season-overview-print h4 { color: #111; }
     }
   </style>
@@ -443,16 +477,47 @@
     <div class="header-controls">
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
-      <button class="refresh-btn" id="youth-mode-btn" onclick="onYouthModeButtonClick()">🎓 Youth Mode: Off</button>
-      <div class="refresh-controls">
-        <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
-        <label class="switch-label" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
-          <span class="switch">
-            <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" />
-            <span class="switch-slider"></span>
-          </span>
-          Auto-refresh
-        </label>
+      <span class="badge youth-mode-header-badge" id="youth-mode-header-badge" style="display: none;" title="Youth Squad Career Mode is permanently enabled for this save.">🎓 Youth Mode Active</span>
+      <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
+      <div class="settings-wrap" id="settings-wrap">
+        <button class="refresh-btn settings-gear-btn" id="settings-gear-btn" onclick="toggleSettingsPanel()" title="Settings">⚙️</button>
+        <div class="settings-panel" id="settings-panel">
+          <div class="settings-section">
+            <h4>Refresh</h4>
+            <label class="settings-row" style="cursor: pointer;" title="Automatically presses Refresh every minute, but only while this app window is focused — it won't steal focus from the game or anything else while you're not looking at the app.">
+              <span>Auto-refresh</span>
+              <span class="switch">
+                <input type="checkbox" id="auto-refresh-toggle" onchange="onAutoRefreshToggle(this.checked)" />
+                <span class="switch-slider"></span>
+              </span>
+            </label>
+          </div>
+          <div class="settings-section">
+            <h4>Display</h4>
+            <div class="settings-row">
+              <span>Units</span>
+              <select id="settings-units-select" onchange="onUnitsChange(this.value)">
+                <option value="imperial">Imperial (ft, lbs)</option>
+                <option value="metric">Metric (cm, kg)</option>
+              </select>
+            </div>
+            <div class="settings-row">
+              <span>Currency</span>
+              <select id="settings-currency-select" onchange="onCurrencyChange(this.value)">
+                <option value="EUR">€ Euro</option>
+                <option value="USD">$ US Dollar</option>
+                <option value="GBP">£ British Pound</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h4>Youth Squad Career Mode</h4>
+            <div class="settings-row" id="settings-youth-mode-row">
+              <span id="settings-youth-mode-status" style="color: var(--text-dim);">Not enabled</span>
+              <button class="refresh-btn" id="settings-youth-mode-btn" onclick="onYouthModeButtonClick()" title="Enable Youth Squad Career Mode for this save (permanent, cannot be turned off).">Enable</button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -637,8 +702,11 @@
 
   <!-- Former Players Tab -->
   <div id="past-players-tab" class="tab-content">
-    <div style="font-size: 13px; color: var(--text-dim); margin-bottom: 14px;">
-      Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For has no data source since the game's transfer-history table crashes when read — see the "Departed" column for when they left instead.
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px;">
+      <div style="font-size: 13px; color: var(--text-dim);">
+        Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For has no data source since the game's transfer-history table crashes when read — see the "Departed" column for when they left instead.
+      </div>
+      <button class="refresh-btn" style="flex-shrink: 0;" onclick="onClearFormerPlayersClick()" title="Hides every former player currently listed — for wiping the pre-youth-rebuild squad so it doesn't count. Doesn't touch past season stats; anyone who leaves after this still shows up normally.">🧹 Clear Former Players</button>
     </div>
     <div class="table-container">
       <table>
@@ -1142,8 +1210,14 @@
       return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: #21262d; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; color: #4d5561; flex-shrink: 0;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.9-2.2 4.9-4.9S14.7 2.2 12 2.2 7.1 4.4 7.1 7.1 9.3 12 12 12zm0 2.4c-3.5 0-10.4 1.8-10.4 5.4v2.1h20.8v-2.1c0-3.6-6.9-5.4-10.4-5.4z"/></svg></div>`;
     }
 
+    // See the Settings panel (Display section) — 'imperial' or 'metric',
+    // persisted in localStorage and read by formatHeight/formatWeight
+    // below. Purely a display preference, not save data.
+    let currentUnits = 'imperial';
+
     // Player height/weight come from the game as "183 cm" / "78 kg" —
-    // converted to feet'inches" and lbs for display.
+    // converted to feet'inches" and lbs for imperial display; metric just
+    // normalizes/rounds the game's own units back out.
     function formatHeightImperial(heightStr) {
       const cm = parseFloat(String(heightStr || '').replace(/[^\d.]/g, ''));
       if (!cm) return heightStr || 'N/A';
@@ -1158,6 +1232,24 @@
       const kg = parseFloat(String(weightStr || '').replace(/[^\d.]/g, ''));
       if (!kg) return weightStr || 'N/A';
       return `${Math.round(kg * 2.20462262)} lbs`;
+    }
+
+    function formatHeightMetric(heightStr) {
+      const cm = parseFloat(String(heightStr || '').replace(/[^\d.]/g, ''));
+      return cm ? `${Math.round(cm)} cm` : (heightStr || 'N/A');
+    }
+
+    function formatWeightMetric(weightStr) {
+      const kg = parseFloat(String(weightStr || '').replace(/[^\d.]/g, ''));
+      return kg ? `${Math.round(kg)} kg` : (weightStr || 'N/A');
+    }
+
+    function formatHeight(heightStr) {
+      return currentUnits === 'metric' ? formatHeightMetric(heightStr) : formatHeightImperial(heightStr);
+    }
+
+    function formatWeight(weightStr) {
+      return currentUnits === 'metric' ? formatWeightMetric(weightStr) : formatWeightImperial(weightStr);
     }
 
     let currentTransferSortColumn = 'fee';
@@ -1562,14 +1654,39 @@
         .map(id => getPositionInfo(id).label).join(', ');
     }
 
+    // See the Settings panel (Display section) — the game's own wage/value
+    // figures are all in EUR, so this is the currency the user picked to
+    // view them in instead, persisted in localStorage. Rates are static
+    // approximations (not a live feed) — fine for a companion app display
+    // preference, not anything financial.
+    let currentCurrency = 'EUR';
+    const CURRENCY_RATES_FROM_EUR = { EUR: 1, USD: 1.08, GBP: 0.86 };
+    const CURRENCY_SYMBOLS = { EUR: '€', USD: '$', GBP: '£' };
+
+    function convertFromEur(amount) {
+      return Number(amount || 0) * (CURRENCY_RATES_FROM_EUR[currentCurrency] || 1);
+    }
+
+    function currencySymbol() {
+      return CURRENCY_SYMBOLS[currentCurrency] || '€';
+    }
+
     function formatMoney(amount) {
       if (!amount) return 'Free / Loan';
-      if (amount >= 1000000) {
-        return `€${(amount / 1000000).toFixed(1)}M`;
-      } else if (amount > 0) {
-        return `€${(amount / 1000).toFixed(0)}K`;
+      const converted = convertFromEur(amount);
+      if (converted >= 1000000) {
+        return `${currencySymbol()}${(converted / 1000000).toFixed(1)}M`;
+      } else if (converted > 0) {
+        return `${currencySymbol()}${(converted / 1000).toFixed(0)}K`;
       }
       return 'Free / Loan';
+    }
+
+    // For the raw "wage/wk" figures shown alongside formatMoney's rounded
+    // K/M values — full precision, converted and comma-formatted, with no
+    // suffix so call sites can append their own "/wk" spacing.
+    function formatWageAmount(wage) {
+      return `${currencySymbol()}${Math.round(convertFromEur(wage)).toLocaleString()}`;
     }
 
     function parseBirthDate(dobInput) {
@@ -1599,7 +1716,12 @@
       return isNaN(age) ? null : age;
     }
 
+    // Tracked so a settings change (units/currency) can re-open whichever
+    // profile is currently on screen — see refreshAllViewsForSettingsChange.
+    let lastOpenedProfileIdentifier = null;
+
     async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
+      lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
 
       // Not on the senior squad — check the youth academy roster before
@@ -1955,8 +2077,8 @@
                 <span>Current Club: <strong>${displayClubName || 'Free Agent'}</strong></span>
               </div>
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-                <span class="badge">Height: ${formatHeightImperial(player.height)}</span>
-                <span class="badge">Weight: ${formatWeightImperial(player.weight)}</span>
+                <span class="badge">Height: ${formatHeight(player.height)}</span>
+                <span class="badge">Weight: ${formatWeight(player.weight)}</span>
                 ${player.__clubStatus === 'loan' ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
                 ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
               </div>
@@ -2132,7 +2254,7 @@
               ` : `
                 <div class="attr-list">
                   <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
-                  <div class="attr-item"><span>Wage:</span> <strong>€${(player.wage || 0).toLocaleString()} / wk</strong></div>
+                  <div class="attr-item"><span>Wage:</span> <strong>${formatWageAmount(player.wage)} / wk</strong></div>
                   <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
                   <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
                   <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
@@ -2663,6 +2785,24 @@
       renderPastPlayersRows();
     }
 
+    // Hides every former player currently listed (see
+    // former_players_cleared_before/clearFormerPlayers in main.js) — for
+    // dropping the pre-youth-rebuild squad that shouldn't count toward it.
+    // Past season stats/leaders are untouched; anyone who departs after
+    // this still shows up here normally.
+    async function onClearFormerPlayersClick() {
+      if (!currentSaveId || !window.api || !window.api.clearFormerPlayers) return;
+      if (currentPastPlayers.length === 0) return;
+      const confirmed = confirm(`Clear all ${currentPastPlayers.length} former player(s) currently listed? This only hides them from this tab — past season stats aren't affected. Anyone who leaves the club after this will still show up here normally.`);
+      if (!confirmed) return;
+      const result = await window.api.clearFormerPlayers(currentSaveId);
+      if (result && result.success) {
+        await renderPastPlayersTable();
+      } else {
+        alert('Could not clear former players — check the console log for details.');
+      }
+    }
+
     function sortPastPlayers(column) {
       if (pastPlayersSortColumn === column) {
         pastPlayersSortAscending = !pastPlayersSortAscending;
@@ -2918,6 +3058,77 @@
       const checkbox = document.getElementById('auto-refresh-toggle');
       if (checkbox) checkbox.checked = true;
       onAutoRefreshToggle(true);
+    })();
+
+    // ------------------------------------------------------------------
+    // Settings panel (gear icon, top right) — holds display preferences
+    // (units, currency) plus the auto-refresh toggle and Youth Mode, which
+    // used to live directly in the header. Units/currency are per-machine
+    // UI preferences (localStorage, like auto-refresh above), not save
+    // data — they affect only how existing numbers are displayed.
+    // ------------------------------------------------------------------
+    function toggleSettingsPanel(forceOpen) {
+      const panel = document.getElementById('settings-panel');
+      const gearBtn = document.getElementById('settings-gear-btn');
+      if (!panel) return;
+      const open = forceOpen !== undefined ? forceOpen : !panel.classList.contains('open');
+      panel.classList.toggle('open', open);
+      if (gearBtn) gearBtn.classList.toggle('open', open);
+    }
+
+    document.addEventListener('click', (e) => {
+      const wrap = document.getElementById('settings-wrap');
+      const panel = document.getElementById('settings-panel');
+      if (!wrap || !panel || !panel.classList.contains('open')) return;
+      if (!wrap.contains(e.target)) toggleSettingsPanel(false);
+    });
+
+    const UNITS_STORAGE_KEY = 'displayUnits';
+    const CURRENCY_STORAGE_KEY = 'displayCurrency';
+
+    // Re-renders every view that displays a formatMoney/formatWageAmount/
+    // formatHeight/formatWeight value, so a settings change shows up
+    // immediately instead of waiting for the next data refresh. Also
+    // re-opens the player profile page if one happens to be open, since
+    // it's built fresh from an identifier rather than kept in a cached DOM
+    // tree like the tables below.
+    function refreshAllViewsForSettingsChange() {
+      renderTableRows();
+      renderPastPlayersTable();
+      renderHomeDashboard();
+      filterAndRenderTransfers();
+      renderLeagueStatsTab();
+      const profileTab = document.getElementById('profile-tab');
+      if (profileTab && profileTab.classList.contains('active') && lastOpenedProfileIdentifier != null) {
+        openPlayerProfile(lastOpenedProfileIdentifier);
+      }
+    }
+
+    function onUnitsChange(value) {
+      currentUnits = value === 'metric' ? 'metric' : 'imperial';
+      try { localStorage.setItem(UNITS_STORAGE_KEY, currentUnits); } catch (e) { /* localStorage unavailable — just won't persist */ }
+      refreshAllViewsForSettingsChange();
+    }
+
+    function onCurrencyChange(value) {
+      currentCurrency = CURRENCY_RATES_FROM_EUR[value] ? value : 'EUR';
+      try { localStorage.setItem(CURRENCY_STORAGE_KEY, currentCurrency); } catch (e) { /* localStorage unavailable — just won't persist */ }
+      refreshAllViewsForSettingsChange();
+    }
+
+    (function restoreDisplayPreferences() {
+      try {
+        const storedUnits = localStorage.getItem(UNITS_STORAGE_KEY);
+        if (storedUnits === 'metric' || storedUnits === 'imperial') currentUnits = storedUnits;
+      } catch (e) { /* localStorage unavailable — defaults to imperial */ }
+      try {
+        const storedCurrency = localStorage.getItem(CURRENCY_STORAGE_KEY);
+        if (CURRENCY_RATES_FROM_EUR[storedCurrency]) currentCurrency = storedCurrency;
+      } catch (e) { /* localStorage unavailable — defaults to EUR */ }
+      const unitsSelect = document.getElementById('settings-units-select');
+      if (unitsSelect) unitsSelect.value = currentUnits;
+      const currencySelect = document.getElementById('settings-currency-select');
+      if (currencySelect) currencySelect.value = currentCurrency;
     })();
 
     function setRefreshButtonState(isRefreshing) {
@@ -3991,7 +4202,7 @@
                   <td>${p.name}</td>
                   <td>${p.contract_expiry}</td>
                   <td>${monthsLeft !== null ? monthsLeft : 'N/A'}</td>
-                  <td>€${(p.wage || 0).toLocaleString()}/wk</td>
+                  <td>${formatWageAmount(p.wage)}/wk</td>
                   <td style="color: var(--accent-color); font-weight:600;">${formatMoney(p.__value)}</td>
                 </tr>
               `;
@@ -4120,7 +4331,7 @@
                   <td>${p.overall || 0}</td>
                   <td>${p.__age ?? 'N/A'}</td>
                   <td style="color: var(--accent-color); font-weight:600;">${formatMoney(value)}</td>
-                  <td>€${(p.wage || 0).toLocaleString()}/wk</td>
+                  <td>${formatWageAmount(p.wage)}/wk</td>
                   <td>${p.__reasons.join(', ')}</td>
                   <td style="color: var(--text-dim); font-size: 12px;">${hint}</td>
                 </tr>
@@ -4338,14 +4549,20 @@
     let currentYouthModeEnabled = false;
     let currentSaveId = null;
 
+    // Youth Mode's actual on/off control lives in the Settings panel (see
+    // onYouthModeButtonClick below), but its active state still needs to
+    // be visible without opening Settings — the header badge covers that.
     function updateYouthModeButton() {
-      const btn = document.getElementById('youth-mode-btn');
-      if (!btn) return;
-      btn.classList.toggle('youth-mode-on', currentYouthModeEnabled);
-      btn.textContent = currentYouthModeEnabled ? '🎓 Youth Mode: On' : '🎓 Youth Mode: Off';
-      btn.title = currentYouthModeEnabled
-        ? 'Youth Squad Career Mode is permanently enabled for this save.'
-        : 'Enable Youth Squad Career Mode for this save (permanent, cannot be turned off).';
+      const headerBadge = document.getElementById('youth-mode-header-badge');
+      if (headerBadge) headerBadge.style.display = currentYouthModeEnabled ? 'inline-block' : 'none';
+
+      const statusEl = document.getElementById('settings-youth-mode-status');
+      if (statusEl) {
+        statusEl.textContent = currentYouthModeEnabled ? '🎓 Active (permanent)' : 'Not enabled';
+        statusEl.style.color = currentYouthModeEnabled ? 'var(--accent-color)' : 'var(--text-dim)';
+      }
+      const btn = document.getElementById('settings-youth-mode-btn');
+      if (btn) btn.style.display = currentYouthModeEnabled ? 'none' : '';
     }
 
     async function onYouthModeButtonClick() {
