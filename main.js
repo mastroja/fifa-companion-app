@@ -948,6 +948,39 @@ function getTrophiesWon(saveId = activeSaveId) {
   return Array.from(byComp.values());
 }
 
+// Every player_id this save considers an academy graduate: anyone ever
+// captured in youth_academy_snapshot, unioned with anyone manually
+// flagged via academy_graduate_overrides (the fail-safe for a promotion
+// that happened between two exports and was never actually captured
+// there). Shared by getInferredTransfers and getSignedPlayers so both
+// "Academy Graduate" surfaces agree.
+function getAcademyGraduateIds(saveId) {
+  const ids = new Set();
+  if (!db || !saveId) return ids;
+  const academyRes = db.exec(`
+    SELECT DISTINCT y.player_id FROM youth_academy_snapshot y
+    JOIN seasons se ON se.id = y.season_id
+    WHERE se.save_id = ${saveId};
+  `);
+  if (academyRes.length > 0) academyRes[0].values.forEach(([pid]) => ids.add(pid));
+
+  const overrideRes = db.exec(`SELECT player_id FROM academy_graduate_overrides WHERE save_id = ${saveId};`);
+  if (overrideRes.length > 0) overrideRes[0].values.forEach(([pid]) => ids.add(pid));
+
+  return ids;
+}
+
+// Manual fail-safe for missed "Academy Graduate" detection — called from
+// the player profile page's "Mark as Academy Graduate" button (Youth
+// Mode only). See academy_graduate_overrides in schema.sql.
+function markAcademyGraduate(playerId, saveId = activeSaveId) {
+  if (!db || !saveId || !playerId) return { success: false };
+  db.run('INSERT OR IGNORE INTO academy_graduate_overrides (player_id, save_id) VALUES (?, ?);', [playerId, saveId]);
+  saveDatabaseToDisk();
+  console.log(`[Academy] Player ${playerId} manually marked as academy graduate for save ${saveId}.`);
+  return { success: true };
+}
+
 // The real "transfers" DB table crashes the game when Live Editor's Lua
 // API tries to read it (confirmed 2026-08-25 — crashes inside its own
 // GetFirstRecord(), before a single field is read; not fixable from a
@@ -998,15 +1031,10 @@ function getInferredTransfers(saveId = activeSaveId) {
 
   // Any player_id ever seen in this save's youth academy — a new
   // arrival matching one of these is a promotion, not a real signing.
-  const everInAcademy = new Set();
-  const academyRes = db.exec(`
-    SELECT DISTINCT y.player_id FROM youth_academy_snapshot y
-    JOIN seasons se ON se.id = y.season_id
-    WHERE se.save_id = ${saveId};
-  `);
-  if (academyRes.length > 0) {
-    academyRes[0].values.forEach(([pid]) => everInAcademy.add(pid));
-  }
+  // Unioned with academy_graduate_overrides, the manual fail-safe for
+  // when a promotion happens between two exports and never gets an
+  // actual youth_academy_snapshot row — see markAcademyGraduate.
+  const everInAcademy = getAcademyGraduateIds(saveId);
 
   const results = [];
 
@@ -2138,13 +2166,7 @@ function getSignedPlayers(saveId = activeSaveId) {
   const ourClubNameRes = db.exec(`SELECT club_name FROM player_season_stats WHERE club_id = ${userTeamId} AND club_name IS NOT NULL LIMIT 1;`);
   const ourClubName = (ourClubNameRes.length > 0 && ourClubNameRes[0].values.length > 0) ? ourClubNameRes[0].values[0][0] : null;
 
-  const everInAcademy = new Set();
-  const academyRes = db.exec(`
-    SELECT DISTINCT y.player_id FROM youth_academy_snapshot y
-    JOIN seasons se ON se.id = y.season_id
-    WHERE se.save_id = ${saveId};
-  `);
-  if (academyRes.length > 0) academyRes[0].values.forEach(([pid]) => everInAcademy.add(pid));
+  const everInAcademy = getAcademyGraduateIds(saveId);
 
   // Earliest season_id each active player_id has ever had a row for on
   // our books this save — that's "when" they signed. Computed in JS from
@@ -2462,6 +2484,7 @@ function deleteSave(saveId) {
   db.run('DELETE FROM player_season_stats WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM season_competition_results WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM youth_academy_snapshot WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
+  db.run('DELETE FROM academy_graduate_overrides WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM player_awards WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM season_end_reviews WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM seasons WHERE save_id = ?;', [saveId]);
@@ -2600,6 +2623,7 @@ ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHono
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
+ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
