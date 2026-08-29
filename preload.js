@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   getTrophiesWon: () => ipcRenderer.invoke('get-trophies-won'),
   getYouthAcademy: (saveId) => ipcRenderer.invoke('get-youth-academy', saveId),
   enableYouthMode: (saveId) => ipcRenderer.invoke('enable-youth-mode', saveId),
+  clearFormerPlayers: (saveId) => ipcRenderer.invoke('clear-former-players', saveId),
   getPendingSeasonReview: (saveId) => ipcRenderer.invoke('get-pending-season-review', saveId),
   getPlayerHonours: (playerId, saveId) => ipcRenderer.invoke('get-player-honours', playerId, saveId),
   acknowledgeSeasonReview: (reviewId) => ipcRenderer.invoke('acknowledge-season-review', reviewId),

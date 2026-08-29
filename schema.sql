@@ -14,7 +14,14 @@ CREATE TABLE IF NOT EXISTS saves (
     -- One-way switch: once set to 1 for a save it is never set back to 0
     -- (see enableYouthMode in main.js) — "always activated" per the user's
     -- design for Youth Squad Career Mode.
-    youth_mode_enabled INTEGER DEFAULT 0
+    youth_mode_enabled INTEGER DEFAULT 0,
+    -- Set by clearFormerPlayers in main.js when the user clears the Former
+    -- Players tab (e.g. right before starting a youth rebuild, to drop the
+    -- pre-rebuild squad that shouldn't count). getPastPlayers hides anyone
+    -- whose last known row predates this timestamp; it never touches the
+    -- underlying player_season_stats rows, so past season stats/leaders
+    -- are unaffected — only the Former Players list is filtered.
+    former_players_cleared_before DATETIME
 );
 
 -- Seasons table (one row per season per save)

@@ -110,6 +110,14 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // See former_players_cleared_before in schema.sql / clearFormerPlayers
+  // below — same ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE saves ADD COLUMN former_players_cleared_before DATETIME;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   // Added when the flat YOUTH_MODE_OVERALL_MARGIN constant was replaced by
   // a per-tier/per-band margin — existing season_end_reviews rows predate
   // this column and just come back NULL, same ignore-already-exists pattern.
@@ -1156,6 +1164,22 @@ function enableYouthMode(saveId) {
   return { success: true };
 }
 
+// Clears the Former Players tab by stamping "now" as this save's cutoff —
+// see former_players_cleared_before in schema.sql and getPastPlayers above.
+// Used to drop the pre-youth-rebuild squad (players who left before the
+// user's academy rebuild started) since they don't count toward it. Only
+// affects which past players are shown going forward; nobody's underlying
+// player_season_stats history is deleted, so past season stats/leaders are
+// unaffected, and anyone who departs after this point still shows up
+// normally.
+function clearFormerPlayers(saveId) {
+  if (!db || !saveId) return { success: false };
+  db.run('UPDATE saves SET former_players_cleared_before = CURRENT_TIMESTAMP WHERE id = ?;', [saveId]);
+  saveDatabaseToDisk();
+  console.log(`[Former Players] Cleared for save ${saveId}.`);
+  return { success: true };
+}
+
 // Called right when a season boundary is crossed (see resolveActiveSave)
 // for a save with Youth Squad Career Mode on. Looks back at the season
 // that just ended: identifies its domestic league (whichever recorded
@@ -1939,7 +1963,7 @@ function getPastPlayers(saveId = activeSaveId) {
   // the same club would mix its past players into this one's list.
   const pastRes = db.exec(`
     SELECT p.player_id, p.name, p.position_id, p.dob, p.nationality, p.height, p.weight, p.alt_positions,
-           s.overall, s.potential, s.wage, s.club_id, se.year_label, s.season_id
+           s.overall, s.potential, s.wage, s.club_id, se.year_label, s.season_id, s.updated_at
     FROM player_season_stats s
     JOIN players p ON p.player_id = s.player_id
     JOIN seasons se ON se.id = s.season_id
@@ -1955,10 +1979,19 @@ function getPastPlayers(saveId = activeSaveId) {
   const lastKnown = new Map();
   const firstYearLabelByPlayer = new Map();
   pastRes[0].values.forEach(row => {
-    const [player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, club_id, year_label, season_id] = row;
+    const [player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, club_id, year_label, season_id, updated_at] = row;
     if (!firstYearLabelByPlayer.has(player_id)) firstYearLabelByPlayer.set(player_id, year_label);
-    lastKnown.set(player_id, { player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, year_label, season_id });
+    lastKnown.set(player_id, { player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, year_label, season_id, updated_at });
   });
+
+  // See clearFormerPlayers/former_players_cleared_before — a player whose
+  // last known row predates this cutoff was already gone before the user
+  // cleared the tab (e.g. right before starting a youth rebuild) and stays
+  // hidden from this list forever; only departures after the cutoff count.
+  // Purely a display filter — their player_season_stats rows are untouched,
+  // so past season stats/leaders elsewhere are unaffected.
+  const clearedRes = db.exec(`SELECT former_players_cleared_before FROM saves WHERE id = ${saveId};`);
+  const clearedBefore = (clearedRes.length > 0 && clearedRes[0].values.length > 0) ? clearedRes[0].values[0][0] : null;
 
   // year_label is "2026/2027" — the leading year is enough to measure a
   // span in whole seasons; +1 makes a single season played count as 1
@@ -1973,6 +2006,7 @@ function getPastPlayers(saveId = activeSaveId) {
   const results = [];
   lastKnown.forEach((info, playerId) => {
     if (stillOnRosterIds.has(playerId)) return; // still on the roster (or out on loan), not a "past" player
+    if (clearedBefore && info.updated_at && info.updated_at <= clearedBefore) return; // cleared — see former_players_cleared_before above
 
     const currentClubId = currentClubById.get(playerId);
     let currentClub = 'Unknown';
@@ -2503,7 +2537,17 @@ async function exportSeasonOverviewPdf(suggestedFileName) {
   if (canceled || !filePath) return { success: false, canceled: true };
 
   try {
-    const pdfBuffer = await mainWindow.webContents.printToPDF({ printBackground: true, landscape: false });
+    // marginType 'none' hands full control of page margins to
+    // #season-overview-print's own padding (see its @media print rules in
+    // index.html) instead of stacking that padding on top of Chromium's
+    // default print margins too — the double-margin was the main reason
+    // content used to spill onto a second page.
+    const pdfBuffer = await mainWindow.webContents.printToPDF({
+      printBackground: true,
+      landscape: false,
+      pageSize: 'Letter',
+      margins: { marginType: 'none' }
+    });
     fs.writeFileSync(filePath, pdfBuffer);
     return { success: true, filePath };
   } catch (err) {
@@ -2550,6 +2594,7 @@ ipcMain.handle('get-season-competition-results', (_event, seasonId) => getSeason
 ipcMain.handle('get-trophies-won', () => getTrophiesWon());
 ipcMain.handle('get-youth-academy', (_event, saveId) => getYouthAcademy(saveId));
 ipcMain.handle('enable-youth-mode', (_event, saveId) => enableYouthMode(saveId));
+ipcMain.handle('clear-former-players', (_event, saveId) => clearFormerPlayers(saveId));
 ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeasonReview(saveId));
 ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
