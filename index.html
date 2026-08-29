@@ -2019,6 +2019,16 @@
         ? transferHistoryEntries.join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
 
+      // Fail-safe for when the automatic Academy Graduate detection
+      // (based on ever appearing in a youth_academy_snapshot export)
+      // misses a promotion — see markAcademyGraduate in main.js. Only
+      // offered under Youth Mode, for a player who isn't already flagged
+      // as an academy graduate.
+      const alreadyAcademy = !!(signedInfo && signedInfo.is_academy);
+      const markAcademyBtnHtml = (currentYouthModeEnabled && player.player_id && !alreadyAcademy)
+        ? `<button class="refresh-btn" style="font-size: 12px; padding: 4px 10px;" onclick="markAcademyGraduate(${player.player_id})" title="Mark this player as an academy graduate — updates their transfer history and 'from' club to Academy. Use this if the automatic detection missed their promotion.">🎓 Mark as Academy Graduate</button>`
+        : '';
+
       const traitsHtml = (player.traits && player.traits.length > 0)
         ? player.traits.map(t => `<span class="trait-badge">${t}</span>`).join('')
         : `<span style="color: var(--text-dim); font-size: 13px;">No traits recorded.</span>`;
@@ -2265,7 +2275,10 @@
             </div>
 
             <div class="profile-card">
-              <h3>Transfer History</h3>
+              <h3 style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <span>Transfer History</span>
+                ${markAcademyBtnHtml}
+              </h3>
               <div>
                 ${transferHistoryHtml}
               </div>
@@ -2902,6 +2915,20 @@
       if (!window.api || !window.api.getSignedPlayers) return;
       currentSignedPlayers = (await window.api.getSignedPlayers(currentSaveId)) || [];
       filterAndRenderTransfers();
+    }
+
+    // Fail-safe button on the player profile (Youth Mode only, see
+    // markAcademyBtnHtml in openPlayerProfile) for when the automatic
+    // Academy Graduate detection misses a promotion. Re-fetches Signed
+    // Players and re-opens the profile so the Transfer History card and
+    // the button itself immediately reflect the change.
+    async function markAcademyGraduate(playerId) {
+      if (!currentSaveId || !window.api || !window.api.markAcademyGraduate) return;
+      const result = await window.api.markAcademyGraduate(playerId, currentSaveId);
+      if (result && result.success) {
+        await refreshSignedPlayers();
+        openPlayerProfile(playerId);
+      }
     }
 
     // Multi-save support: auto-detect updates this list/selection on its

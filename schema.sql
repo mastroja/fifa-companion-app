@@ -311,3 +311,20 @@ CREATE TABLE IF NOT EXISTS former_player_snapshots (
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(player_id, season_id)
 );
+
+-- Manual fail-safe for "Academy Graduate" detection, which normally goes
+-- purely off youth_academy_snapshot (see getInferredTransfers/
+-- getSignedPlayers in main.js). A promotion that happens between two live
+-- exports can slip through with nothing ever recorded in that table, so
+-- this lets the user mark the gap by hand from the player profile page
+-- (Youth Mode only — see the "Mark as Academy Graduate" button in
+-- index.html). Consulted as a second source everywhere is_academy is
+-- computed; never written to automatically.
+CREATE TABLE IF NOT EXISTS academy_graduate_overrides (
+    player_id INTEGER NOT NULL,
+    save_id INTEGER NOT NULL,
+    marked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (player_id, save_id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(save_id) REFERENCES saves(id)
+);
