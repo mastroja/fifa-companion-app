@@ -552,15 +552,20 @@ function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
   const signed = getSignedPlayers(saveId).filter(p => p.signed_season === yearLabel);
   const sold = getPastPlayers(saveId).filter(p => p.departed_season === yearLabel);
 
+  // club_name (NOT loan_club_name — that's the player's parent/contract
+  // club, correct for detecting a loan-in/loan-return in
+  // getInferredTransfers below, but wrong here) is the real loan
+  // DESTINATION for an on_loan=1 row — see the SQUAD EXPORT block's
+  // loaned_out_destination resolution in export_all.lua.
   const loanRes = db.exec(`
-    SELECT s.player_id, p.name, p.position_id, s.overall, s.loan_club_name, s.loan_date_end
+    SELECT s.player_id, p.name, p.position_id, s.overall, s.club_name, s.loan_date_end
     FROM player_season_stats s
     JOIN players p ON p.player_id = s.player_id
     WHERE s.season_id = ${seasonId} AND s.on_loan = 1;
   `);
   const loaned = loanRes.length > 0 ? loanRes[0].values.map(
-    ([player_id, name, position_id, overall, loan_club_name, loan_date_end]) =>
-      ({ player_id, name, position_id, overall, loan_club_name, loan_date_end })
+    ([player_id, name, position_id, overall, club_name, loan_date_end]) =>
+      ({ player_id, name, position_id, overall, club_name, loan_date_end })
   ) : [];
 
   return { signed, sold, loaned };
@@ -1045,7 +1050,7 @@ function getInferredTransfers(saveId = activeSaveId) {
     const isAcademyGraduate = everInAcademy.has(id);
     results.push({
       player_name: info.name,
-      from_team: isAcademyGraduate ? 'Academy' : (isLoanIn ? info.loan_club_name : 'Unknown Club'),
+      from_team: isAcademyGraduate ? `${info.club_name} Academy` : (isLoanIn ? info.loan_club_name : 'Unknown Club'),
       to_team: info.club_name,
       fee: 0,
       is_user: true,
@@ -1148,10 +1153,13 @@ function persistTransferFees(saveId, transferPayload) {
   saveDatabaseToDisk();
 }
 
-// One row per player: whichever transfer_fees row is their most recent
-// (by deal_date) — the Transfer Hub/Former Players/profile only ever want
-// "what did we pay/receive for this player last", not their full deal
-// history. Loans always come back with fee 0 (see export_all.lua — the
+// One row per (player, deal_type): whichever transfer_fees row is most
+// recent (by deal_date) for that pairing — NOT collapsed to one row per
+// player, since a player can legitimately have both a 'transfer' deal
+// (their signing or departure) and a separate 'loan' deal captured in the
+// same window, and the player profile's Transfer History wants fee/date
+// data for each of those independently, not just whichever happened last
+// overall. Loans always come back with fee 0 (see export_all.lua — the
 // reference script never extracts a loan fee), so they still show up here
 // for deal_type/date but the UI should treat a 0 fee as "not shown".
 function getTransferFees(saveId = activeSaveId) {
@@ -1164,13 +1172,14 @@ function getTransferFees(saveId = activeSaveId) {
   `);
   if (res.length === 0) return [];
   const cols = res[0].columns;
-  const latestByPlayer = new Map();
+  const latestByPlayerAndType = new Map();
   res[0].values.forEach(row => {
     const obj = {};
     cols.forEach((c, i) => { obj[c] = row[i]; });
-    latestByPlayer.set(obj.player_id, obj); // later rows (ASC order) overwrite earlier ones
+    // later rows (ASC order) overwrite earlier ones for the same key
+    latestByPlayerAndType.set(`${obj.player_id}|${obj.deal_type}`, obj);
   });
-  return Array.from(latestByPlayer.values());
+  return Array.from(latestByPlayerAndType.values());
 }
 
 // ------------------------------------------------------------------
@@ -2257,7 +2266,7 @@ function getSignedPlayers(saveId = activeSaveId) {
 
     let fromTeam = 'Unknown Club';
     if (isAcademy) {
-      fromTeam = 'Academy';
+      fromTeam = ourClubName ? `${ourClubName} Academy` : 'Academy';
     } else if (earliest) {
       // A rival team's row for this same player_id from a season BEFORE
       // they first appeared on our own books — the closest thing to a

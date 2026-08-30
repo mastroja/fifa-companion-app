@@ -48,11 +48,24 @@ do
 
     local json_path = "C:\\Users\\Public\\ea_fc_squad_export.json"
 
+    -- pcall'd around os.date — confirmed live 2026-08-30 in the TRANSFERS
+    -- EXPORT block: a "date" field read from a negotiation record came
+    -- back large/negative enough that os.date throws "date result cannot
+    -- be represented in this installation" (a real dayOffset just parses
+    -- fine; this is the record-parsing equivalent of a bad pointer — some
+    -- field wasn't at the offset expected). That error was propagating out
+    -- of convertFifaDate and wiping out the entire batch of records being
+    -- built at the time, not just that one record's date. Every local copy
+    -- of convertFifaDate in this file gets the same guard on the same
+    -- reasoning — a single bad birthdate/join-date should cost that one
+    -- date string, not the whole squad/youth/transfers export it's part of.
     local function convertFifaDate(dayOffset)
         if not dayOffset or dayOffset <= 0 then return "" end
         local baseEpochSeconds = -12219292800
         local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
-        return os.date("%m-%d-%Y", targetSeconds) or tostring(dayOffset)
+        local ok, formatted = pcall(os.date, "%m-%d-%Y", targetSeconds)
+        if ok and formatted then return formatted end
+        return ""
     end
 
     -- ============================================================
@@ -609,11 +622,24 @@ end
 do
     require 'imports/other/helpers'
 
+    -- pcall'd around os.date — confirmed live 2026-08-30 in the TRANSFERS
+    -- EXPORT block: a "date" field read from a negotiation record came
+    -- back large/negative enough that os.date throws "date result cannot
+    -- be represented in this installation" (a real dayOffset just parses
+    -- fine; this is the record-parsing equivalent of a bad pointer — some
+    -- field wasn't at the offset expected). That error was propagating out
+    -- of convertFifaDate and wiping out the entire batch of records being
+    -- built at the time, not just that one record's date. Every local copy
+    -- of convertFifaDate in this file gets the same guard on the same
+    -- reasoning — a single bad birthdate/join-date should cost that one
+    -- date string, not the whole squad/youth/transfers export it's part of.
     local function convertFifaDate(dayOffset)
         if not dayOffset or dayOffset <= 0 then return "" end
         local baseEpochSeconds = -12219292800
         local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
-        return os.date("%m-%d-%Y", targetSeconds) or tostring(dayOffset)
+        local ok, formatted = pcall(os.date, "%m-%d-%Y", targetSeconds)
+        if ok and formatted then return formatted end
+        return ""
     end
 
     local youth_json_list = {}
@@ -697,11 +723,24 @@ do
     local json_path = "C:\\Users\\Public\\ea_fc_transfers_export.json"
     local BIG_MONEY_THRESHOLD = 60000000
 
+    -- pcall'd around os.date — confirmed live 2026-08-30 in the TRANSFERS
+    -- EXPORT block: a "date" field read from a negotiation record came
+    -- back large/negative enough that os.date throws "date result cannot
+    -- be represented in this installation" (a real dayOffset just parses
+    -- fine; this is the record-parsing equivalent of a bad pointer — some
+    -- field wasn't at the offset expected). That error was propagating out
+    -- of convertFifaDate and wiping out the entire batch of records being
+    -- built at the time, not just that one record's date. Every local copy
+    -- of convertFifaDate in this file gets the same guard on the same
+    -- reasoning — a single bad birthdate/join-date should cost that one
+    -- date string, not the whole squad/youth/transfers export it's part of.
     local function convertFifaDate(dayOffset)
         if not dayOffset or dayOffset <= 0 then return "" end
         local baseEpochSeconds = -12219292800
         local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
-        return os.date("%m-%d-%Y", targetSeconds) or tostring(dayOffset)
+        local ok, formatted = pcall(os.date, "%m-%d-%Y", targetSeconds)
+        if ok and formatted then return formatted end
+        return ""
     end
 
     local function safe_player_name(playerid)
@@ -1050,11 +1089,16 @@ do
 
     -- Same day-offset encoding as the squad export's convertFifaDate —
     -- duplicated locally since each do...end block keeps its own copies.
+    -- pcall'd around os.date for the same reason as the other copies (see
+    -- the TRANSFERS EXPORT block's convertFifaDate) — a bad dayOffset
+    -- should cost one date string, not abort this whole export.
     local function convertFifaDate(dayOffset)
         if not dayOffset or dayOffset <= 0 then return "" end
         local baseEpochSeconds = -12219292800
         local targetSeconds = baseEpochSeconds + (dayOffset * 86400)
-        return os.date("%Y-%m-%d", targetSeconds) or tostring(dayOffset)
+        local ok, formatted = pcall(os.date, "%Y-%m-%d", targetSeconds)
+        if ok and formatted then return formatted end
+        return ""
     end
 
     local function GetStandingsByIndex(idx)
