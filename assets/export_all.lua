@@ -724,13 +724,35 @@ do
     -- in one or the other; get_transfer_data() joins them by that key,
     -- same two-pass approach as the reference script.
 
-    local function get_succeeded_ai_club_transfers(out, storage)
-        local obj_size = 0xB8
-        local vec = MEMORY:ReadPointer(storage + 0x8)
+    -- Bounds-checked eastl::vector walk shared by every get_succeeded_*
+    -- below. The negotiation storage's exact struct layout is a reverse-
+    -- engineered, version-specific memory offset (see this block's header
+    -- comment) — this app's very first live run against this code hung
+    -- silently (no crash, no error, the F10 script just never finished,
+    -- so calendar/league stats never synced either) because an invalid
+    -- mBegin/mEnd pair turned into a loop that never terminated, walking
+    -- garbage memory forever. Every guard below exists specifically to
+    -- make a bad offset fail safely (empty result) instead of hanging.
+    local MAX_NEGOTIATION_ENTRIES = 2000
+
+    local function walk_negotiation_vector(storage, vec_offset, obj_size, visit)
+        if not storage or storage == 0 then return end
+        local vec = MEMORY:ReadPointer(storage + vec_offset)
+        if not vec or vec == 0 then return end
         local mBegin = MEMORY:ReadPointer(vec + 0x0)
         local mEnd = MEMORY:ReadPointer(vec + 0x8)
+        if not mBegin or not mEnd or mBegin == 0 or mEnd == 0 or mEnd < mBegin then return end
         local current = mBegin
-        while current < mEnd do
+        local iterations = 0
+        while current < mEnd and iterations < MAX_NEGOTIATION_ENTRIES do
+            visit(current)
+            current = current + obj_size
+            iterations = iterations + 1
+        end
+    end
+
+    local function get_succeeded_ai_club_transfers(out, storage)
+        walk_negotiation_vector(storage, 0x8, 0xB8, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -751,17 +773,11 @@ do
                     out[key] = { final_fee = final_fee, exchange_value = exchange_value }
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_user_club_transfers(out, storage)
-        local obj_size = 0xA0
-        local vec = MEMORY:ReadPointer(storage + 0x28)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x28, 0xA0, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -792,17 +808,11 @@ do
                     end
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_ai_player_transfers(out, storage)
-        local obj_size = 0xB0
-        local vec = MEMORY:ReadPointer(storage + 0x10)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x10, 0xB0, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -815,17 +825,11 @@ do
                     out[key] = { playerid = playerid, buying_team = buying_team, selling_team = selling_team, date = last_action_date, type = "transfer" }
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_ai_player_exchanges(out, storage)
-        local obj_size = 0xA8
-        local vec = MEMORY:ReadPointer(storage + 0x40)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x40, 0xA8, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -838,17 +842,11 @@ do
                     out[key] = { playerid = playerid, buying_team = buying_team, selling_team = selling_team, date = last_action_date, type = "transfer" }
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_user_player_transfers(out, storage)
-        local obj_size = 0x98
-        local vec = MEMORY:ReadPointer(storage + 0x38)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x38, 0x98, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -866,17 +864,11 @@ do
                     end
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_user_player_exchanges(out, storage)
-        local obj_size = 0x98
-        local vec = MEMORY:ReadPointer(storage + 0x48)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x48, 0x98, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -894,17 +886,11 @@ do
                     end
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_ai_player_loans(out, storage)
-        local obj_size = 0x98
-        local vec = MEMORY:ReadPointer(storage + 0x20)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x20, 0x98, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -917,17 +903,11 @@ do
                     out[key] = { playerid = playerid, buying_team = buying_team, selling_team = selling_team, date = last_action_date, type = "loan" }
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_ai_club_loans(out, storage)
-        local obj_size = 0xB8
-        local vec = MEMORY:ReadPointer(storage + 0x18)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x18, 0xB8, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -939,17 +919,11 @@ do
                     out[key] = { final_fee = 0 }
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     local function get_succeeded_user_club_loans(out, storage)
-        local obj_size = 0xF8
-        local vec = MEMORY:ReadPointer(storage + 0x30)
-        local mBegin = MEMORY:ReadPointer(vec + 0x0)
-        local mEnd = MEMORY:ReadPointer(vec + 0x8)
-        local current = mBegin
-        while current < mEnd do
+        walk_negotiation_vector(storage, 0x30, 0xF8, function(current)
             local playerid = MEMORY:ReadInt(current + 0x0)
             local buying_team = MEMORY:ReadInt(current + 0x4)
             local selling_team = MEMORY:ReadInt(current + 0x8)
@@ -966,8 +940,7 @@ do
                     end
                 end
             end
-            current = current + obj_size
-        end
+        end)
     end
 
     -- Graceful, not assert()'d — an assert() failure here would abort the
@@ -1043,7 +1016,17 @@ do
         return string.format('{"save_uid":"%s","transfers":[', save_uid:gsub('"', '\\"')) .. table.concat(parts, ",") .. ']}'
     end
 
-    local transfers = get_transfer_data()
+    -- pcall'd as a final safety net — walk_negotiation_vector's own guards
+    -- stop a bad vector from hanging, but a single bad pointer chase deeper
+    -- inside a record (e.g. the mLastReq/mLastOff dereferences above) could
+    -- still throw once. Catching it here means a one-off bad read costs
+    -- this sync's fee data, not the calendar/league-stats exports after it.
+    local ok, transfers = pcall(get_transfer_data)
+    if not ok then
+        print("[CompanionApp] WARNING: Transfer fee read failed this sync (" .. tostring(transfers) .. ") — exporting empty.")
+        transfers = {}
+    end
+
     local file = io.open(json_path, "w+")
     if file then
         file:write(serialize_to_json(transfers))
