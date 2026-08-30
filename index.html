@@ -1799,17 +1799,24 @@
           // authoritative live source once it's caught up, but it has a
           // one-sync lag for a player who JUST departed — see the
           // "takes one F10 refresh after a player first appears here to
-          // populate" note on the Former Players tab. The transfer-fee
-          // memory read (see getTransferFees in main.js) captures the
-          // destination club immediately, same sync as the departure, so
-          // it's used as a fallback specifically for that gap — never as
-          // an override once the watchlist has a real answer, since a
-          // player who's moved on AGAIN since that deal would make the
-          // deal's to_team_name stale while the watchlist stays current.
+          // populate" note on the Former Players tab. Until that lookup
+          // actually runs, current_club isn't blank/"Unknown" — it's
+          // whatever club_name they last synced WITH (i.e. our own club,
+          // the one they just left), which looks like a real answer but
+          // is stale. The transfer-fee memory read (see getTransferFees in
+          // main.js) captures the real destination immediately, same sync
+          // as the departure, so it's used as a fallback for both cases —
+          // never overriding a watchlist answer that's neither blank nor
+          // still our own club, since a player who's moved on AGAIN since
+          // that deal would make the deal's to_team_name stale too.
           const departureDeal = getTransferDealForPlayer(formerPlayer.player_id, 'transfer');
-          const freshCurrentClub = (formerPlayer.current_club && formerPlayer.current_club !== 'Unknown')
-            ? formerPlayer.current_club
-            : ((departureDeal && departureDeal.to_team_name) || formerPlayer.current_club);
+          const ourClubName = getMostCommonClubName();
+          const currentClubIsStale = !formerPlayer.current_club
+            || formerPlayer.current_club === 'Unknown'
+            || (ourClubName && formerPlayer.current_club === ourClubName);
+          const freshCurrentClub = currentClubIsStale
+            ? ((departureDeal && departureDeal.to_team_name) || formerPlayer.current_club)
+            : formerPlayer.current_club;
           player = {
             ...formerPlayer,
             club_name: freshCurrentClub,
@@ -2063,7 +2070,7 @@
         const loanMonths = (loanDeal && loanDeal.deal_date) ? monthsBetweenDates(loanDeal.deal_date, player.loan_date_end) : null;
         transferHistoryEntries.push(`
           <div class="timeline-item">
-            <div class="timeline-title">On loan at ${player.loan_club_name}</div>
+            <div class="timeline-title">On loan at ${displayClubName}</div>
             ${player.loan_date_end ? `<div style="font-size: 13px; color: var(--accent-color);">Until ${player.loan_date_end}${loanMonths !== null ? ` (${formatDuration(loanMonths)})` : ''}</div>` : ''}
             ${loanFee ? `<div style="font-size: 13px; color: var(--accent-color);">Loan Fee: ${formatMoney(loanFee)}</div>` : ''}
           </div>
@@ -2075,9 +2082,12 @@
         // Same watchlist-lag fallback as the header/Now Playing At card
         // above (see the formerPlayer resolution comment) — soldInfo is a
         // separate lookup from formerPlayer, so it needs its own fallback.
-        const soldCurrentClub = (soldInfo.current_club && soldInfo.current_club !== 'Unknown')
-          ? soldInfo.current_club
-          : ((soldDeal && soldDeal.to_team_name) || soldInfo.current_club);
+        const soldCurrentClubIsStale = !soldInfo.current_club
+          || soldInfo.current_club === 'Unknown'
+          || soldInfo.current_club === ourClub;
+        const soldCurrentClub = soldCurrentClubIsStale
+          ? ((soldDeal && soldDeal.to_team_name) || soldInfo.current_club)
+          : soldInfo.current_club;
         transferHistoryEntries.push(`
           <div class="timeline-item">
             <div class="timeline-title">${ourClub} → ${soldCurrentClub || 'Unknown'}</div>
@@ -2644,11 +2654,16 @@
       if (view === 'loaned') {
         // Loans never carry real fee data (see getTransferFeeForPlayer) —
         // still looked up for consistency, but expect it to always be null.
+        // to_team is p.club_name (the resolved real destination, see
+        // loaned_out_destination in export_all.lua), NOT p.loan_club_name
+        // — that field is actually the parent/contract club (who they're
+        // loaned FROM), a naming trap that showed up as "loaned to
+        // themselves" bugs elsewhere in the profile too.
         return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => ({
           player_id: p.player_id,
           player_name: p.name,
           from_team: ourClub,
-          to_team: p.loan_club_name || 'Unknown Club',
+          to_team: p.club_name || 'Unknown Club',
           detail: p.loan_date_end || '—',
           fee: getTransferFeeForPlayer(p.player_id)
         }));
@@ -5303,7 +5318,7 @@
         <h4 style="margin-top:16px; color:var(--accent-color);">Sold</h4>
         ${rowsHtml(t.sold, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>To ${p.current_club || 'Unknown'}</span></div>`)}
         <h4 style="margin-top:16px; color:var(--accent-color);">Loaned</h4>
-        ${rowsHtml(t.loaned, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>${p.loan_club_name || 'Unknown'} · until ${p.loan_date_end || '—'}</span></div>`)}
+        ${rowsHtml(t.loaned, p => `<div class="season-overview-stat-row"><span>${p.name} (${getPositionInfo(p.position_id).label})</span><span>${p.club_name || 'Unknown'} · until ${p.loan_date_end || '—'}</span></div>`)}
       `;
     }
 

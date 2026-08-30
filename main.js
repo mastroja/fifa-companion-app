@@ -552,15 +552,20 @@ function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
   const signed = getSignedPlayers(saveId).filter(p => p.signed_season === yearLabel);
   const sold = getPastPlayers(saveId).filter(p => p.departed_season === yearLabel);
 
+  // club_name (NOT loan_club_name — that's the player's parent/contract
+  // club, correct for detecting a loan-in/loan-return in
+  // getInferredTransfers below, but wrong here) is the real loan
+  // DESTINATION for an on_loan=1 row — see the SQUAD EXPORT block's
+  // loaned_out_destination resolution in export_all.lua.
   const loanRes = db.exec(`
-    SELECT s.player_id, p.name, p.position_id, s.overall, s.loan_club_name, s.loan_date_end
+    SELECT s.player_id, p.name, p.position_id, s.overall, s.club_name, s.loan_date_end
     FROM player_season_stats s
     JOIN players p ON p.player_id = s.player_id
     WHERE s.season_id = ${seasonId} AND s.on_loan = 1;
   `);
   const loaned = loanRes.length > 0 ? loanRes[0].values.map(
-    ([player_id, name, position_id, overall, loan_club_name, loan_date_end]) =>
-      ({ player_id, name, position_id, overall, loan_club_name, loan_date_end })
+    ([player_id, name, position_id, overall, club_name, loan_date_end]) =>
+      ({ player_id, name, position_id, overall, club_name, loan_date_end })
   ) : [];
 
   return { signed, sold, loaned };
