@@ -1617,6 +1617,18 @@
       return `${month}-${day}-${year}`;
     }
 
+    // Whole-month span between two MM-DD-YYYY strings (the format both
+    // convertFifaDate's loan_date_end and the transfer-fee deal_date use)
+    // — feeds formatDuration for the loan-length line in Transfer History.
+    // Returns null (not 0) when either date fails to parse, so callers can
+    // tell "no length known" apart from a genuinely same-day loan.
+    function monthsBetweenDates(startStr, endStr) {
+      const start = parseBirthDate(startStr);
+      const end = parseBirthDate(endStr);
+      if (!start || !end) return null;
+      return Math.max((end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()), 0);
+    }
+
     function formatDuration(totalMonths) {
       const monthsNum = Number(totalMonths || 0);
       if (monthsNum <= 0) return '0 mos';
@@ -1783,9 +1795,25 @@
           }
         }
         if (formerPlayer) {
+          // The watchlist lookup (formerPlayer.current_club) is the
+          // authoritative live source once it's caught up, but it has a
+          // one-sync lag for a player who JUST departed — see the
+          // "takes one F10 refresh after a player first appears here to
+          // populate" note on the Former Players tab. The transfer-fee
+          // memory read (see getTransferFees in main.js) captures the
+          // destination club immediately, same sync as the departure, so
+          // it's used as a fallback specifically for that gap — never as
+          // an override once the watchlist has a real answer, since a
+          // player who's moved on AGAIN since that deal would make the
+          // deal's to_team_name stale while the watchlist stays current.
+          const departureDeal = getTransferDealForPlayer(formerPlayer.player_id, 'transfer');
+          const freshCurrentClub = (formerPlayer.current_club && formerPlayer.current_club !== 'Unknown')
+            ? formerPlayer.current_club
+            : ((departureDeal && departureDeal.to_team_name) || formerPlayer.current_club);
           player = {
             ...formerPlayer,
-            club_name: formerPlayer.current_club,
+            club_name: freshCurrentClub,
+            current_club: freshCurrentClub,
             attributes: formerPlayer.attributes || {},
             __isFormerPlayer: true
           };
@@ -2008,8 +2036,16 @@
       const soldInfo = currentPastPlayers.find(matchesPlayer);
       const ourClub = getMostCommonClubName() || 'My Club';
 
+      // Fee/date data (see getTransferDealForPlayer) comes from the
+      // transfer-fee memory read, a SEPARATE source from signedInfo/
+      // soldInfo/player.loan_* above — it's only ever additive detail on
+      // an entry those already decided to show, never what decides
+      // whether an entry shows at all, so a save with no captured deal
+      // data for this player just renders the same as before this existed.
       const transferHistoryEntries = [];
       if (signedInfo) {
+        const signedDeal = getTransferDealForPlayer(player.player_id, 'transfer');
+        const signedFee = (signedDeal && signedDeal.fee > 0) ? signedDeal.fee : null;
         transferHistoryEntries.push(signedInfo.is_academy
           ? `<div class="timeline-item">
                <div class="timeline-title">Academy Graduate</div>
@@ -2017,23 +2053,35 @@
              </div>`
           : `<div class="timeline-item">
                <div class="timeline-title">${signedInfo.from_team || 'Unknown Club'} → ${ourClub}</div>
-               <div style="font-size: 13px; color: var(--accent-color);">Signed${signedInfo.signed_season ? ` (${signedInfo.signed_season})` : ''}</div>
+               <div style="font-size: 13px; color: var(--accent-color);">Signed${signedInfo.signed_season ? ` (${signedInfo.signed_season})` : ''}${signedFee ? ` — ${formatMoney(signedFee)}` : ''}</div>
              </div>`
         );
       }
       if (player.__clubStatus === 'loan' && player.loan_club_name) {
+        const loanDeal = getTransferDealForPlayer(player.player_id, 'loan');
+        const loanFee = (loanDeal && loanDeal.fee > 0) ? loanDeal.fee : null;
+        const loanMonths = (loanDeal && loanDeal.deal_date) ? monthsBetweenDates(loanDeal.deal_date, player.loan_date_end) : null;
         transferHistoryEntries.push(`
           <div class="timeline-item">
             <div class="timeline-title">On loan at ${player.loan_club_name}</div>
-            ${player.loan_date_end ? `<div style="font-size: 13px; color: var(--accent-color);">Until ${player.loan_date_end}</div>` : ''}
+            ${player.loan_date_end ? `<div style="font-size: 13px; color: var(--accent-color);">Until ${player.loan_date_end}${loanMonths !== null ? ` (${formatDuration(loanMonths)})` : ''}</div>` : ''}
+            ${loanFee ? `<div style="font-size: 13px; color: var(--accent-color);">Loan Fee: ${formatMoney(loanFee)}</div>` : ''}
           </div>
         `);
       }
       if (soldInfo) {
+        const soldDeal = getTransferDealForPlayer(player.player_id, 'transfer');
+        const soldFee = (soldDeal && soldDeal.fee > 0) ? soldDeal.fee : null;
+        // Same watchlist-lag fallback as the header/Now Playing At card
+        // above (see the formerPlayer resolution comment) — soldInfo is a
+        // separate lookup from formerPlayer, so it needs its own fallback.
+        const soldCurrentClub = (soldInfo.current_club && soldInfo.current_club !== 'Unknown')
+          ? soldInfo.current_club
+          : ((soldDeal && soldDeal.to_team_name) || soldInfo.current_club);
         transferHistoryEntries.push(`
           <div class="timeline-item">
-            <div class="timeline-title">${ourClub} → ${soldInfo.current_club || 'Unknown'}</div>
-            <div style="font-size: 13px; color: var(--accent-color);">Departed${soldInfo.departed_season ? ` (${soldInfo.departed_season})` : ''}</div>
+            <div class="timeline-title">${ourClub} → ${soldCurrentClub || 'Unknown'}</div>
+            <div style="font-size: 13px; color: var(--accent-color);">Departed${soldInfo.departed_season ? ` (${soldInfo.departed_season})` : ''}${soldFee ? ` — ${formatMoney(soldFee)}` : ''}</div>
           </div>
         `);
       }
@@ -2966,13 +3014,26 @@
       renderPastPlayersRows();
     }
 
-    // A loan's fee is always 0 (the reference memory read never extracts
-    // one — see export_all.lua), so treat 0 as "no fee data" rather than
-    // "confirmed free", matching the "Unknown" fallback every fee display
-    // already used before this data source existed.
+    // currentTransferFees holds one row per (player, deal_type) — see
+    // getTransferFees in main.js — so a player can have both a 'transfer'
+    // row and a separate 'loan' row. Prefer 'transfer' since a loan's fee
+    // is always 0 (the reference memory read never extracts one), and
+    // treat 0/missing as "no fee data" rather than "confirmed free",
+    // matching the "Unknown" fallback every fee display already used
+    // before this data source existed.
     function getTransferFeeForPlayer(playerId) {
-      const row = currentTransferFees.find(t => t.player_id == playerId);
-      return (row && row.fee > 0) ? row.fee : null;
+      const rows = currentTransferFees.filter(t => t.player_id == playerId && t.fee > 0);
+      if (rows.length === 0) return null;
+      const preferred = rows.find(t => t.deal_type === 'transfer') || rows[0];
+      return preferred.fee;
+    }
+
+    // The specific deal record (fee, date, to/from team) for a player,
+    // scoped to one deal type — used where a fee/date alone isn't enough,
+    // e.g. showing a loan's start date or a specific deal's destination
+    // club. Returns null if this save has no such deal captured for them.
+    function getTransferDealForPlayer(playerId, dealType) {
+      return currentTransferFees.find(t => t.player_id == playerId && t.deal_type === dealType) || null;
     }
 
     // Fail-safe button on the player profile (Youth Mode only, see

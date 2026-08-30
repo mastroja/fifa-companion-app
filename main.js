@@ -1148,10 +1148,13 @@ function persistTransferFees(saveId, transferPayload) {
   saveDatabaseToDisk();
 }
 
-// One row per player: whichever transfer_fees row is their most recent
-// (by deal_date) — the Transfer Hub/Former Players/profile only ever want
-// "what did we pay/receive for this player last", not their full deal
-// history. Loans always come back with fee 0 (see export_all.lua — the
+// One row per (player, deal_type): whichever transfer_fees row is most
+// recent (by deal_date) for that pairing — NOT collapsed to one row per
+// player, since a player can legitimately have both a 'transfer' deal
+// (their signing or departure) and a separate 'loan' deal captured in the
+// same window, and the player profile's Transfer History wants fee/date
+// data for each of those independently, not just whichever happened last
+// overall. Loans always come back with fee 0 (see export_all.lua — the
 // reference script never extracts a loan fee), so they still show up here
 // for deal_type/date but the UI should treat a 0 fee as "not shown".
 function getTransferFees(saveId = activeSaveId) {
@@ -1164,13 +1167,14 @@ function getTransferFees(saveId = activeSaveId) {
   `);
   if (res.length === 0) return [];
   const cols = res[0].columns;
-  const latestByPlayer = new Map();
+  const latestByPlayerAndType = new Map();
   res[0].values.forEach(row => {
     const obj = {};
     cols.forEach((c, i) => { obj[c] = row[i]; });
-    latestByPlayer.set(obj.player_id, obj); // later rows (ASC order) overwrite earlier ones
+    // later rows (ASC order) overwrite earlier ones for the same key
+    latestByPlayerAndType.set(`${obj.player_id}|${obj.deal_type}`, obj);
   });
-  return Array.from(latestByPlayer.values());
+  return Array.from(latestByPlayerAndType.values());
 }
 
 // ------------------------------------------------------------------
