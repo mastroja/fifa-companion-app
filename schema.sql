@@ -328,3 +328,33 @@ CREATE TABLE IF NOT EXISTS academy_graduate_overrides (
     FOREIGN KEY(player_id) REFERENCES players(player_id),
     FOREIGN KEY(save_id) REFERENCES saves(id)
 );
+
+-- Real transfer/loan fees, read directly from the Career Mode Transfer
+-- Manager's negotiation-storage memory (see export_all.lua's TRANSFERS
+-- EXPORT block) rather than the "transfers"/"transferhistory" DB tables,
+-- which crash the game on read (see feedback_live_editor_data_safety
+-- memory). That negotiation storage only ever holds the CURRENT season's
+-- succeeded deals — reset by the game itself every season — so this is
+-- upserted every sync rather than replaced wholesale, and accumulates
+-- across seasons instead of losing prior seasons' deals when the game's
+-- own memory resets. The UNIQUE key includes deal_date so the same player
+-- transferring twice across different seasons gets two rows, not one
+-- overwriting the other; re-syncing mid-season (deal already captured,
+-- same key) just updates fee/team-name in place instead of duplicating.
+CREATE TABLE IF NOT EXISTS transfer_fees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    from_team_id INTEGER,
+    to_team_id INTEGER,
+    from_team_name TEXT,
+    to_team_name TEXT,
+    deal_type TEXT,            -- 'transfer' | 'loan'
+    fee INTEGER DEFAULT 0,
+    exchange_value INTEGER DEFAULT 0,
+    deal_date TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    UNIQUE(save_id, player_id, from_team_id, to_team_id, deal_date)
+);
