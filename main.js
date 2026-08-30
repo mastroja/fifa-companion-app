@@ -1050,7 +1050,7 @@ function getInferredTransfers(saveId = activeSaveId) {
     const isAcademyGraduate = everInAcademy.has(id);
     results.push({
       player_name: info.name,
-      from_team: isAcademyGraduate ? 'Academy' : (isLoanIn ? info.loan_club_name : 'Unknown Club'),
+      from_team: isAcademyGraduate ? `${info.club_name} Academy` : (isLoanIn ? info.loan_club_name : 'Unknown Club'),
       to_team: info.club_name,
       fee: 0,
       is_user: true,
@@ -2266,7 +2266,7 @@ function getSignedPlayers(saveId = activeSaveId) {
 
     let fromTeam = 'Unknown Club';
     if (isAcademy) {
-      fromTeam = 'Academy';
+      fromTeam = ourClubName ? `${ourClubName} Academy` : 'Academy';
     } else if (earliest) {
       // A rival team's row for this same player_id from a season BEFORE
       // they first appeared on our own books — the closest thing to a

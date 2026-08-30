@@ -1780,7 +1780,7 @@
           player = {
             ...academyPlayer,
             potential: formatAcademyPotentialDisplay(academyPlayer),
-            club_name: 'Youth Academy',
+            club_name: `${getMostCommonClubName() || 'My Club'} Academy`,
             wage: 0
           };
         }
@@ -2068,7 +2068,7 @@
         const signedFee = (signedDeal && signedDeal.fee > 0) ? signedDeal.fee : null;
         transferHistoryEntries.push(signedInfo.is_academy
           ? `<div class="timeline-item">
-               <div class="timeline-title">Academy Graduate</div>
+               <div class="timeline-title">${ourClub} Academy Graduate</div>
                ${signedInfo.signed_season ? `<div style="font-size: 13px; color: var(--accent-color);">${signedInfo.signed_season}</div>` : ''}
              </div>`
           : `<div class="timeline-item">
@@ -2120,7 +2120,7 @@
       // as an academy graduate.
       const alreadyAcademy = !!(signedInfo && signedInfo.is_academy);
       const markAcademyBtnHtml = (currentYouthModeEnabled && player.player_id && !alreadyAcademy)
-        ? `<button class="refresh-btn" style="font-size: 12px; padding: 4px 10px;" onclick="markAcademyGraduate(${player.player_id})" title="Mark this player as an academy graduate — updates their transfer history and 'from' club to Academy. Use this if the automatic detection missed their promotion.">🎓 Mark as Academy Graduate</button>`
+        ? `<button class="refresh-btn" style="font-size: 12px; padding: 4px 10px;" onclick="markAcademyGraduate(${player.player_id})" title="Mark this player as an academy graduate — updates their transfer history and 'from' club to ${ourClub} Academy. Use this if the automatic detection missed their promotion.">🎓 Mark as ${ourClub} Academy Graduate</button>`
         : '';
 
       const traitsHtml = (player.traits && player.traits.length > 0)
