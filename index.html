@@ -1757,6 +1757,19 @@
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
 
+      // A 'transferred' match (see transformPlayersForTable) is stale
+      // history, not a live squad member — getSquadFromDB returns every
+      // player_season_stats row for this season regardless of whether
+      // they're still with us, so a mid-season departure's row is still
+      // here with club_name/club_id frozen at whatever it was the last
+      // time THEY synced (i.e. still us), not their real current club.
+      // Fall through to the currentPastPlayers/formerPlayer branch below
+      // instead, which has the fresh-club fallback (watchlist lookup,
+      // then the transfer-deal data as a backstop for its one-sync lag).
+      if (player && player.__clubStatus === 'transferred') {
+        player = null;
+      }
+
       // Not on the senior squad — check the youth academy roster before
       // giving up. potential becomes a display string (the real range,
       // not a fabricated one) rather than a number, which the profile
