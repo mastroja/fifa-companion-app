@@ -1114,6 +1114,65 @@ function correctTransferFlags(transferPayload) {
   return transferPayload;
 }
 
+// Durable counterpart to correctTransferFlags above, which only patches
+// flags on the transient in-memory payload pushed to the renderer this
+// sync. This persists whatever real fee data the negotiation-manager
+// memory read (see export_all.lua) currently has into transfer_fees, so
+// the Transfer Hub/Former Players/player profile can show it across saves
+// and app restarts, not just for the session that happened to be open
+// when the deal was struck. Records without a resolvable player_id are
+// skipped (shouldn't happen — see get_transfer_data in export_all.lua —
+// but a bad memory read is exactly the failure mode worth guarding here).
+function persistTransferFees(saveId, transferPayload) {
+  if (!db || !saveId || !transferPayload || !Array.isArray(transferPayload.transfers)) return;
+  const stmt = db.prepare(`
+    INSERT INTO transfer_fees (save_id, player_id, from_team_id, to_team_id, from_team_name, to_team_name, deal_type, fee, exchange_value, deal_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(save_id, player_id, from_team_id, to_team_id, deal_date) DO UPDATE SET
+      from_team_name=excluded.from_team_name,
+      to_team_name=excluded.to_team_name,
+      deal_type=excluded.deal_type,
+      fee=excluded.fee,
+      exchange_value=excluded.exchange_value,
+      updated_at=CURRENT_TIMESTAMP;
+  `);
+  transferPayload.transfers.forEach(t => {
+    if (!t.player_id) return;
+    stmt.run([
+      saveId, t.player_id, t.from_team_id || 0, t.to_team_id || 0,
+      t.from_team || '', t.to_team || '', t.deal_type || 'transfer',
+      t.fee || 0, t.exchange_value || 0, t.date || ''
+    ]);
+  });
+  stmt.free();
+  saveDatabaseToDisk();
+}
+
+// One row per player: whichever transfer_fees row is their most recent
+// (by deal_date) — the Transfer Hub/Former Players/profile only ever want
+// "what did we pay/receive for this player last", not their full deal
+// history. Loans always come back with fee 0 (see export_all.lua — the
+// reference script never extracts a loan fee), so they still show up here
+// for deal_type/date but the UI should treat a 0 fee as "not shown".
+function getTransferFees(saveId = activeSaveId) {
+  if (!db || !saveId) return [];
+  const res = db.exec(`
+    SELECT player_id, from_team_id, to_team_id, from_team_name, to_team_name, deal_type, fee, exchange_value, deal_date
+    FROM transfer_fees
+    WHERE save_id = ${saveId}
+    ORDER BY deal_date ASC;
+  `);
+  if (res.length === 0) return [];
+  const cols = res[0].columns;
+  const latestByPlayer = new Map();
+  res[0].values.forEach(row => {
+    const obj = {};
+    cols.forEach((c, i) => { obj[c] = row[i]; });
+    latestByPlayer.set(obj.player_id, obj); // later rows (ASC order) overwrite earlier ones
+  });
+  return Array.from(latestByPlayer.values());
+}
+
 // ------------------------------------------------------------------
 // Youth Squad Career Mode — gameplay balancing
 // ------------------------------------------------------------------
@@ -2485,6 +2544,7 @@ function deleteSave(saveId) {
   db.run('DELETE FROM season_competition_results WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM youth_academy_snapshot WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM academy_graduate_overrides WHERE save_id = ?;', [saveId]);
+  db.run('DELETE FROM transfer_fees WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM player_awards WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ?);', [saveId]);
   db.run('DELETE FROM season_end_reviews WHERE save_id = ?;', [saveId]);
   db.run('DELETE FROM seasons WHERE save_id = ?;', [saveId]);
@@ -2502,6 +2562,34 @@ function deleteSave(saveId) {
   }
 
   return { success: true, fallback_save_id: activeSaveId };
+}
+
+// Permanently deletes a player and every row across every table that
+// references their player_id — unlike deleteSave, this DOES touch the
+// shared `players` table, since "delete this player" only makes sense
+// as removing them entirely, not just from one save's view of them.
+// Irreversible from the app's side; the renderer confirms with the user
+// (and warns about the caveat below) before calling this. player_id is
+// EA FC's own internal id, and importFifaData's sync upsert is a plain
+// INSERT ... ON CONFLICT(player_id) DO UPDATE with no "was deliberately
+// deleted" check — so if this player is still on the in-game squad, the
+// very next Live Editor sync will simply re-create their row from
+// scratch, with no memory of the deletion ever having happened.
+function deletePlayer(playerId) {
+  if (!db || !playerId) return { success: false };
+
+  db.run('DELETE FROM player_season_stats WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM youth_academy_snapshot WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM season_league_stats WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM player_awards WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM former_player_snapshots WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM academy_graduate_overrides WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM transfer_fees WHERE player_id = ?;', [playerId]);
+  db.run('DELETE FROM players WHERE player_id = ?;', [playerId]);
+  saveDatabaseToDisk();
+  console.log(`[Player] Deleted player ${playerId}.`);
+
+  return { success: true };
 }
 
 // ------------------------------------------------------------------
@@ -2610,9 +2698,11 @@ ipcMain.handle('get-career-totals', () => getCareerTotalsForSquad());
 ipcMain.handle('get-manager-ppg', () => getManagerSeasonPPG());
 ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
 ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfers(saveId));
+ipcMain.handle('get-transfer-fees', (_event, saveId) => getTransferFees(saveId));
 ipcMain.handle('get-saves-list', () => getSavesList());
 ipcMain.handle('select-save', (_event, saveId) => selectSave(saveId));
 ipcMain.handle('delete-save', (_event, saveId) => deleteSave(saveId));
+ipcMain.handle('delete-player', (_event, playerId) => deletePlayer(playerId));
 ipcMain.handle('get-season-competition-results', (_event, seasonId) => getSeasonCompetitionResults(seasonId));
 ipcMain.handle('get-trophies-won', () => getTrophiesWon());
 ipcMain.handle('get-youth-academy', (_event, saveId) => getYouthAcademy(saveId));
@@ -2719,6 +2809,7 @@ app.whenReady().then(async () => {
       try {
         const rawTransfers = fs.readFileSync(transferExportPath, 'utf-8');
         const transferPayload = correctTransferFlags(JSON.parse(rawTransfers));
+        persistTransferFees(activeSaveId, transferPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('transfers-updated', { save_id: activeSaveId, data: transferPayload });

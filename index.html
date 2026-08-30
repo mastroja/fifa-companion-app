@@ -704,7 +704,7 @@
   <div id="past-players-tab" class="tab-content">
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px;">
       <div style="font-size: 13px; color: var(--text-dim);">
-        Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For has no data source since the game's transfer-history table crashes when read — see the "Departed" column for when they left instead.
+        Players who've left the club. Current OVR/Potential are looked up live from the game when available (takes one F10 refresh after a player first appears here to populate); Sold For shows the real fee when the game's transfer negotiation data has it, otherwise Unknown — see the "Departed" column for when they left instead.
       </div>
       <button class="refresh-btn" style="flex-shrink: 0;" onclick="onClearFormerPlayersClick()" title="Hides every former player currently listed — for wiping the pre-youth-rebuild squad so it doesn't count. Doesn't touch past season stats; anyone who leaves after this still shows up normally.">🧹 Clear Former Players</button>
     </div>
@@ -714,9 +714,10 @@
           <tr>
             <th onclick="sortPastPlayers('name')">Player ↕</th>
             <th onclick="sortPastPlayers('position_id')">Pos ↕</th>
+            <th onclick="sortPastPlayers('__age')">Age ↕</th>
             <th onclick="sortPastPlayers('overall')">Current OVR ↕</th>
             <th onclick="sortPastPlayers('current_club')">Current Club ↕</th>
-            <th title="No data source for actual transfer fees — always shows Unknown, not sortable">Sold For</th>
+            <th onclick="sortPastPlayers('__soldFor')" title="Real fee from the game's transfer negotiation data, when known — otherwise Unknown.">Sold For ↕</th>
             <th onclick="sortPastPlayers('__value')">Current Value ↕</th>
             <th onclick="sortPastPlayers('departed_season')">Departed ↕</th>
             <th onclick="sortPastPlayers('joined_season')">Years Active ↕</th>
@@ -724,7 +725,7 @@
           </tr>
         </thead>
         <tbody id="past-players-body">
-          <tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>
+          <tr><td colspan="10" class="empty-state">No former players tracked yet.</td></tr>
         </tbody>
       </table>
     </div>
@@ -758,10 +759,11 @@
             <th onclick="sortTransfers('from_team')">From ↕</th>
             <th onclick="sortTransfers('to_team')">To ↕</th>
             <th id="transfer-detail-header" onclick="sortTransfers('detail')">Signed ↕</th>
+            <th onclick="sortTransfers('fee')" title="Real fee from the game's transfer negotiation data, when known — a loan or an untracked deal shows as Unknown.">Fee ↕</th>
           </tr>
         </thead>
         <tbody id="transfers-tbody">
-          <tr><td colspan="4" class="empty-state">No transfer data loaded.</td></tr>
+          <tr><td colspan="5" class="empty-state">No transfer data loaded.</td></tr>
         </tbody>
       </table>
     </div>
@@ -888,7 +890,10 @@
 
   <!-- Player Profile Detailed Tab -->
   <div id="profile-tab" class="tab-content">
-    <button class="back-btn" onclick="goBackFromProfile()">← Back to List</button>
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <button class="back-btn" onclick="goBackFromProfile()">← Back to List</button>
+      <button class="refresh-btn" onclick="deletePlayerFromProfile(currentProfilePlayerId)" title="Permanently delete this player from the database. If they still exist in your save, they'll be added back on the next refresh." style="color: #f85149; border-color: #f8514955; opacity: 0.7;">🗑</button>
+    </div>
     <div id="profile-content-container"></div>
   </div>
 
@@ -1151,6 +1156,15 @@
     let currentSaveIsSnapshot = false;
     let currentSnapshotSyncedAt = null;
     let currentTransfers = [];
+    // Real fee/date data from the negotiation-manager memory read (see
+    // getTransferFees in main.js) — one row per player_id, whichever of
+    // their transfer_fees rows is most recent. Separate from
+    // currentTransfers above (which is just is_league/userClubName
+    // bookkeeping) since this backs actual UI: the Transfer Hub's Fee
+    // column, Former Players' Sold For, and the profile's Transfer Fee
+    // line. Loans always carry fee 0 (see export_all.lua) — treat that as
+    // "no fee data", not "confirmed free".
+    let currentTransferFees = [];
     // Transfer Hub's Signed view (see getTransferHubRows/refreshSignedPlayers).
     let currentSignedPlayers = [];
     let currentYouthAcademy = [];
@@ -1720,6 +1734,13 @@
     // profile is currently on screen — see refreshAllViewsForSettingsChange.
     let lastOpenedProfileIdentifier = null;
 
+    // The resolved numeric player_id for whichever profile is currently on
+    // screen (null if none was resolvable — e.g. a not-found fallback
+    // profile). The delete button lives in the static back-button row
+    // rather than the rebuilt profile content, so it reads this instead of
+    // having the id baked into its onclick like the rest of the page does.
+    let currentProfilePlayerId = null;
+
     async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
@@ -1774,6 +1795,8 @@
       if (!player) {
         player = { name: identifier };
       }
+
+      currentProfilePlayerId = player.player_id || null;
 
       let realSeasonHistory = [];
       if (player.player_id && window.api && window.api.getPlayerHistory) {
@@ -2264,6 +2287,7 @@
               ` : `
                 <div class="attr-list">
                   <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
+                  <div class="attr-item" title="Real fee from the game's transfer negotiation data, when known — this is what was actually paid to sign them, not an estimate of what they're worth now."><span>Transfer Fee:</span> <strong style="${getTransferFeeForPlayer(player.player_id) ? '' : 'color: var(--text-dim); font-style: italic; font-weight: normal;'}">${getTransferFeeForPlayer(player.player_id) ? formatMoney(getTransferFeeForPlayer(player.player_id)) : 'Unknown'}</strong></div>
                   <div class="attr-item"><span>Wage:</span> <strong>${formatWageAmount(player.wage)} / wk</strong></div>
                   <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
                   <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
@@ -2564,17 +2588,21 @@
           player_name: p.name,
           from_team: ourClub,
           to_team: p.current_club || 'Unknown',
-          detail: p.departed_season || '—'
+          detail: p.departed_season || '—',
+          fee: getTransferFeeForPlayer(p.player_id)
         }));
       }
 
       if (view === 'loaned') {
+        // Loans never carry real fee data (see getTransferFeeForPlayer) —
+        // still looked up for consistency, but expect it to always be null.
         return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => ({
           player_id: p.player_id,
           player_name: p.name,
           from_team: ourClub,
           to_team: p.loan_club_name || 'Unknown Club',
-          detail: p.loan_date_end || '—'
+          detail: p.loan_date_end || '—',
+          fee: getTransferFeeForPlayer(p.player_id)
         }));
       }
 
@@ -2584,7 +2612,8 @@
         player_name: p.name,
         from_team: p.from_team,
         to_team: ourClub,
-        detail: p.signed_season || '—'
+        detail: p.signed_season || '—',
+        fee: getTransferFeeForPlayer(p.player_id)
       }));
     }
 
@@ -2609,6 +2638,10 @@
       let rows = getTransferHubRows(view);
 
       rows.sort((a, b) => {
+        if (currentTransferSortColumn === 'fee') {
+          const valA = Number(a.fee || 0), valB = Number(b.fee || 0);
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
         const valA = String(a[currentTransferSortColumn] || '');
         const valB = String(b[currentTransferSortColumn] || '');
         return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
@@ -2623,7 +2656,7 @@
       }
 
       if (rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="empty-state">No ${view} players found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No ${view} players found.</td></tr>`;
         return;
       }
 
@@ -2633,6 +2666,7 @@
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
           <td style="color: var(--accent-color); font-weight: 600;">${t.detail}</td>
+          <td style="color: var(--text-dim); ${t.fee ? 'font-weight: 600; color: var(--accent-color);' : 'font-style: italic;'}">${t.fee ? formatMoney(t.fee) : 'Unknown'}</td>
         </tr>
       `).join('');
     }
@@ -2833,7 +2867,7 @@
       if (!tbody) return;
 
       if (currentPastPlayers.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="9" class="empty-state">No former players tracked yet.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-state">No former players tracked yet.</td></tr>`;
         return;
       }
 
@@ -2844,7 +2878,8 @@
         // wage_at_departure is the best available proxy for a current-club
         // wage we have no way to know — value is still just an estimate.
         const value = estimateMarketValue(p.overall, p.potential, age, p.wage_at_departure);
-        return { ...p, __value: value };
+        const soldFor = getTransferFeeForPlayer(p.player_id);
+        return { ...p, __age: age, __value: value, __soldFor: soldFor };
       });
 
       rows.sort((a, b) => {
@@ -2853,10 +2888,10 @@
         if (pastPlayersSortColumn === 'position_id') {
           valA = getPositionInfo(a.position_id).label;
           valB = getPositionInfo(b.position_id).label;
-        } else if (pastPlayersSortColumn === '__value') {
+        } else if (pastPlayersSortColumn === '__value' || pastPlayersSortColumn === '__soldFor') {
           valA = Number(valA || 0); valB = Number(valB || 0);
           return pastPlayersSortAscending ? valA - valB : valB - valA;
-        } else if (pastPlayersSortColumn === 'overall' || pastPlayersSortColumn === 'years_active') {
+        } else if (pastPlayersSortColumn === '__age' || pastPlayersSortColumn === 'overall' || pastPlayersSortColumn === 'years_active') {
           valA = Number(valA || 0); valB = Number(valB || 0);
           return pastPlayersSortAscending ? valA - valB : valB - valA;
         }
@@ -2872,9 +2907,10 @@
           <tr>
             <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+            <td>${p.__age ?? '—'}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
             <td>${p.current_club}</td>
-            <td style="color: var(--text-dim); font-style: italic;">Unknown</td>
+            <td style="${p.__soldFor ? 'color: var(--accent-color); font-weight: 600;' : 'color: var(--text-dim); font-style: italic;'}">${p.__soldFor ? formatMoney(p.__soldFor) : 'Unknown'}</td>
             <td style="color: var(--accent-color); font-weight: 600;">${formatMoney(p.__value)}</td>
             <td>${p.departed_season || '—'}</td>
             <td>${formatYearsActiveRange(p.joined_season, p.departed_season)}</td>
@@ -2915,6 +2951,28 @@
       if (!window.api || !window.api.getSignedPlayers) return;
       currentSignedPlayers = (await window.api.getSignedPlayers(currentSaveId)) || [];
       filterAndRenderTransfers();
+    }
+
+    // Real fee data (see currentTransferFees above) — self-refreshes the
+    // Transfer Hub and Former Players tables, same pattern as
+    // refreshSignedPlayers, since both read fee data by player_id.
+    async function refreshTransferFees() {
+      if (!window.api || !window.api.getTransferFees) return;
+      currentTransferFees = (await window.api.getTransferFees(currentSaveId)) || [];
+      filterAndRenderTransfers();
+      // Redraw-only (currentPastPlayers itself hasn't changed, only the fee
+      // lookup it's about to use) — renderPastPlayersTable would re-fetch
+      // past players over IPC for no reason.
+      renderPastPlayersRows();
+    }
+
+    // A loan's fee is always 0 (the reference memory read never extracts
+    // one — see export_all.lua), so treat 0 as "no fee data" rather than
+    // "confirmed free", matching the "Unknown" fallback every fee display
+    // already used before this data source existed.
+    function getTransferFeeForPlayer(playerId) {
+      const row = currentTransferFees.find(t => t.player_id == playerId);
+      return (row && row.fee > 0) ? row.fee : null;
     }
 
     // Fail-safe button on the player profile (Youth Mode only, see
@@ -3000,12 +3058,41 @@
       populateSquadSeasonSelector();
       renderPastPlayersTable();
       refreshSignedPlayers();
+      refreshTransferFees();
 
       currentYouthAcademy = bundle.youth_academy || [];
       renderYouthAcademyTable();
 
       leagueStatsSelectedSeasonId = null; // a different save has different seasons
       populateLeagueStatsSeasonSelector();
+    }
+
+    // Irreversible — see deletePlayer in main.js for the actual cascade.
+    // Unlike deleteCurrentSave, this DOES wipe the shared players row,
+    // since "delete this player" only makes sense as removing them
+    // entirely. player_id is EA FC's own internal id and the Live Editor
+    // sync is a plain upsert with no "was deliberately deleted" check, so
+    // a player still on the in-game squad comes right back on the next
+    // refresh — the confirm() below spells that out before anything runs.
+    async function deletePlayerFromProfile(playerId) {
+      if (!playerId || !window.api || !window.api.deletePlayer) return;
+
+      const known = (currentPlayers || []).find(p => p.player_id == playerId)
+        || (currentYouthAcademy || []).find(p => p.player_id == playerId)
+        || (currentPastPlayers || []).find(p => p.player_id == playerId);
+      const label = (known && known.name) ? known.name : 'this player';
+
+      const confirmed = confirm(`Delete ${label} from the database? This permanently removes all of their stored history (stats, awards, transfer history) and can't be undone. If they still exist in your save, they will be added back automatically the next time you refresh/sync with Live Editor.`);
+      if (!confirmed) return;
+
+      const result = await window.api.deletePlayer(playerId);
+      if (!result || !result.success) {
+        alert('Could not delete player — check the console log for details.');
+        return;
+      }
+
+      if (currentSaveId) await changeSave(currentSaveId);
+      goBackFromProfile();
     }
 
     // Irreversible — confirm with the user before calling into main.js's
@@ -3113,22 +3200,30 @@
     const UNITS_STORAGE_KEY = 'displayUnits';
     const CURRENCY_STORAGE_KEY = 'displayCurrency';
 
+    // Re-opens the player profile page if one happens to be open, rebuilding
+    // it fresh from whatever's now in currentPlayers/currentYouthAcademy/
+    // currentPastPlayers/currentSignedPlayers — it's built fresh from an
+    // identifier rather than kept in a cached DOM tree like the tables
+    // elsewhere, so nothing shows the update otherwise. Call this AFTER
+    // whichever of those source lists you just refreshed has settled
+    // (await them first), or it'll rebuild the profile from stale data.
+    function reopenActiveProfileIfOpen() {
+      const profileTab = document.getElementById('profile-tab');
+      if (profileTab && profileTab.classList.contains('active') && lastOpenedProfileIdentifier != null) {
+        openPlayerProfile(lastOpenedProfileIdentifier);
+      }
+    }
+
     // Re-renders every view that displays a formatMoney/formatWageAmount/
     // formatHeight/formatWeight value, so a settings change shows up
-    // immediately instead of waiting for the next data refresh. Also
-    // re-opens the player profile page if one happens to be open, since
-    // it's built fresh from an identifier rather than kept in a cached DOM
-    // tree like the tables below.
+    // immediately instead of waiting for the next data refresh.
     function refreshAllViewsForSettingsChange() {
       renderTableRows();
       renderPastPlayersTable();
       renderHomeDashboard();
       filterAndRenderTransfers();
       renderLeagueStatsTab();
-      const profileTab = document.getElementById('profile-tab');
-      if (profileTab && profileTab.classList.contains('active') && lastOpenedProfileIdentifier != null) {
-        openPlayerProfile(lastOpenedProfileIdentifier);
-      }
+      reopenActiveProfileIfOpen();
     }
 
     function onUnitsChange(value) {
@@ -5429,9 +5524,12 @@
     }
 
     function refreshYouthAcademy() {
-      if (!window.api || !window.api.getYouthAcademy) return;
+      if (!window.api || !window.api.getYouthAcademy) return Promise.resolve();
       // Same save-scoping reasoning as refreshInferredTransfers above.
-      window.api.getYouthAcademy(currentSaveId).then(data => {
+      // Returns the promise (rather than firing-and-forgetting like
+      // refreshInferredTransfers does) so callers that need the academy
+      // data settled first — e.g. reopenActiveProfileIfOpen — can await it.
+      return window.api.getYouthAcademy(currentSaveId).then(data => {
         currentYouthAcademy = data || [];
         renderYouthAcademyTable();
       });
@@ -5511,15 +5609,27 @@
         processIncomingPlayers(envelope.data);
         refreshInferredTransfers();
         populateSquadSeasonSelector();
-        renderPastPlayersTable();
-        refreshSignedPlayers();
-        refreshYouthAcademy();
+        // Awaited (unlike refreshInferredTransfers/populateSquadSeasonSelector
+        // above, which don't feed the profile page) so that if a player's
+        // profile is open when they transfer out/get promoted, it's rebuilt
+        // from the NEW current/former/academy lists below, not stale ones —
+        // otherwise the profile would keep showing their old club until the
+        // user manually navigated away and back.
+        await Promise.all([renderPastPlayersTable(), refreshSignedPlayers(), refreshYouthAcademy()]);
+        reopenActiveProfileIfOpen();
       });
       window.api.onCareerStatsUpdated((data) => processIncomingPlayers(data));
       window.api.onTransfersUpdated(async (envelope) => {
         await populateSaveSelector();
         if (currentSaveId !== envelope.save_id) return;
         processIncomingTransfers(envelope.data);
+        // main.js already persisted this same envelope's fee data into
+        // transfer_fees before pushing it — re-fetch it here (rather than
+        // reading envelope.data directly) so currentTransferFees reflects
+        // the same "most recent row per player" shape getTransferFees
+        // always returns, not just this sync's raw negotiation dump.
+        await refreshTransferFees();
+        reopenActiveProfileIfOpen();
       });
       window.api.onCalendarUpdated(async (envelope) => {
         await populateSaveSelector();
@@ -5532,6 +5642,7 @@
         if (currentSaveId !== envelope.save_id) return;
         currentYouthAcademy = envelope.data || [];
         renderYouthAcademyTable();
+        reopenActiveProfileIfOpen();
       });
       window.api.onLeagueStatsUpdated(async (envelope) => {
         await populateSaveSelector();
