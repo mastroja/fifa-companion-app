@@ -464,6 +464,27 @@ function getSeasonStandings(seasonId) {
 // noted on latestLeagueStatsPayload above). Also keeps seasons.league_name
 // current for whichever season is still being written to, since a save
 // can change league across seasons via promotion/relegation.
+// The league-stats file is watched independently from the calendar file
+// (see the chokidar watcher below), so right at a season rollover the two
+// can be picked up in either order — persistLeagueStats used to just
+// trust whatever currentSeasonId happened to be globally at that instant,
+// which could silently attribute an ending season's league name/stats to
+// the new season's row (or vice versa) depending on which file's watcher
+// event fired first. Same fix already applied to importFifaData (see its
+// "FIXED 2026-08-27" comment): resolve fresh from this payload's OWN
+// save_uid/current_date (added to export_all.lua's LEAGUE STATS EXPORT
+// block alongside this) instead. Falls back to the old currentSeasonId
+// behavior when current_date isn't present yet — an export written before
+// that Lua change shipped — so this doesn't regress anyone mid-update.
+function resolveLeagueStatsSeasonId(leagueStatsPayload) {
+  if (leagueStatsPayload && leagueStatsPayload.save_uid && leagueStatsPayload.current_date) {
+    return resolveActiveSave(leagueStatsPayload.save_uid, null, null, leagueStatsPayload.current_date)
+      ? currentSeasonId
+      : null; // blank uid while a different save is active — skip, matches importFifaData's guard
+  }
+  return currentSeasonId;
+}
+
 function persistLeagueStats(seasonId, leagueStatsPayload) {
   if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
 
@@ -731,27 +752,26 @@ function getSeasonOverview(saveId, seasonId) {
   const leaguePosition = leagueResult ? parseStandingPositionServer(leagueResult.standing) : null;
   const wonLeague = !!leagueResult && leagueResult.standing === 'Winner';
 
-  // Promotion/relegation compares this season's tier against whichever
-  // season directly followed it — only known once THAT season has
-  // recorded at least one recognized-league result of its own, which may
-  // not be true yet immediately after rollover (hence "unknown" is a
-  // valid, honest outcome here, not just win/promoted/relegated/stayed).
-  let relegated = false, promoted = false;
+  // Relegation still needs the season that directly followed this one —
+  // only known once THAT season has recorded a recognized-league result
+  // of its own, which may not be true yet immediately after rollover
+  // (hence "unknown"/false is a valid, honest outcome here). Promotion,
+  // unlike relegation, doesn't need to wait for that: see
+  // getPromotionStatusFromOwnResults below, which reads this season's own
+  // final position/play-off result directly — that's what lets the
+  // Season Summary be generated and shown BEFORE the in-game rollover
+  // even happens (the "final save point" flow — see checkFinalSavePoint).
+  let relegated = false;
   if (leagueResult) {
     const nextSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id > ${seasonId} ORDER BY id ASC LIMIT 1;`);
     if (nextSeasonRes.length > 0 && nextSeasonRes[0].values.length > 0) {
       const nextResult = getSeasonPrimaryLeagueResult(nextSeasonRes[0].values[0][0]);
       if (nextResult) {
         relegated = nextResult.tier > leagueResult.tier;
-        promoted = nextResult.tier < leagueResult.tier;
       }
     }
   }
-  // In the Championship/League One/League Two, only 1st and 2nd go up
-  // automatically — 3rd-6th enter a playoff and only its winner is also
-  // promoted. So any promotion recorded from a final position outside the
-  // top 2 has to have come via the playoffs.
-  const promotedViaPlayoff = promoted && leaguePosition !== null && leaguePosition > 2;
+  const { promoted, viaPlayoff: promotedViaPlayoff } = getPromotionStatusFromOwnResults(seasonId, leagueResult);
 
   const leagueHistoryRes = db.exec(`
     SELECT r.comp_name, r.standing, se.year_label, se.id
@@ -1319,6 +1339,30 @@ function parseStandingPositionServer(standingText) {
   if (standingText === 'Winner') return 1;
   const match = /^(\d+)/.exec(standingText || '');
   return match ? parseInt(match[1], 10) : null;
+}
+
+// Whether a season counts as "promoted", read directly from that
+// season's own recorded results — never needs a later season to exist,
+// unlike the tier-comparison approach still used for relegated in
+// getSeasonOverview. In the Championship/League One/League Two, only 1st
+// and 2nd go up automatically; 3rd-6th enter a play-off and only its
+// winner is also promoted — so this checks position first, then falls
+// back to a play-off competition result (matched by name — the game
+// varies the exact string per tier, e.g. "Lg Two Play-Offs") with
+// standing "Winner". The Premier League (tier 1) has nothing above it.
+function getPromotionStatusFromOwnResults(seasonId, leagueResult) {
+  if (!leagueResult || leagueResult.tier === 1) return { promoted: false, viaPlayoff: false };
+
+  const position = parseStandingPositionServer(leagueResult.standing);
+  if (position !== null && position <= 2) return { promoted: true, viaPlayoff: false };
+
+  const playoffRes = db.exec(`
+    SELECT standing FROM season_competition_results
+    WHERE season_id = ${seasonId}
+      AND (LOWER(comp_name) LIKE '%play-off%' OR LOWER(comp_name) LIKE '%play off%' OR LOWER(comp_name) LIKE '%playoff%');
+  `);
+  const wonPlayoff = playoffRes.length > 0 && playoffRes[0].values.some(([standing]) => standing === 'Winner');
+  return { promoted: wonPlayoff, viaPlayoff: wonPlayoff };
 }
 
 // Permanently enables Youth Squad Career Mode for a save. One-way by
@@ -2858,7 +2902,7 @@ app.whenReady().then(async () => {
       try {
         const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
         latestLeagueStatsPayload = startupLeagueStats;
-        persistLeagueStats(currentSeasonId, startupLeagueStats);
+        persistLeagueStats(resolveLeagueStatsSeasonId(startupLeagueStats), startupLeagueStats);
         mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [], league_name: startupLeagueStats.league_name || null });
       } catch (err) {
         console.error('[Startup] Failed to load existing league stats export:', err);
@@ -2956,7 +3000,7 @@ app.whenReady().then(async () => {
         const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
         const leagueStatsPayload = JSON.parse(rawLeagueStats);
         latestLeagueStatsPayload = leagueStatsPayload;
-        persistLeagueStats(currentSeasonId, leagueStatsPayload);
+        persistLeagueStats(resolveLeagueStatsSeasonId(leagueStatsPayload), leagueStatsPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [], league_name: leagueStatsPayload.league_name || null });

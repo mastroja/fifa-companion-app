@@ -4342,11 +4342,16 @@
           const results = await window.api.getSeasonCompetitionResults(season.id);
           const match = (results || []).find(r => findPyramidTier(r.comp_name));
           if (match) {
+            // Read the actual recorded play-off result rather than
+            // guessing from final position — the game names the
+            // competition differently per tier (e.g. "Lg Two Play-Offs").
+            const wonPlayoff = (results || []).some(r => /play[\s-]?off/i.test(r.comp_name) && r.standing === 'Winner');
             trace.push({
               season: season.year_label,
               tier: findPyramidTier(match.comp_name).tier,
               tier_name: match.comp_name,
-              position: parseStandingPosition(match.standing)
+              position: parseStandingPosition(match.standing),
+              wonPlayoff
             });
           }
         }
@@ -4369,10 +4374,7 @@
         let badge = '';
         if (i < trace.length - 1) {
           if (trace[i + 1].tier < t.tier) {
-            // Championship/League One/League Two only send 1st and 2nd up
-            // automatically — anything else promoted came via the playoffs.
-            const viaPlayoff = t.position && t.position > 2;
-            badge = `<span class="promo-badge promo-up">Promoted${viaPlayoff ? ' via Play-off' : ''}</span>`;
+            badge = `<span class="promo-badge promo-up">Promoted${t.wonPlayoff ? ' via Play-off' : ''}</span>`;
           } else if (trace[i + 1].tier > t.tier) badge = '<span class="promo-badge promo-down">Relegated</span>';
         }
         const posLabel = t.position ? ordinal(t.position) : 'Not started yet';
