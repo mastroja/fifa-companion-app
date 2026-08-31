@@ -1394,9 +1394,10 @@
       return code ? `https://flagcdn.com/w80/${code}.png` : null;
     }
 
-    // Small +N/-N badge for the attribute/overall watcher — the change
-    // since the player's previous sync (see overall_delta/attribute_deltas
-    // from main.js's computeAttributeDeltas), not a season-long total.
+    // Small +N/-N badge for the attribute/overall watcher — the CUMULATIVE
+    // change for the whole current season so far (see overall_delta/
+    // attribute_deltas and season_start_overall/season_start_attributes_json
+    // in main.js), reset automatically whenever a new season starts.
     function deltaBadge(delta, fontSize = 11) {
       const d = Number(delta || 0);
       if (!d) return '';

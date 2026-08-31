@@ -128,10 +128,24 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     traits_json TEXT,
     play_styles_json TEXT,
 
-    -- change since the previous sync (not cumulative for the season) —
-    -- see computeAttributeDeltas in main.js
+    -- Cumulative change for the WHOLE season so far, not just since the
+    -- previous sync — computed by diffing the current overall/attributes
+    -- against season_start_overall/season_start_attributes_json below,
+    -- see computeAttributeDeltas and the sync logic in main.js.
     overall_delta INTEGER DEFAULT 0,
     attribute_deltas_json TEXT,
+
+    -- Frozen snapshot of this player's overall/attributes from the FIRST
+    -- sync of this season — set once on this row's initial insert and
+    -- never touched again (deliberately excluded from every subsequent
+    -- ON CONFLICT DO UPDATE), so overall_delta/attribute_deltas_json above
+    -- always measure growth from the start of the season, not from
+    -- whatever the last sync happened to be. A new season gets its own
+    -- row (and its own fresh baseline) automatically via the
+    -- UNIQUE(player_id, season_id) constraint below — no explicit
+    -- "clear at season end" step needed.
+    season_start_overall INTEGER,
+    season_start_attributes_json TEXT,
 
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 

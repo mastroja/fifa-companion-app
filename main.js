@@ -77,7 +77,9 @@ async function initDatabase() {
     ['traits_json', 'TEXT'],
     ['play_styles_json', 'TEXT'],
     ['overall_delta', 'INTEGER DEFAULT 0'],
-    ['attribute_deltas_json', 'TEXT']
+    ['attribute_deltas_json', 'TEXT'],
+    ['season_start_overall', 'INTEGER'],
+    ['season_start_attributes_json', 'TEXT']
   ];
   seasonStatsMigrations.forEach(([column, type]) => {
     try {
@@ -86,6 +88,22 @@ async function initDatabase() {
       // column already exists, safe to ignore
     }
   });
+
+  // One-time backfill for rows that predate season_start_overall/
+  // season_start_attributes_json (added above) — a season already in
+  // progress at the moment of this upgrade has no real "start of season"
+  // snapshot to recover, so this treats "right now" as the baseline going
+  // forward. Idempotent (only touches rows that still have no baseline),
+  // safe to run on every launch.
+  try {
+    db.run(`
+      UPDATE player_season_stats
+      SET season_start_overall = overall, season_start_attributes_json = attributes_json
+      WHERE season_start_overall IS NULL;
+    `);
+  } catch (e) {
+    console.error('[DB] Failed to backfill season_start_overall/attributes:', e);
+  }
 
   // Multi-save support, added after some users already had a DB on disk —
   // same ignore-already-exists migration pattern as above. The unique
@@ -241,11 +259,12 @@ function computeSeasonLabel(dateStr) {
   return `${startYear}/${startYear + 1}`;
 }
 
-// Per-attribute change since the last sync (not cumulative for the
-// season — each sync overwrites this with whatever changed since the
-// PREVIOUS sync only). Only includes attributes that actually moved, so
-// the UI can show e.g. "+3 sprint speed -4 jumping" without listing every
-// unchanged stat.
+// Per-attribute difference between two attribute snapshots. Only includes
+// attributes that actually moved, so the UI can show e.g. "+3 sprint
+// speed -4 jumping" without listing every unchanged stat. Cumulative for
+// the whole season when called with the season's frozen starting snapshot
+// (see season_start_attributes_json / importFifaData below) rather than
+// the previous sync's values.
 function computeAttributeDeltas(oldAttrs, newAttrs) {
   const deltas = {};
   Object.keys(newAttrs || {}).forEach(key => {
@@ -1629,16 +1648,25 @@ function importFifaData(jsonPayload) {
     return;
   }
 
-  // Snapshot of each player's overall/attributes as they stood BEFORE
-  // this sync's upsert overwrites them — the baseline computeAttributeDeltas
-  // diffs the new payload against. Read once up front rather than per
-  // player to avoid a query per row.
+  // Whether each player already has a row THIS season (so overall_delta/
+  // attribute_deltas_json below know to diff against the season's frozen
+  // starting point rather than treating this as a fresh baseline). Read
+  // once up front rather than per player to avoid a query per row.
   const previousStatsByPlayer = new Map();
   if (currentSeasonId) {
-    const prevRes = db.exec(`SELECT player_id, overall, attributes_json FROM player_season_stats WHERE season_id = ${currentSeasonId};`);
+    const prevRes = db.exec(`SELECT player_id, overall, attributes_json, season_start_overall, season_start_attributes_json FROM player_season_stats WHERE season_id = ${currentSeasonId};`);
     if (prevRes.length > 0) {
-      prevRes[0].values.forEach(([playerId, overall, attributesJson]) => {
-        previousStatsByPlayer.set(playerId, { overall, attributes: JSON.parse(attributesJson || '{}') });
+      prevRes[0].values.forEach(([playerId, overall, attributesJson, seasonStartOverall, seasonStartAttributesJson]) => {
+        previousStatsByPlayer.set(playerId, {
+          overall,
+          attributes: JSON.parse(attributesJson || '{}'),
+          // Falls back to this row's plain overall/attributes_json only if
+          // season_start_* somehow never got backfilled (shouldn't happen
+          // post-migration, but keeps this from ever computing a delta
+          // against nothing).
+          seasonStartOverall: seasonStartOverall != null ? seasonStartOverall : overall,
+          seasonStartAttributes: seasonStartAttributesJson ? JSON.parse(seasonStartAttributesJson) : JSON.parse(attributesJson || '{}')
+        });
       });
     }
   }
@@ -1683,8 +1711,14 @@ function importFifaData(jsonPayload) {
          on_loan, loan_team_from, loan_club_name, loan_date_end, is_loan_to_buy, wage,
          goals, assists, appearances, clean_sheets, saves, yellow_cards, red_cards, avg_rating,
          attributes_json, competitions_json, traits_json, play_styles_json,
-         overall_delta, attribute_deltas_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         overall_delta, attribute_deltas_json, season_start_overall, season_start_attributes_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      -- season_start_overall/season_start_attributes_json are deliberately
+      -- NOT in this SET list — see the column comment in schema.sql. The
+      -- values bound for them below only ever take effect on a fresh
+      -- INSERT (this player's first row for this season); on a conflict
+      -- (every later sync this season) they're silently ignored and the
+      -- row keeps whatever baseline its first insert set.
       ON CONFLICT(player_id, season_id) DO UPDATE SET
         overall=excluded.overall,
         potential=excluded.potential,
@@ -1722,8 +1756,15 @@ function importFifaData(jsonPayload) {
 
     jsonPayload.players.forEach(p => {
       const previous = previousStatsByPlayer.get(p.player_id);
-      const overallDelta = previous ? (p.overall || 0) - (previous.overall || 0) : 0;
-      const attributeDeltas = previous ? computeAttributeDeltas(previous.attributes, p.attributes || {}) : {};
+      // Diffed against the season's FROZEN starting point (previous.
+      // seasonStartOverall/seasonStartAttributes), not the previous sync's
+      // values — this is what makes the delta accumulate for the whole
+      // season instead of resetting every sync. A player with no row yet
+      // this season has nothing to diff against, so their first sync of
+      // the season always shows a 0/empty delta (exactly right, since
+      // this sync IS the new baseline).
+      const overallDelta = previous ? (p.overall || 0) - (previous.seasonStartOverall || 0) : 0;
+      const attributeDeltas = previous ? computeAttributeDeltas(previous.seasonStartAttributes, p.attributes || {}) : {};
 
       playerStmt.run([
         p.player_id,
@@ -1772,6 +1813,8 @@ function importFifaData(jsonPayload) {
         JSON.stringify(p.play_styles || []),
         overallDelta,
         JSON.stringify(attributeDeltas),
+        p.overall || 0,                       // season_start_overall — only takes effect on a fresh insert
+        JSON.stringify(p.attributes || {}),   // season_start_attributes_json — same
         syncTimestamp
       ]);
     });
