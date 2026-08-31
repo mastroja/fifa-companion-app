@@ -529,6 +529,25 @@ function syncSeasonLeagueNameFromResults(seasonId) {
   }
 }
 
+// Re-derives EVERY season's league_name from its own season_competition_results
+// on every app launch — a self-healing pass, not just a one-time repair.
+// Without this, a season's league_name can only ever get corrected by a
+// LIVE sync targeting that exact season; once a season ends and stops
+// being synced, a bad value from the race described on
+// syncSeasonLeagueNameFromResults would be stuck forever (and worse, an
+// in-memory session that loaded the bad value before a fix landed on disk
+// can silently flush it right back on its next unrelated write, undoing
+// a manual correction). Running this against every season at startup
+// means the correct value gets re-asserted every time, regardless of
+// what any stale prior session left behind.
+function backfillSeasonLeagueNames() {
+  if (!db) return;
+  const res = db.exec('SELECT id FROM seasons;');
+  if (res.length === 0) return;
+  res[0].values.forEach(([seasonId]) => syncSeasonLeagueNameFromResults(seasonId));
+  saveDatabaseToDisk();
+}
+
 function persistLeagueStats(seasonId, leagueStatsPayload) {
   if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
 
@@ -3090,6 +3109,7 @@ ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => expo
 
 app.whenReady().then(async () => {
   await initDatabase();
+  backfillSeasonLeagueNames();
   refreshCurrentSeasonFromCalendar();
   createWindow();
 
