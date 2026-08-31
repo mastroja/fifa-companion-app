@@ -50,6 +50,26 @@ local function convertFifaDate(dayOffset)
     return ""
 end
 
+-- The transfer negotiation manager's own action-date field is a
+-- COMPLETELY different encoding from convertFifaDate's 1582-epoch
+-- day-offset (the one dob/jointeamdate/loan_date_end use) — it's a
+-- literal calendar date packed as a plain YYYYMMDD integer (e.g.
+-- 20250706 = July 6, 2025). Running it through convertFifaDate computed
+-- a nonsense far-future timestamp that always failed the os.date pcall
+-- guard above, which is why every deal_date has been blank since this
+-- feature shipped. Confirmed via a live memory probe (2026-08-31): raw
+-- struct bytes compared against GetCurrentDate() showed this exact
+-- YYYYMMDD pattern consistently across every succeeded transfer and loan
+-- negotiation sampled.
+local function convertNegotiationDate(yyyymmdd)
+    if not yyyymmdd or yyyymmdd <= 0 then return "" end
+    local year = math.floor(yyyymmdd / 10000)
+    local month = math.floor((yyyymmdd % 10000) / 100)
+    local day = yyyymmdd % 100
+    if year < 1900 or year > 2200 or month < 1 or month > 12 or day < 1 or day > 31 then return "" end
+    return string.format("%02d-%02d-%04d", month, day, year)
+end
+
 local function safe_player_name(playerid)
     local ok, name = pcall(GetPlayerName, playerid)
     if ok and type(name) == "string" and #name > 0 then return name end
@@ -175,8 +195,11 @@ local function get_succeeded_ai_player_exchanges(out, storage)
         if (playerid > 0 and buying_team > 0 and selling_team > 0) then
             local seller_accepted = MEMORY:ReadBool(current + 0x67)
             if (seller_accepted) then
+                -- No "-1" here — see get_succeeded_ai_player_loans below
+                -- for why; same bug, same fix, mirrored to this sibling
+                -- function since it shares the identical index scheme.
                 local last_action_idx = MEMORY:ReadChar(current + 0x6B)
-                local last_action_date = MEMORY:ReadInt(current + 0x6C + (0xC * (last_action_idx - 1)))
+                local last_action_date = MEMORY:ReadInt(current + 0x6C + (0xC * last_action_idx))
                 local key = string.format("T%d-%d-%d", playerid, buying_team, selling_team)
                 out[key] = { playerid = playerid, buying_team = buying_team, selling_team = selling_team, date = last_action_date, type = "transfer" }
             end
@@ -236,8 +259,20 @@ local function get_succeeded_ai_player_loans(out, storage)
         if (playerid > 0 and buying_team > 0 and selling_team > 0) then
             local seller_accepted = MEMORY:ReadBool(current + 0x52)
             if (seller_accepted) then
+                -- last_action_idx is a 1-based count of real actions in
+                -- this negotiation's fixed inline array (slot 0 is always
+                -- an unused -1 sentinel) — indexing it directly lands on
+                -- the FINAL action (the one that actually completed the
+                -- deal). The "-1" this used to subtract landed one slot
+                -- too early, on an offer/counter instead — confirmed via
+                -- a live memory probe (2026-08-31) comparing raw struct
+                -- bytes against GetCurrentDate(): every sampled loan
+                -- showed its true final action (action-type byte at +0x8
+                -- reads 0, same "completed" marker the pointer-based
+                -- user_player_transfer/exchange functions already key off
+                -- of) sitting one slot AFTER what the old "-1" math picked.
                 local last_action_idx = MEMORY:ReadChar(current + 0x57)
-                local last_action_date = MEMORY:ReadInt(current + 0x58 + (0xC * (last_action_idx - 1)))
+                local last_action_date = MEMORY:ReadInt(current + 0x58 + (0xC * last_action_idx))
                 local key = string.format("L%d-%d-%d", playerid, buying_team, selling_team)
                 out[key] = { playerid = playerid, buying_team = buying_team, selling_team = selling_team, date = last_action_date, type = "loan" }
             end
@@ -324,7 +359,7 @@ local function get_transfer_data()
             deal_type = nego.type,
             fee = fee,
             exchange_value = club_nego.exchange_value or 0,
-            date = convertFifaDate(nego.date),
+            date = convertNegotiationDate(nego.date),
             is_user = is_user,
             is_big_money = fee > BIG_MONEY_THRESHOLD
         })

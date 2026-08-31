@@ -1164,11 +1164,18 @@ function persistTransferFees(saveId, transferPayload) {
 // for deal_type/date but the UI should treat a 0 fee as "not shown".
 function getTransferFees(saveId = activeSaveId) {
   if (!db || !saveId) return [];
+  // deal_date is stored MM-DD-YYYY (text) — sorts wrong chronologically as
+  // a plain string (e.g. "01-31-2026" < "07-06-2025"), same fix as
+  // getPlayerTransferHistory's ORDER BY. Went unnoticed until now because
+  // every deal_date used to come back blank (see export_all.lua's
+  // convertNegotiationDate fix), so this ORDER BY was previously a no-op.
   const res = db.exec(`
     SELECT player_id, from_team_id, to_team_id, from_team_name, to_team_name, deal_type, fee, exchange_value, deal_date
     FROM transfer_fees
     WHERE save_id = ${saveId}
-    ORDER BY deal_date ASC;
+    ORDER BY CASE WHEN deal_date LIKE '__-__-____'
+      THEN substr(deal_date,7,4) || substr(deal_date,1,2) || substr(deal_date,4,2)
+      ELSE '' END ASC;
   `);
   if (res.length === 0) return [];
   const cols = res[0].columns;
