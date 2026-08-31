@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   getTeamRecordSeasons: () => ipcRenderer.invoke('get-team-record-seasons'),
   getInferredTransfers: (saveId) => ipcRenderer.invoke('get-inferred-transfers', saveId),
   getTransferFees: (saveId) => ipcRenderer.invoke('get-transfer-fees', saveId),
+  getPlayerTransferHistory: (playerId, saveId) => ipcRenderer.invoke('get-player-transfer-history', playerId, saveId),
   getSavesList: () => ipcRenderer.invoke('get-saves-list'),
   selectSave: (saveId) => ipcRenderer.invoke('select-save', saveId),
   deleteSave: (saveId) => ipcRenderer.invoke('delete-save', saveId),

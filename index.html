@@ -1639,6 +1639,30 @@
       return `${years} yr${years > 1 ? 's' : ''} (${remainingMonths} mo${remainingMonths > 1 ? 's' : ''})`;
     }
 
+    // "6 month loan" / "1 year loan" phrasing for the loan timeline entry —
+    // same months-of-difference formatDuration above uses, worded to read
+    // naturally inline ("Loaned to X until Y (6 month loan)").
+    function formatLoanLength(totalMonths) {
+      const n = Number(totalMonths || 0);
+      if (n <= 0) return null;
+      const years = Math.floor(n / 12);
+      const remMonths = n % 12;
+      if (years === 0) return `${n} month${n > 1 ? 's' : ''} loan`;
+      if (remMonths === 0) return `${years} year${years > 1 ? 's' : ''} loan`;
+      return `${years} year${years > 1 ? 's' : ''} ${remMonths} month${remMonths > 1 ? 's' : ''} loan`;
+    }
+
+    // Human-readable date for Transfer History (deal_date/loan_date_end are
+    // MM-DD-YYYY strings from convertFifaDate in export_all.lua) — falls
+    // back to the raw string if it doesn't parse, same fail-open convention
+    // as formatDateMMDDYYYY.
+    function formatPrettyDate(dateInput) {
+      if (!dateInput) return null;
+      const d = parseBirthDate(dateInput);
+      if (!d) return String(dateInput);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
     // year_label is "2025/2026" — turns a joined/departed pair into a
     // "2025-2028" span (joined season's start year through departed
     // season's END year, i.e. start year + 1), same convention as a
@@ -1855,6 +1879,20 @@
         }
       }
 
+      // Full deal-by-deal history for this player (see getPlayerTransferHistory
+      // in main.js) — feeds the Transfer History timeline's post-departure
+      // section below, so a former player's moves between OTHER clubs (no
+      // involvement from us) keep showing up instead of the timeline going
+      // stale the moment they left.
+      let playerTransferHistory = [];
+      if (player.player_id && window.api && window.api.getPlayerTransferHistory) {
+        try {
+          playerTransferHistory = (await window.api.getPlayerTransferHistory(player.player_id, currentSaveId)) || [];
+        } catch (e) {
+          console.error('Failed to load player transfer history:', e);
+        }
+      }
+
       // Career-cumulative stats (across every season, not just this
       // one) feed the Youth Mode potential reveal — see
       // formatPotentialDisplay/getCareerStatsMap.
@@ -2066,14 +2104,18 @@
       if (signedInfo) {
         const signedDeal = getTransferDealForPlayer(player.player_id, 'transfer');
         const signedFee = (signedDeal && signedDeal.fee > 0) ? signedDeal.fee : null;
+        // Prefer the exact deal date over the generic season tag — falls
+        // back to signed_season when no deal was captured (e.g. an academy
+        // promotion has no negotiation, so no deal_date to read).
+        const signedDateLabel = (signedDeal && signedDeal.deal_date) ? formatPrettyDate(signedDeal.deal_date) : signedInfo.signed_season;
         transferHistoryEntries.push(signedInfo.is_academy
           ? `<div class="timeline-item">
                <div class="timeline-title">${ourClub} Academy Graduate</div>
-               ${signedInfo.signed_season ? `<div style="font-size: 13px; color: var(--accent-color);">${signedInfo.signed_season}</div>` : ''}
+               ${signedDateLabel ? `<div style="font-size: 13px; color: var(--accent-color);">${signedDateLabel}</div>` : ''}
              </div>`
           : `<div class="timeline-item">
                <div class="timeline-title">${signedInfo.from_team || 'Unknown Club'} → ${ourClub}</div>
-               <div style="font-size: 13px; color: var(--accent-color);">Signed${signedInfo.signed_season ? ` (${signedInfo.signed_season})` : ''}${signedFee ? ` — ${formatMoney(signedFee)}` : ''}</div>
+               <div style="font-size: 13px; color: var(--accent-color);">Signed${signedDateLabel ? ` (${signedDateLabel})` : ''}${signedFee ? ` — ${formatMoney(signedFee)}` : ''}</div>
              </div>`
         );
       }
@@ -2081,10 +2123,11 @@
         const loanDeal = getTransferDealForPlayer(player.player_id, 'loan');
         const loanFee = (loanDeal && loanDeal.fee > 0) ? loanDeal.fee : null;
         const loanMonths = (loanDeal && loanDeal.deal_date) ? monthsBetweenDates(loanDeal.deal_date, player.loan_date_end) : null;
+        const loanEndLabel = player.loan_date_end ? formatPrettyDate(player.loan_date_end) : null;
+        const loanLengthLabel = loanMonths !== null ? formatLoanLength(loanMonths) : null;
         transferHistoryEntries.push(`
           <div class="timeline-item">
-            <div class="timeline-title">On loan at ${displayClubName}</div>
-            ${player.loan_date_end ? `<div style="font-size: 13px; color: var(--accent-color);">Until ${player.loan_date_end}${loanMonths !== null ? ` (${formatDuration(loanMonths)})` : ''}</div>` : ''}
+            <div class="timeline-title">Loaned to ${displayClubName}${loanEndLabel ? ` until ${loanEndLabel}` : ''}${loanLengthLabel ? ` (${loanLengthLabel})` : ''}</div>
             ${loanFee ? `<div style="font-size: 13px; color: var(--accent-color);">Loan Fee: ${formatMoney(loanFee)}</div>` : ''}
           </div>
         `);
@@ -2101,12 +2144,36 @@
         const soldCurrentClub = soldCurrentClubIsStale
           ? ((soldDeal && soldDeal.to_team_name) || soldInfo.current_club)
           : soldInfo.current_club;
+        const soldDateLabel = (soldDeal && soldDeal.deal_date) ? formatPrettyDate(soldDeal.deal_date) : soldInfo.departed_season;
         transferHistoryEntries.push(`
           <div class="timeline-item">
             <div class="timeline-title">${ourClub} → ${soldCurrentClub || 'Unknown'}</div>
-            <div style="font-size: 13px; color: var(--accent-color);">Departed${soldInfo.departed_season ? ` (${soldInfo.departed_season})` : ''}${soldFee ? ` — ${formatMoney(soldFee)}` : ''}</div>
+            <div style="font-size: 13px; color: var(--accent-color);">Departed${soldDateLabel ? ` (${soldDateLabel})` : ''}${soldFee ? ` — ${formatMoney(soldFee)}` : ''}</div>
           </div>
         `);
+
+        // Everything that happened to them AFTER they left us — the
+        // negotiation-manager memory read captures every succeeded deal in
+        // the league each sync, not just ones involving our club (see
+        // getPlayerTransferHistory in main.js), so this keeps following a
+        // departed player's career for as long as the save runs, with zero
+        // involvement from us required. Any row touching our own club is
+        // already shown above (the Signed/Departed entries), so only rows
+        // between two OTHER clubs land here.
+        const laterMoves = (playerTransferHistory || []).filter(t =>
+          t.from_team_name !== ourClub && t.to_team_name !== ourClub
+        );
+        laterMoves.forEach(move => {
+          const moveFee = move.fee > 0 ? move.fee : null;
+          const moveDateLabel = move.deal_date ? formatPrettyDate(move.deal_date) : null;
+          const isLoan = move.deal_type === 'loan';
+          transferHistoryEntries.push(`
+            <div class="timeline-item">
+              <div class="timeline-title">${move.from_team_name || 'Unknown Club'} → ${move.to_team_name || 'Unknown Club'}</div>
+              <div style="font-size: 13px; color: var(--accent-color);">${isLoan ? 'Loan' : 'Transfer'}${moveDateLabel ? ` (${moveDateLabel})` : ''}${moveFee ? ` — ${formatMoney(moveFee)}` : ''}</div>
+            </div>
+          `);
+        });
       }
 
       const transferHistoryHtml = transferHistoryEntries.length > 0

@@ -1182,6 +1182,36 @@ function getTransferFees(saveId = activeSaveId) {
   return Array.from(latestByPlayerAndType.values());
 }
 
+// Full deal-by-deal history for one player, chronological — unlike
+// getTransferFees above (which collapses to one row per deal_type), this
+// keeps every row. persistTransferFees writes EVERY succeeded deal the
+// negotiation-manager memory read finds each sync (see get_transfer_data
+// in export_all.lua, which walks AI-AI and AI-user negotiations alike,
+// not just ones involving our own club), so a former player's moves
+// between OTHER clubs after leaving us are already accumulating here —
+// this just surfaces that chain for the player profile's Transfer History
+// timeline. deal_date is stored MM-DD-YYYY (text), which sorts wrong
+// chronologically as a plain string, so ORDER BY rewrites it to
+// YYYYMMDD first.
+function getPlayerTransferHistory(playerId, saveId = activeSaveId) {
+  if (!db || !saveId || !playerId) return [];
+  const res = db.exec(`
+    SELECT from_team_id, to_team_id, from_team_name, to_team_name, deal_type, fee, exchange_value, deal_date
+    FROM transfer_fees
+    WHERE save_id = ${saveId} AND player_id = ${playerId}
+    ORDER BY CASE WHEN deal_date LIKE '__-__-____'
+      THEN substr(deal_date,7,4) || substr(deal_date,1,2) || substr(deal_date,4,2)
+      ELSE '' END ASC;
+  `);
+  if (res.length === 0) return [];
+  const cols = res[0].columns;
+  return res[0].values.map(row => {
+    const obj = {};
+    cols.forEach((c, i) => { obj[c] = row[i]; });
+    return obj;
+  });
+}
+
 // ------------------------------------------------------------------
 // Youth Squad Career Mode — gameplay balancing
 // ------------------------------------------------------------------
@@ -2708,6 +2738,7 @@ ipcMain.handle('get-manager-ppg', () => getManagerSeasonPPG());
 ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
 ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfers(saveId));
 ipcMain.handle('get-transfer-fees', (_event, saveId) => getTransferFees(saveId));
+ipcMain.handle('get-player-transfer-history', (_event, playerId, saveId) => getPlayerTransferHistory(playerId, saveId));
 ipcMain.handle('get-saves-list', () => getSavesList());
 ipcMain.handle('select-save', (_event, saveId) => selectSave(saveId));
 ipcMain.handle('delete-save', (_event, saveId) => deleteSave(saveId));
