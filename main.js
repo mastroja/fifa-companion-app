@@ -178,6 +178,30 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Final Save Point (see checkSeasonFinalSavePoint) — added after some
+  // users already had a DB on disk, same ignore-already-exists migration
+  // pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN last_known_date TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_save_point_at DATETIME;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_save_point_overview_json TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_reminder_may_shown_at DATETIME;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -911,9 +935,147 @@ function getPendingSeasonOverview(saveId = activeSaveId) {
     WHERE save_id = ${saveId} AND is_current = 0 AND overview_acknowledged = 0
     ORDER BY id DESC;
   `);
-  if (res.length === 0) return null;
-  const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
-  return row ? getSeasonOverview(saveId, row[0]) : null;
+  if (res.length > 0) {
+    const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+    if (row) return getSeasonOverview(saveId, row[0]);
+  }
+
+  // Final Save Point: the CURRENT season's own Season Summary, frozen
+  // early — before the in-game rollover — once checkFinalSavePoint below
+  // confirms the season's data is complete. Surfaced through this same
+  // pending-overview flow so it auto-pops the existing splash exactly
+  // once, the same way an already-ended season's overview does above;
+  // returns the FROZEN snapshot rather than recomputing live, since the
+  // whole point of a save point is to lock in data that's known-good
+  // right now rather than trust it stays that way through the rollover.
+  const currentRes = db.exec(`
+    SELECT final_save_point_overview_json FROM seasons
+    WHERE save_id = ${saveId} AND is_current = 1 AND overview_acknowledged = 0
+      AND final_save_point_overview_json IS NOT NULL;
+  `);
+  if (currentRes.length > 0 && currentRes[0].values.length > 0) {
+    try {
+      return JSON.parse(currentRes[0].values[0][0]);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+// ------------------------------------------------------------------
+// Final Save Point — a one-time-per-season safety net around the end
+// of the football season. On or after June 20th, once this season's
+// own results show it's genuinely finished (not "Not Started"), its
+// Season Summary is computed and frozen (see getPendingSeasonOverview
+// above) — this is what protects that data from whatever race/timing
+// issue might otherwise corrupt it during the actual in-game rollover
+// (see the league-stats season-resolution race this was built after).
+// Runs on every calendar sync ("on refresh") — if the season isn't
+// finished yet by the 20th, it just silently re-checks on the next
+// sync; if it's STILL not locked in by the 29th, getSeasonAlerts below
+// starts returning show_final_alert so the UI can nag about it.
+// ------------------------------------------------------------------
+
+function parseYMD(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr || '');
+  return m ? { year: parseInt(m[1], 10), month: parseInt(m[2], 10), day: parseInt(m[3], 10) } : null;
+}
+
+function seasonEndYear(yearLabel) {
+  const parts = String(yearLabel || '').split('/');
+  return parts.length === 2 ? parseInt(parts[1], 10) : null;
+}
+
+// Last week of May — the softer, dismissible heads-up.
+function isInMayReminderWindow(ymd, endYear) {
+  return !!ymd && ymd.year === endYear && ymd.month === 5 && ymd.day >= 24;
+}
+
+// June 20-29 — the window the final check actively runs in.
+function isInFinalCheckWindow(ymd, endYear) {
+  return !!ymd && ymd.year === endYear && ymd.month === 6 && ymd.day >= 20 && ymd.day <= 29;
+}
+
+// June 29 through July 1 inclusive — the non-dismissible banner window;
+// per the user's explicit call, this stays up through July 1st
+// regardless of whether the check already completed, only clearing once
+// the date moves past it.
+function isInFinalAlertWindow(ymd, endYear) {
+  if (!ymd || ymd.year !== endYear) return false;
+  if (ymd.month === 6) return ymd.day >= 29;
+  if (ymd.month === 7) return ymd.day <= 1;
+  return false;
+}
+
+// Called on every calendar sync for the CURRENT season with that sync's
+// own in-game date. Idempotent/cheap to call repeatedly — that's what
+// makes "just keep syncing" the retry mechanism, no separate retry loop
+// needed.
+function checkSeasonFinalSavePoint(saveId, seasonId, currentDateStr) {
+  if (!db || !saveId || !seasonId || !currentDateStr) return;
+
+  const seasonRes = db.exec(`SELECT year_label, final_save_point_at FROM seasons WHERE id = ${seasonId};`);
+  if (seasonRes.length === 0 || seasonRes[0].values.length === 0) return;
+  const [yearLabel, finalSavePointAt] = seasonRes[0].values[0];
+
+  db.run('UPDATE seasons SET last_known_date = ? WHERE id = ?;', [currentDateStr, seasonId]);
+
+  const ymd = parseYMD(currentDateStr);
+  const endYear = seasonEndYear(yearLabel);
+  if (!ymd || !endYear || finalSavePointAt || !isInFinalCheckWindow(ymd, endYear)) {
+    saveDatabaseToDisk();
+    return;
+  }
+
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  const seasonComplete = !!leagueResult && leagueResult.standing !== 'Not Started';
+  if (seasonComplete) {
+    const overview = getSeasonOverview(saveId, seasonId);
+    if (overview) {
+      db.run(
+        'UPDATE seasons SET final_save_point_at = CURRENT_TIMESTAMP, final_save_point_overview_json = ? WHERE id = ?;',
+        [JSON.stringify(overview), seasonId]
+      );
+      console.log(`[Final Save Point] Season ${yearLabel} (id ${seasonId}) locked in.`);
+    }
+  }
+  saveDatabaseToDisk();
+}
+
+// Read-only status for the renderer's alert banners — recomputed live
+// from last_known_date on every call, so it stays correct across app
+// restarts without needing a fresh sync first.
+function getSeasonAlerts(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const seasonId = getCurrentSeasonForSave(saveId);
+  if (!seasonId) return null;
+
+  const res = db.exec(`
+    SELECT year_label, last_known_date, final_save_point_at, final_reminder_may_shown_at
+    FROM seasons WHERE id = ${seasonId};
+  `);
+  if (res.length === 0 || res[0].values.length === 0) return null;
+  const [yearLabel, lastKnownDate, finalSavePointAt, mayReminderShownAt] = res[0].values[0];
+
+  const ymd = parseYMD(lastKnownDate);
+  const endYear = seasonEndYear(yearLabel);
+
+  return {
+    season_id: seasonId,
+    year_label: yearLabel,
+    show_may_reminder: !mayReminderShownAt && isInMayReminderWindow(ymd, endYear),
+    show_final_alert: isInFinalAlertWindow(ymd, endYear),
+    final_save_point_complete: !!finalSavePointAt
+  };
+}
+
+function dismissMayReminder(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return { success: false };
+  db.run('UPDATE seasons SET final_reminder_may_shown_at = CURRENT_TIMESTAMP WHERE id = ? AND save_id = ?;', [seasonId, saveId]);
+  saveDatabaseToDisk();
+  return { success: true };
 }
 
 function acknowledgeSeasonOverview(saveId, seasonId) {
@@ -2462,7 +2624,7 @@ function getSignedPlayers(saveId = activeSaveId) {
 function getPlayerHistory(playerId, saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const res = db.exec(`
-    SELECT se.id, se.year_label, s.overall, s.potential, s.goals, s.assists, s.appearances,
+    SELECT se.id, se.year_label, se.league_name, s.overall, s.potential, s.goals, s.assists, s.appearances,
            s.clean_sheets, s.avg_rating, s.attributes_json, s.competitions_json
     FROM player_season_stats s
     JOIN seasons se ON se.id = s.season_id
@@ -2477,20 +2639,21 @@ function getPlayerHistory(playerId, saveId = activeSaveId) {
     return {
       seasonOrder: row[0],
       season: row[1],
-      overall: row[2],
-      potential: row[3],
-      goals: row[4],
-      assists: row[5],
-      appearances: row[6],
-      clean_sheets: row[7],
-      avg_rating: row[8],
-      attributes: JSON.parse(row[9] || '{}'),
-      competitions: JSON.parse(row[10] || '[]')
+      league_name: row[2],
+      overall: row[3],
+      potential: row[4],
+      goals: row[5],
+      assists: row[6],
+      appearances: row[7],
+      clean_sheets: row[8],
+      avg_rating: row[9],
+      attributes: JSON.parse(row[10] || '{}'),
+      competitions: JSON.parse(row[11] || '[]')
     };
   });
 
   const formerRes = db.exec(`
-    SELECT se.id, se.year_label, f.overall, f.potential, f.attributes_json,
+    SELECT se.id, se.year_label, se.league_name, f.overall, f.potential, f.attributes_json,
            l.goals, l.assists, l.appearances, l.clean_sheets
     FROM former_player_snapshots f
     JOIN seasons se ON se.id = f.season_id
@@ -2500,11 +2663,12 @@ function getPlayerHistory(playerId, saveId = activeSaveId) {
   `);
   if (formerRes.length > 0) {
     formerRes[0].values.forEach(row => {
-      const [seasonId, yearLabel, overall, potential, attributesJson, goals, assists, appearances, cleanSheets] = row;
+      const [seasonId, yearLabel, leagueName, overall, potential, attributesJson, goals, assists, appearances, cleanSheets] = row;
       if (coveredSeasonIds.has(seasonId)) return; // already have a with-us row for this season
       combined.push({
         seasonOrder: seasonId,
         season: yearLabel,
+        league_name: leagueName,
         overall,
         potential,
         goals: goals || 0,
@@ -2874,6 +3038,8 @@ ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId
 ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
+ipcMain.handle('get-season-alerts', (_event, saveId) => getSeasonAlerts(saveId));
+ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayReminder(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
 
@@ -2891,6 +3057,7 @@ app.whenReady().then(async () => {
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
         persistSeasonStandings(currentSeasonId, startupCalendarPayload.standings);
+        checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, startupCalendarPayload.current_date);
         saveSnapshotForActiveSave(rawCalendar);
         mainWindow.webContents.send('calendar-updated', { save_id: activeSaveId, data: startupCalendarPayload });
       } catch (err) {
@@ -2934,6 +3101,7 @@ app.whenReady().then(async () => {
             importCalendarMatches(calendarPayload);
             persistSeasonCompetitionResults(calendarPayload);
             persistSeasonStandings(currentSeasonId, calendarPayload.standings);
+            checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, calendarPayload.current_date);
             saveSnapshotForActiveSave(rawCalendar);
 
             if (mainWindow && !mainWindow.isDestroyed()) {

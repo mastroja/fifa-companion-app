@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
   acknowledgeSeasonOverview: (saveId, seasonId) => ipcRenderer.invoke('acknowledge-season-overview', saveId, seasonId),
   getSeasonOverviewPreview: (saveId) => ipcRenderer.invoke('get-season-overview-preview', saveId),
   exportSeasonOverviewPdf: (suggestedFileName) => ipcRenderer.invoke('export-season-overview-pdf', suggestedFileName),
+  getSeasonAlerts: (saveId) => ipcRenderer.invoke('get-season-alerts', saveId),
+  dismissMayReminder: (saveId, seasonId) => ipcRenderer.invoke('dismiss-may-reminder', saveId, seasonId),
 
   onSquadUpdated: (callback) => ipcRenderer.on('squad-updated', (_event, data) => callback(data)),
   onCareerStatsUpdated: (callback) => ipcRenderer.on('career-stats-updated', (_event, data) => callback(data)),
