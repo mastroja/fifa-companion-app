@@ -2244,7 +2244,7 @@ function getSignedPlayers(saveId = activeSaveId) {
   if (!currentSeasonForSave) return [];
 
   const currentRes = db.exec(`
-    SELECT player_id, club_id, on_loan, updated_at FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+    SELECT player_id, club_id, on_loan, updated_at, contract_date FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
   `);
   const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
 
@@ -2259,11 +2259,19 @@ function getSignedPlayers(saveId = activeSaveId) {
   // staleness on its own).
   const activeIds = [];
   let userTeamId = null;
-  currentRows.forEach(([player_id, club_id, on_loan, updated_at]) => {
+  // contract_date (YYYYMMDD, from the game's own contract record — see
+  // export_all.lua) is the fallback "signed date" for anyone with no
+  // captured transfer negotiation, most importantly academy graduates
+  // (a promotion has no negotiation at all) — always present, unlike the
+  // negotiation-memory deal which only exists if a sync happened to catch
+  // it while it was still in memory.
+  const contractDateByPlayer = new Map();
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at, contract_date]) => {
     const isActive = !maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt;
     if (isActive) {
       activeIds.push(player_id);
       if (!on_loan && userTeamId === null) userTeamId = club_id;
+      contractDateByPlayer.set(player_id, contract_date || '');
     }
   });
   if (userTeamId === null || activeIds.length === 0) return [];
@@ -2330,7 +2338,8 @@ function getSignedPlayers(saveId = activeSaveId) {
       dob: bio.dob || '',
       from_team: fromTeam,
       is_academy: isAcademy,
-      signed_season: earliest ? earliest.year_label : null
+      signed_season: earliest ? earliest.year_label : null,
+      contract_date: contractDateByPlayer.get(playerId) || ''
     });
   });
 

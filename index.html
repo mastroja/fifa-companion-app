@@ -1658,9 +1658,80 @@
     // as formatDateMMDDYYYY.
     function formatPrettyDate(dateInput) {
       if (!dateInput) return null;
-      const d = parseBirthDate(dateInput);
-      if (!d) return String(dateInput);
+      const d = dateInput instanceof Date ? dateInput : parseBirthDate(dateInput);
+      if (!d || isNaN(d.getTime())) return String(dateInput);
       return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    // Whole-month span between two JS Date objects — same arithmetic as
+    // monthsBetweenDates above, just for callers that already have Date
+    // objects (e.g. a computed transfer-window start) instead of raw
+    // MM-DD-YYYY strings.
+    function monthsBetweenJsDates(start, end) {
+      if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+      return Math.max((end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()), 0);
+    }
+
+    // A loan negotiation's deal_date is when the deal was AGREED, not when
+    // the player actually leaves — career mode only lets a loan take effect
+    // once a real transfer window opens (June-August for summer, January
+    // for winter; see currentIngameMonthKey's comment for where these
+    // window months come from elsewhere in this app). A deal agreed in,
+    // say, March doesn't start until June 1; one agreed in July (already
+    // inside the summer window) is treated as having started on that
+    // window's first day, June 1, not the exact agreement date.
+    function getNextTransferWindowStart(dealDateStr) {
+      const d = parseBirthDate(dealDateStr);
+      if (!d) return null;
+      const month = d.getMonth() + 1; // 1-12
+      const year = d.getFullYear();
+      if (month === 1) return new Date(year, 0, 1); // already inside the January window
+      if (month >= 2 && month <= 8) return new Date(year, 5, 1); // Feb-Aug: this year's June 1 window (or already inside it)
+      return new Date(year + 1, 0, 1); // Sep-Dec: next window is January of next year
+    }
+
+    // The game only ever offers 6-month, 1-year, or 2-year loans — a raw
+    // month count computed from real dates can drift a few days off a
+    // clean tier (calendar month-length differences, etc.), so this snaps
+    // to whichever valid tier is actually closest rather than ever
+    // displaying an impossible length like "9 months".
+    const VALID_LOAN_LENGTHS_MONTHS = [6, 12, 24];
+    function snapLoanLengthMonths(rawMonths) {
+      if (rawMonths === null || rawMonths === undefined) return null;
+      return VALID_LOAN_LENGTHS_MONTHS.reduce((closest, tier) =>
+        Math.abs(rawMonths - tier) < Math.abs(rawMonths - closest) ? tier : closest
+      );
+    }
+
+    // Zero-padded YYYY-MM-DD for chronological sorting — formatPrettyDate's
+    // "Jul 6, 2025" output sorts alphabetically wrong (months out of
+    // calendar order), so table columns that display a pretty date sort by
+    // this instead.
+    function toSortableDateStr(dateInput) {
+      const d = dateInput instanceof Date ? dateInput : parseBirthDate(dateInput);
+      if (!d || isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    // Single source of truth for an active loan's real start (window-
+    // snapped, not the deal's agreement date), end, and snapped length —
+    // shared by the profile header badge, the Transfer History card, and
+    // the Transfer Hub's Loaned view so all three always agree.
+    function computeActiveLoanInfo(player) {
+      if (!player || player.__clubStatus !== 'loan' || !player.loan_club_name) return null;
+      const loanDeal = getTransferDealForPlayer(player.player_id, 'loan');
+      const windowStart = (loanDeal && loanDeal.deal_date) ? getNextTransferWindowStart(loanDeal.deal_date) : null;
+      const endDate = parseBirthDate(player.loan_date_end);
+      const rawMonths = monthsBetweenJsDates(windowStart, endDate);
+      const snappedMonths = snapLoanLengthMonths(rawMonths);
+      return {
+        loanFee: (loanDeal && loanDeal.fee > 0) ? loanDeal.fee : null,
+        startDate: windowStart,
+        startLabel: windowStart ? formatPrettyDate(windowStart) : null,
+        endLabel: player.loan_date_end ? formatPrettyDate(player.loan_date_end) : null,
+        lengthLabel: snappedMonths !== null ? formatLoanLength(snappedMonths) : null,
+        isOptionToBuy: !!player.is_loan_to_buy
+      };
     }
 
     // year_label is "2025/2026" — turns a joined/departed pair into a
@@ -1906,6 +1977,10 @@
       const displayClubName = player.club_name;
       const clubBadgeUrl = await fetchClubBadgeUrl(displayClubName);
 
+      // Computed once, shared by the header badge below and the Transfer
+      // History card further down — see computeActiveLoanInfo.
+      const activeLoanInfo = computeActiveLoanInfo(player);
+
       const posInfo = getPositionInfo(player.position_id);
       const isGoalkeeper = player.position_id === 0 || posInfo.label === "GK";
       const baseOvr = Number(player.overall || 75);
@@ -2107,7 +2182,14 @@
         // Prefer the exact deal date over the generic season tag — falls
         // back to signed_season when no deal was captured (e.g. an academy
         // promotion has no negotiation, so no deal_date to read).
-        const signedDateLabel = (signedDeal && signedDeal.deal_date) ? formatPrettyDate(signedDeal.deal_date) : signedInfo.signed_season;
+        // Prefer the exact negotiation date; fall back to the game's own
+        // contract_date (always present, unlike a captured negotiation —
+        // this is the only source an academy promotion has at all, since
+        // a promotion never goes through a transfer negotiation) before
+        // finally falling back to the generic season tag.
+        const signedDateLabel = (signedDeal && signedDeal.deal_date)
+          ? formatPrettyDate(signedDeal.deal_date)
+          : (signedInfo.contract_date ? formatPrettyDate(signedInfo.contract_date) : signedInfo.signed_season);
         transferHistoryEntries.push(signedInfo.is_academy
           ? `<div class="timeline-item">
                <div class="timeline-title">${ourClub} Academy Graduate</div>
@@ -2119,16 +2201,12 @@
              </div>`
         );
       }
-      if (player.__clubStatus === 'loan' && player.loan_club_name) {
-        const loanDeal = getTransferDealForPlayer(player.player_id, 'loan');
-        const loanFee = (loanDeal && loanDeal.fee > 0) ? loanDeal.fee : null;
-        const loanMonths = (loanDeal && loanDeal.deal_date) ? monthsBetweenDates(loanDeal.deal_date, player.loan_date_end) : null;
-        const loanEndLabel = player.loan_date_end ? formatPrettyDate(player.loan_date_end) : null;
-        const loanLengthLabel = loanMonths !== null ? formatLoanLength(loanMonths) : null;
+      if (player.__clubStatus === 'loan' && player.loan_club_name && activeLoanInfo) {
+        const optionToBuyLabel = activeLoanInfo.isOptionToBuy ? ' [Option to Buy]' : '';
         transferHistoryEntries.push(`
           <div class="timeline-item">
-            <div class="timeline-title">Loaned to ${displayClubName}${loanEndLabel ? ` until ${loanEndLabel}` : ''}${loanLengthLabel ? ` (${loanLengthLabel})` : ''}</div>
-            ${loanFee ? `<div style="font-size: 13px; color: var(--accent-color);">Loan Fee: ${formatMoney(loanFee)}</div>` : ''}
+            <div class="timeline-title">Loaned to ${displayClubName}${activeLoanInfo.endLabel ? ` until ${activeLoanInfo.endLabel}` : ''}${activeLoanInfo.lengthLabel ? ` (${activeLoanInfo.lengthLabel})` : ''}${optionToBuyLabel}</div>
+            ${activeLoanInfo.loanFee ? `<div style="font-size: 13px; color: var(--accent-color);">Loan Fee: ${formatMoney(activeLoanInfo.loanFee)}</div>` : ''}
           </div>
         `);
       }
@@ -2250,7 +2328,7 @@
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                 <span class="badge">Height: ${formatHeight(player.height)}</span>
                 <span class="badge">Weight: ${formatWeight(player.weight)}</span>
-                ${player.__clubStatus === 'loan' ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${formatDateMMDDYYYY(player.loan_date_end)} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
+                ${player.__clubStatus === 'loan' ? `<span class="badge" style="background:#388bfd22; border-color:#388bfd55; color:#58a6ff;">Loaned to ${player.club_name || 'Unknown Club'} until ${(activeLoanInfo && activeLoanInfo.endLabel) || formatDateMMDDYYYY(player.loan_date_end)}${(activeLoanInfo && activeLoanInfo.lengthLabel) ? ` (${activeLoanInfo.lengthLabel})` : ''} ${player.is_loan_to_buy ? '[Option to Buy]' : ''}</span>` : ''}
                 ${player.injury ? `<span class="injury-badge">INJURED</span>` : ''}
               </div>
             </div>
@@ -2715,49 +2793,75 @@
     //    live squad data (loan_club_name/loan_date_end already synced).
     // Normalized to one {player_id, player_name, from_team, to_team,
     // detail} shape so sorting/searching/rendering only needs one path.
-    const TRANSFER_HUB_DETAIL_LABELS = { signed: 'Signed', sold: 'Departed', loaned: 'Loan Ends' };
+    const TRANSFER_HUB_DETAIL_LABELS = { signed: 'Signed', sold: 'Departed', loaned: 'Loan Window' };
 
     function getTransferHubRows(view) {
       const ourClub = getMostCommonClubName() || 'My Club';
 
       if (view === 'sold') {
-        return currentPastPlayers.map(p => ({
-          player_id: p.player_id,
-          player_name: p.name,
-          from_team: ourClub,
-          to_team: p.current_club || 'Unknown',
-          detail: p.departed_season || '—',
-          fee: getTransferFeeForPlayer(p.player_id)
-        }));
+        return currentPastPlayers.map(p => {
+          const soldDeal = getTransferDealForPlayer(p.player_id, 'transfer');
+          const dateLabel = (soldDeal && soldDeal.deal_date) ? formatPrettyDate(soldDeal.deal_date) : null;
+          return {
+            player_id: p.player_id,
+            player_name: p.name,
+            from_team: ourClub,
+            to_team: p.current_club || 'Unknown',
+            detail: dateLabel || p.departed_season || '—',
+            detailSort: (soldDeal && soldDeal.deal_date) ? toSortableDateStr(soldDeal.deal_date) : '',
+            fee: getTransferFeeForPlayer(p.player_id)
+          };
+        });
       }
 
       if (view === 'loaned') {
-        // Loans never carry real fee data (see getTransferFeeForPlayer) —
-        // still looked up for consistency, but expect it to always be null.
         // to_team is p.club_name (the resolved real destination, see
         // loaned_out_destination in export_all.lua), NOT p.loan_club_name
         // — that field is actually the parent/contract club (who they're
         // loaned FROM), a naming trap that showed up as "loaned to
-        // themselves" bugs elsewhere in the profile too.
-        return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => ({
-          player_id: p.player_id,
-          player_name: p.name,
-          from_team: ourClub,
-          to_team: p.club_name || 'Unknown Club',
-          detail: p.loan_date_end || '—',
-          fee: getTransferFeeForPlayer(p.player_id)
-        }));
+        // themselves" bugs elsewhere in the profile too. detail shows the
+        // real window-snapped start through the end date (see
+        // computeActiveLoanInfo) rather than just the end date, since the
+        // deal's agreement date is never when the loan actually begins.
+        return currentPlayers.filter(p => p.__clubStatus === 'loan').map(p => {
+          const info = computeActiveLoanInfo(p);
+          const rangeLabel = info
+            ? `${info.startLabel || '—'} → ${info.endLabel || '—'}${info.lengthLabel ? ` (${info.lengthLabel})` : ''}${info.isOptionToBuy ? ' [OTB]' : ''}`
+            : (p.loan_date_end || '—');
+          return {
+            player_id: p.player_id,
+            player_name: p.name,
+            from_team: ourClub,
+            to_team: p.club_name || 'Unknown Club',
+            detail: rangeLabel,
+            detailSort: (info && info.startDate) ? toSortableDateStr(info.startDate) : '',
+            fee: (info && info.loanFee) || null
+          };
+        });
       }
 
-      // 'signed' (default)
-      return currentSignedPlayers.map(p => ({
-        player_id: p.player_id,
-        player_name: p.name,
-        from_team: p.from_team,
-        to_team: ourClub,
-        detail: p.signed_season || '—',
-        fee: getTransferFeeForPlayer(p.player_id)
-      }));
+      // 'signed' (default) — see the signedDateLabel comment in
+      // openPlayerProfile for the same fallback chain: exact negotiation
+      // date, then contract_date (an academy promotion's only source,
+      // since it never goes through a negotiation), then the season tag.
+      return currentSignedPlayers.map(p => {
+        const signedDeal = getTransferDealForPlayer(p.player_id, 'transfer');
+        const exactDate = (signedDeal && signedDeal.deal_date) ? signedDeal.deal_date : (p.contract_date || null);
+        const dateLabel = exactDate ? formatPrettyDate(exactDate) : null;
+        return {
+          player_id: p.player_id,
+          player_name: p.name,
+          from_team: p.from_team,
+          to_team: ourClub,
+          detail: dateLabel || p.signed_season || '—',
+          detailSort: exactDate ? toSortableDateStr(exactDate) : '',
+          // Academy promotions are always free — "N/A" instead of
+          // "Unknown" distinguishes "there's deliberately no fee" from
+          // "we don't have fee data for this external signing".
+          fee: p.is_academy ? null : getTransferFeeForPlayer(p.player_id),
+          feeDisplay: p.is_academy ? 'N/A' : null
+        };
+      });
     }
 
     function sortTransfers(column) {
@@ -2785,8 +2889,14 @@
           const valA = Number(a.fee || 0), valB = Number(b.fee || 0);
           return transferSortAscending ? valA - valB : valB - valA;
         }
-        const valA = String(a[currentTransferSortColumn] || '');
-        const valB = String(b[currentTransferSortColumn] || '');
+        // detail now shows a formatted date ("Jul 6, 2025") or a date range,
+        // which sorts alphabetically wrong (months out of calendar order) —
+        // detailSort carries the same value as a zero-padded YYYY-MM-DD for
+        // correct chronological sorting instead.
+        const rawA = currentTransferSortColumn === 'detail' ? (a.detailSort || a.detail) : a[currentTransferSortColumn];
+        const rawB = currentTransferSortColumn === 'detail' ? (b.detailSort || b.detail) : b[currentTransferSortColumn];
+        const valA = String(rawA || '');
+        const valB = String(rawB || '');
         return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
       });
 
@@ -2809,7 +2919,7 @@
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
           <td style="color: var(--accent-color); font-weight: 600;">${t.detail}</td>
-          <td style="color: var(--text-dim); ${t.fee ? 'font-weight: 600; color: var(--accent-color);' : 'font-style: italic;'}">${t.fee ? formatMoney(t.fee) : 'Unknown'}</td>
+          <td style="color: var(--text-dim); ${t.fee ? 'font-weight: 600; color: var(--accent-color);' : 'font-style: italic;'}">${t.feeDisplay || (t.fee ? formatMoney(t.fee) : 'Unknown')}</td>
         </tr>
       `).join('');
     }
