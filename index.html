@@ -1864,7 +1864,7 @@
     // having the id baked into its onclick like the rest of the page does.
     let currentProfilePlayerId = null;
 
-    async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
+    async function openPlayerProfile(identifier) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
 
@@ -2113,9 +2113,6 @@
       const chronoSeasons = normalizedSeasons;
       let seasonsList = normalizedSeasons.slice().reverse();
 
-      selectedSeasonIndex = Math.max(0, Math.min(selectedSeasonIndex, seasonsList.length - 1));
-      let activeSeason = seasonsList[selectedSeasonIndex] || seasonsList[0];
-
       let careerApps = 0, careerGoals = 0, careerAssists = 0, careerCS = 0, careerRatingWeightedSum = 0;
       seasonsList.forEach(s => {
         const apps = Number(s.appearances || 0);
@@ -2155,25 +2152,32 @@
         avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
       }));
 
-      profileStatsViewMode = 'season';
+      // One entry per season the player has ever recorded stats for (most
+      // recent first, since seasonsList is already reversed for the
+      // dropdown default), keyed by index — plus All Time. Stashing every
+      // season here (not just activeSeason) lets the Stats card's
+      // dropdown switch between any of them instantly, no re-fetch.
+      profileStatsViewMode = 'season_0';
       currentProfileStatsData = {
-        season: {
-          label: activeSeason.season_name || 'This Season',
-          competitions: activeSeason.competitions || [],
-          totals: {
-            appearances: activeSeason.appearances || 0,
-            goals: activeSeason.goals || 0,
-            assists: activeSeason.assists || 0,
-            clean_sheets: activeSeason.clean_sheets || 0,
-            avg_rating: activeSeason.avg_rating || 0
-          }
-        },
         allTime: {
           label: 'All Time',
           competitions: allTimeCompetitions,
           totals: { appearances: careerApps, goals: careerGoals, assists: careerAssists, clean_sheets: careerCS, avg_rating: careerAvgRating }
         }
       };
+      seasonsList.forEach((s, idx) => {
+        currentProfileStatsData[`season_${idx}`] = {
+          label: s.season_name || 'This Season',
+          competitions: s.competitions || [],
+          totals: {
+            appearances: s.appearances || 0,
+            goals: s.goals || 0,
+            assists: s.assists || 0,
+            clean_sheets: s.clean_sheets || 0,
+            avg_rating: s.avg_rating || 0
+          }
+        };
+      });
 
       if (careerApps === 0 && player.competitions && player.competitions.length > 0) {
         const fallbackComps = player.competitions.filter(c => c.comp_name !== "World's Game");
@@ -2504,7 +2508,7 @@
               <h3>
                 <span>Stats</span>
                 <select onchange="changeStatsViewMode(this.value)" style="font-size: 12px; padding: 3px 8px;">
-                  <option value="season" ${profileStatsViewMode === 'season' ? 'selected' : ''}>Season</option>
+                  ${seasonsList.map((s, idx) => `<option value="season_${idx}" ${profileStatsViewMode === `season_${idx}` ? 'selected' : ''}>${s.season_name}</option>`).join('')}
                   <option value="allTime" ${profileStatsViewMode === 'allTime' ? 'selected' : ''}>All Time</option>
                 </select>
               </h3>
@@ -2612,7 +2616,7 @@
       const container = document.getElementById('profile-stats-body');
       if (!container || !currentProfileStatsData) return;
 
-      const data = currentProfileStatsData[mode] || currentProfileStatsData.season;
+      const data = currentProfileStatsData[mode] || currentProfileStatsData.season_0 || currentProfileStatsData.allTime;
 
       container.innerHTML = `
         <div class="table-container">
