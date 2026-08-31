@@ -307,6 +307,16 @@
     .promo-badge.promo-up { background: #3fb95022; color: #3fb950; border: 1px solid #3fb95055; }
     .promo-badge.promo-down { background: #f8514922; color: #f85149; border: 1px solid #f8514955; }
 
+    /* Final Save Point alert banners — see #season-alert-banners */
+    .season-alert-banner { display: flex; align-items: center; gap: 12px; padding: 10px 20px; font-size: 13px; font-weight: 600; }
+    .season-alert-banner .season-alert-icon { font-size: 16px; flex-shrink: 0; }
+    .season-alert-banner .season-alert-text { flex: 1; }
+    .season-alert-banner .season-alert-dismiss { background: none; border: none; cursor: pointer; font-size: 15px; color: inherit; opacity: 0.75; padding: 2px 6px; }
+    .season-alert-banner .season-alert-dismiss:hover { opacity: 1; }
+    .season-alert-banner.season-alert-reminder { background: #d2992222; color: #d29922; border-bottom: 1px solid #d2992255; }
+    .season-alert-banner.season-alert-urgent { background: #f8514922; color: #f85149; border-bottom: 1px solid #f8514955; }
+    .season-alert-banner.season-alert-urgent.season-alert-complete { background: #3fb95022; color: #3fb950; border-bottom: 1px solid #3fb95055; }
+
     .profile-header { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
     .profile-main-info h2 { font-size: 28px; margin-bottom: 8px; color: #58a6ff; display: flex; align-items: center; gap: 12px; }
     .profile-meta { display: flex; gap: 12px; color: var(--text-dim); font-size: 14px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -521,6 +531,11 @@
       </div>
     </div>
   </header>
+
+  <!-- Final Save Point alert banners — see checkSeasonFinalSavePoint/
+       getSeasonAlerts in main.js and refreshSeasonAlerts() below. Visible
+       above every tab since they're time-sensitive, not Home-page-only. -->
+  <div id="season-alert-banners"></div>
 
   <!-- Navigation Tabs -->
   <div class="nav-tabs" id="main-nav-tabs">
@@ -1849,7 +1864,7 @@
     // having the id baked into its onclick like the rest of the page does.
     let currentProfilePlayerId = null;
 
-    async function openPlayerProfile(identifier, selectedSeasonIndex = 0) {
+    async function openPlayerProfile(identifier) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
 
@@ -2048,12 +2063,21 @@
         };
       }
 
+      // "League Two 25/26" rather than just "25/26" — same league-name +
+      // shortened-year format as the League Stats tab's season dropdown,
+      // so a season's stats are always traceable to which league they
+      // were actually captured in even after a promotion/relegation.
+      const seasonDisplayLabel = (yearLabel, leagueName) => {
+        if (leagueName && yearLabel) return `${leagueName} ${shortenSeasonLabel(yearLabel)}`;
+        return leagueName || yearLabel || 'This Season';
+      };
+
       let normalizedSeasons;
       if (realSeasonHistory.length > 0) {
         normalizedSeasons = realSeasonHistory.map(s => {
           const cleaned = cleanSeasonStats(s);
           return {
-            season_name: s.season,
+            season_name: seasonDisplayLabel(s.season, s.league_name),
             appearances: cleaned.appearances,
             goals: cleaned.goals,
             assists: cleaned.assists,
@@ -2069,7 +2093,7 @@
         const cleaned = cleanSeasonStats(player);
         normalizedSeasons = [
           {
-            season_name: player.current_season_name || 'Current Season',
+            season_name: seasonDisplayLabel(null, getPrimaryLeagueName()),
             appearances: cleaned.appearances,
             goals: cleaned.goals,
             assists: cleaned.assists,
@@ -2088,9 +2112,6 @@
       // recent season selected by default, so it gets the reversed copy.
       const chronoSeasons = normalizedSeasons;
       let seasonsList = normalizedSeasons.slice().reverse();
-
-      selectedSeasonIndex = Math.max(0, Math.min(selectedSeasonIndex, seasonsList.length - 1));
-      let activeSeason = seasonsList[selectedSeasonIndex] || seasonsList[0];
 
       let careerApps = 0, careerGoals = 0, careerAssists = 0, careerCS = 0, careerRatingWeightedSum = 0;
       seasonsList.forEach(s => {
@@ -2131,25 +2152,32 @@
         avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
       }));
 
-      profileStatsViewMode = 'season';
+      // One entry per season the player has ever recorded stats for (most
+      // recent first, since seasonsList is already reversed for the
+      // dropdown default), keyed by index — plus All Time. Stashing every
+      // season here (not just activeSeason) lets the Stats card's
+      // dropdown switch between any of them instantly, no re-fetch.
+      profileStatsViewMode = 'season_0';
       currentProfileStatsData = {
-        season: {
-          label: activeSeason.season_name || 'This Season',
-          competitions: activeSeason.competitions || [],
-          totals: {
-            appearances: activeSeason.appearances || 0,
-            goals: activeSeason.goals || 0,
-            assists: activeSeason.assists || 0,
-            clean_sheets: activeSeason.clean_sheets || 0,
-            avg_rating: activeSeason.avg_rating || 0
-          }
-        },
         allTime: {
           label: 'All Time',
           competitions: allTimeCompetitions,
           totals: { appearances: careerApps, goals: careerGoals, assists: careerAssists, clean_sheets: careerCS, avg_rating: careerAvgRating }
         }
       };
+      seasonsList.forEach((s, idx) => {
+        currentProfileStatsData[`season_${idx}`] = {
+          label: s.season_name || 'This Season',
+          competitions: s.competitions || [],
+          totals: {
+            appearances: s.appearances || 0,
+            goals: s.goals || 0,
+            assists: s.assists || 0,
+            clean_sheets: s.clean_sheets || 0,
+            avg_rating: s.avg_rating || 0
+          }
+        };
+      });
 
       if (careerApps === 0 && player.competitions && player.competitions.length > 0) {
         const fallbackComps = player.competitions.filter(c => c.comp_name !== "World's Game");
@@ -2480,7 +2508,7 @@
               <h3>
                 <span>Stats</span>
                 <select onchange="changeStatsViewMode(this.value)" style="font-size: 12px; padding: 3px 8px;">
-                  <option value="season" ${profileStatsViewMode === 'season' ? 'selected' : ''}>Season</option>
+                  ${seasonsList.map((s, idx) => `<option value="season_${idx}" ${profileStatsViewMode === `season_${idx}` ? 'selected' : ''}>${s.season_name}</option>`).join('')}
                   <option value="allTime" ${profileStatsViewMode === 'allTime' ? 'selected' : ''}>All Time</option>
                 </select>
               </h3>
@@ -2588,7 +2616,7 @@
       const container = document.getElementById('profile-stats-body');
       if (!container || !currentProfileStatsData) return;
 
-      const data = currentProfileStatsData[mode] || currentProfileStatsData.season;
+      const data = currentProfileStatsData[mode] || currentProfileStatsData.season_0 || currentProfileStatsData.allTime;
 
       container.innerHTML = `
         <div class="table-container">
@@ -3332,6 +3360,7 @@
 
       leagueStatsSelectedSeasonId = null; // a different save has different seasons
       populateLeagueStatsSeasonSelector();
+      refreshSeasonAlerts();
     }
 
     // Irreversible — see deletePlayer in main.js for the actual cascade.
@@ -4340,13 +4369,24 @@
         const seasons = await window.api.getSeasonsList();
         for (const season of (seasons || [])) {
           const results = await window.api.getSeasonCompetitionResults(season.id);
-          const match = (results || []).find(r => findPyramidTier(r.comp_name));
+          // A promotion/relegation can register BOTH the league actually
+          // played AND next season's not-yet-started league under the same
+          // season before rollover — prefer a real result over "Not
+          // Started" so an about-to-end season isn't mistaken for one that
+          // hasn't begun (same fix as getSeasonPrimaryLeagueResult in main.js).
+          const tierMatches = (results || []).filter(r => findPyramidTier(r.comp_name));
+          const match = tierMatches.find(r => r.standing !== 'Not Started') || tierMatches[0];
           if (match) {
+            // Read the actual recorded play-off result rather than
+            // guessing from final position — the game names the
+            // competition differently per tier (e.g. "Lg Two Play-Offs").
+            const wonPlayoff = (results || []).some(r => /play[\s-]?off/i.test(r.comp_name) && r.standing === 'Winner');
             trace.push({
               season: season.year_label,
               tier: findPyramidTier(match.comp_name).tier,
               tier_name: match.comp_name,
-              position: parseStandingPosition(match.standing)
+              position: parseStandingPosition(match.standing),
+              wonPlayoff
             });
           }
         }
@@ -4368,8 +4408,9 @@
       const rows = trace.map((t, i) => {
         let badge = '';
         if (i < trace.length - 1) {
-          if (trace[i + 1].tier < t.tier) badge = '<span class="promo-badge promo-up">Promoted</span>';
-          else if (trace[i + 1].tier > t.tier) badge = '<span class="promo-badge promo-down">Relegated</span>';
+          if (trace[i + 1].tier < t.tier) {
+            badge = `<span class="promo-badge promo-up">Promoted${t.wonPlayoff ? ' via Play-off' : ''}</span>`;
+          } else if (trace[i + 1].tier > t.tier) badge = '<span class="promo-badge promo-down">Relegated</span>';
         }
         const posLabel = t.position ? ordinal(t.position) : 'Not started yet';
         return `<tr><td>${t.season}</td><td>${t.tier_name}</td><td>${posLabel}</td><td>${badge}</td></tr>`;
@@ -5187,6 +5228,98 @@
     }
 
     // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // Final Save Point alerts — see checkSeasonFinalSavePoint/
+    // getSeasonAlerts in main.js. Two distinct banners: a dismissible
+    // last-week-of-May reminder, and a non-dismissible June 29 - July 1
+    // banner that stays up regardless of whether the final check already
+    // succeeded (per explicit user request — an extra safety margin
+    // against advancing before you meant to).
+    // ------------------------------------------------------------------
+    let lastShownMayReminderSeasonId = null;
+    let lastShownUrgentAlertSeasonId = null;
+
+    // Short, gentle two-note chime (not a loud "alert!" sound) synthesized
+    // via Web Audio API rather than shipping an audio asset — a soft sine
+    // ping, low volume, quick decay.
+    function playGentleChime() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const now = ctx.currentTime;
+        [523.25, 659.25].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          const start = now + i * 0.14;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.12, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.5);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + 0.55);
+        });
+        setTimeout(() => ctx.close(), 1200);
+      } catch (e) {
+        // Web Audio unavailable/blocked — silently skip the sound, banner still shows.
+      }
+    }
+
+    async function dismissMayReminderBanner() {
+      const container = document.getElementById('season-alert-banners');
+      const el = container && container.querySelector('.season-alert-reminder');
+      if (el) el.remove();
+      if (currentSaveId && lastShownMayReminderSeasonId && window.api && window.api.dismissMayReminder) {
+        await window.api.dismissMayReminder(currentSaveId, lastShownMayReminderSeasonId);
+      }
+    }
+
+    async function refreshSeasonAlerts() {
+      const container = document.getElementById('season-alert-banners');
+      if (!container || !currentSaveId || !window.api || !window.api.getSeasonAlerts) return;
+
+      const alerts = await window.api.getSeasonAlerts(currentSaveId);
+      if (!alerts) { container.innerHTML = ''; return; }
+
+      let html = '';
+
+      if (alerts.show_may_reminder) {
+        html += `
+          <div class="season-alert-banner season-alert-reminder">
+            <span class="season-alert-icon">🔔</span>
+            <span class="season-alert-text">Season ${alerts.year_label} is heading into its final weeks — refresh (F10) sometime between June 20-29 to lock in this season's final stats before you advance.</span>
+            <button class="season-alert-dismiss" onclick="dismissMayReminderBanner()" title="Dismiss">✕</button>
+          </div>
+        `;
+        if (lastShownMayReminderSeasonId !== alerts.season_id) {
+          lastShownMayReminderSeasonId = alerts.season_id;
+          playGentleChime();
+        }
+      } else {
+        lastShownMayReminderSeasonId = null;
+      }
+
+      if (alerts.show_final_alert) {
+        const complete = alerts.final_save_point_complete;
+        html += `
+          <div class="season-alert-banner season-alert-urgent ${complete ? 'season-alert-complete' : ''}">
+            <span class="season-alert-icon">${complete ? '✅' : '⚠️'}</span>
+            <span class="season-alert-text">${complete
+              ? `Season ${alerts.year_label}'s final stats are locked in — safe to advance once you're ready.`
+              : `Important: Season ${alerts.year_label} isn't locked in yet. Refresh (F10) now to save this season's final stats before you advance — June 29th is the last safe date.`}</span>
+          </div>
+        `;
+        if (lastShownUrgentAlertSeasonId !== alerts.season_id) {
+          lastShownUrgentAlertSeasonId = alerts.season_id;
+          playGentleChime();
+        }
+      } else {
+        lastShownUrgentAlertSeasonId = null;
+      }
+
+      container.innerHTML = html;
+    }
+
     // End of Season Overview — multi-page splash shown once a season ends
     // (see getPendingSeasonOverview/getSeasonOverview in main.js for how
     // the payload is built). Page order below matches the wireframes:
@@ -5600,7 +5733,8 @@
           headlineText = `Relegated — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         } else if (d.league.promoted) {
           headlineIcon = seasonOverviewTrendIcon('up');
-          headlineText = `Promoted — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
+          const promoLabel = d.league.promoted_via_playoff ? 'Promoted via Play-off' : 'Promoted';
+          headlineText = `${promoLabel} — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         } else {
           headlineText = `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         }
@@ -5903,6 +6037,7 @@
         if (currentSaveId !== envelope.save_id) return;
         currentSaveIsSnapshot = false;
         processIncomingCalendar(envelope.data);
+        refreshSeasonAlerts();
       });
       window.api.onYouthUpdated(async (envelope) => {
         await populateSaveSelector();
@@ -5928,6 +6063,7 @@
       // "whichever save is live" and were the other half of this leak.
       populateSaveSelector().then(() => {
         if (currentSaveId) changeSave(currentSaveId);
+        refreshSeasonAlerts();
       });
     } else {
       console.error('window.api is not available — check that preload.js is wired up in main.js (webPreferences.preload).');

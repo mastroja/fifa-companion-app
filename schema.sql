@@ -41,6 +41,22 @@ CREATE TABLE IF NOT EXISTS seasons (
     -- season that just ENDED, not the new one, since the overview reviews
     -- the ended season. See getPendingSeasonOverview in main.js.
     overview_acknowledged INTEGER DEFAULT 0,
+    -- Final Save Point (see checkSeasonFinalSavePoint in main.js): the
+    -- most recent in-game date seen for this season (from the calendar
+    -- export's current_date), used to detect the May-reminder and
+    -- June 20-29 final-check windows without needing a fresh sync at the
+    -- exact moment the app is opened.
+    last_known_date TEXT,
+    -- Set once, the first time the June 20-29 check finds this season's
+    -- data genuinely complete (its primary league result is no longer
+    -- "Not Started") — the season's own Season Summary is then frozen
+    -- into final_save_point_overview_json and shown right away, BEFORE
+    -- the in-game rollover, instead of waiting for it.
+    final_save_point_at DATETIME,
+    final_save_point_overview_json TEXT,
+    -- Set once the last-week-of-May reminder toast has been shown and
+    -- dismissed, so it doesn't reappear on every later sync/app open.
+    final_reminder_may_shown_at DATETIME,
     FOREIGN KEY(save_id) REFERENCES saves(id),
     UNIQUE(save_id, year_label)
 );

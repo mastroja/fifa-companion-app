@@ -178,6 +178,30 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Final Save Point (see checkSeasonFinalSavePoint) — added after some
+  // users already had a DB on disk, same ignore-already-exists migration
+  // pattern as above.
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN last_known_date TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_save_point_at DATETIME;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_save_point_overview_json TEXT;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+  try {
+    db.run(`ALTER TABLE seasons ADD COLUMN final_reminder_may_shown_at DATETIME;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -464,11 +488,79 @@ function getSeasonStandings(seasonId) {
 // noted on latestLeagueStatsPayload above). Also keeps seasons.league_name
 // current for whichever season is still being written to, since a save
 // can change league across seasons via promotion/relegation.
+// The league-stats file is watched independently from the calendar file
+// (see the chokidar watcher below), so right at a season rollover the two
+// can be picked up in either order — persistLeagueStats used to just
+// trust whatever currentSeasonId happened to be globally at that instant,
+// which could silently attribute an ending season's league name/stats to
+// the new season's row (or vice versa) depending on which file's watcher
+// event fired first. Same fix already applied to importFifaData (see its
+// "FIXED 2026-08-27" comment): resolve fresh from this payload's OWN
+// save_uid/current_date (added to export_all.lua's LEAGUE STATS EXPORT
+// block alongside this) instead. Falls back to the old currentSeasonId
+// behavior when current_date isn't present yet — an export written before
+// that Lua change shipped — so this doesn't regress anyone mid-update.
+function resolveLeagueStatsSeasonId(leagueStatsPayload) {
+  if (leagueStatsPayload && leagueStatsPayload.save_uid && leagueStatsPayload.current_date) {
+    return resolveActiveSave(leagueStatsPayload.save_uid, null, null, leagueStatsPayload.current_date)
+      ? currentSeasonId
+      : null; // blank uid while a different save is active — skip, matches importFifaData's guard
+  }
+  return currentSeasonId;
+}
+
+// Keeps seasons.league_name authoritative and self-healing: derived from
+// season_competition_results via getSeasonPrimaryLeagueResult (which
+// already prefers a real result over a "Not Started" placeholder — see
+// its own comment) instead of trusted directly from whatever competition
+// the league-stats export's memory read currently considers "primary".
+// That memory read can flip to next season's league before the season
+// actually rolls over (a promoted/relegated club sees its new league's
+// fixtures appear during the close season), which was overwriting an
+// about-to-end season's league_name with the WRONG, not-yet-started
+// league. Called after every calendar AND league-stats sync (see both
+// below) so whichever runs last always leaves the correct value,
+// regardless of which file's watcher fires first.
+function syncSeasonLeagueNameFromResults(seasonId) {
+  if (!db || !seasonId) return;
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  if (leagueResult) {
+    db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueResult.comp_name, seasonId]);
+  }
+}
+
+// Re-derives EVERY season's league_name from its own season_competition_results
+// on every app launch — a self-healing pass, not just a one-time repair.
+// Without this, a season's league_name can only ever get corrected by a
+// LIVE sync targeting that exact season; once a season ends and stops
+// being synced, a bad value from the race described on
+// syncSeasonLeagueNameFromResults would be stuck forever (and worse, an
+// in-memory session that loaded the bad value before a fix landed on disk
+// can silently flush it right back on its next unrelated write, undoing
+// a manual correction). Running this against every season at startup
+// means the correct value gets re-asserted every time, regardless of
+// what any stale prior session left behind.
+function backfillSeasonLeagueNames() {
+  if (!db) return;
+  const res = db.exec('SELECT id FROM seasons;');
+  if (res.length === 0) return;
+  res[0].values.forEach(([seasonId]) => syncSeasonLeagueNameFromResults(seasonId));
+  saveDatabaseToDisk();
+}
+
 function persistLeagueStats(seasonId, leagueStatsPayload) {
   if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
 
-  if (leagueStatsPayload.league_name) {
+  // season_competition_results (populated by the calendar sync) is the
+  // authoritative source once it has anything for this season — only
+  // fall back to this payload's own league_name before that's happened
+  // yet (e.g. a squad/league-stats sync that beat the first calendar
+  // sync), and even then syncSeasonLeagueNameFromResults will correct it
+  // as soon as calendar data arrives.
+  if (!getSeasonPrimaryLeagueResult(seasonId) && leagueStatsPayload.league_name) {
     db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueStatsPayload.league_name, seasonId]);
+  } else {
+    syncSeasonLeagueNameFromResults(seasonId);
   }
 
   const stmt = db.prepare(`
@@ -560,11 +652,23 @@ function getSeasonCompetitionResults(seasonId) {
 function getSeasonPrimaryLeagueResult(seasonId) {
   const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
   const compRows = compRes.length > 0 ? compRes[0].values : [];
+  // A promotion/relegation can register BOTH the league actually being
+  // played AND the incoming season's not-yet-started league under the
+  // SAME season_id before rollover happens — the game's calendar starts
+  // surfacing next season's fixtures/table early, and persistSeasonCompetitionResults
+  // just writes whatever it's handed into whichever season is still
+  // current. Row order here isn't guaranteed, so picking the first
+  // tier-matching row could pick the "Not Started" placeholder for next
+  // season instead of the real, finished result for the one actually
+  // being reported on — prefer any tier match with a real standing.
+  let notStartedFallback = null;
   for (const [comp_name, standing] of compRows) {
     const tier = findPyramidTierServer(comp_name);
-    if (tier) return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+    if (!tier) continue;
+    if (standing !== 'Not Started') return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+    if (!notStartedFallback) notStartedFallback = { comp_name, standing, tier: tier.tier, tier_name: tier.name };
   }
-  return null;
+  return notStartedFallback;
 }
 
 function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
@@ -731,22 +835,26 @@ function getSeasonOverview(saveId, seasonId) {
   const leaguePosition = leagueResult ? parseStandingPositionServer(leagueResult.standing) : null;
   const wonLeague = !!leagueResult && leagueResult.standing === 'Winner';
 
-  // Promotion/relegation compares this season's tier against whichever
-  // season directly followed it — only known once THAT season has
-  // recorded at least one recognized-league result of its own, which may
-  // not be true yet immediately after rollover (hence "unknown" is a
-  // valid, honest outcome here, not just win/promoted/relegated/stayed).
-  let relegated = false, promoted = false;
+  // Relegation still needs the season that directly followed this one —
+  // only known once THAT season has recorded a recognized-league result
+  // of its own, which may not be true yet immediately after rollover
+  // (hence "unknown"/false is a valid, honest outcome here). Promotion,
+  // unlike relegation, doesn't need to wait for that: see
+  // getPromotionStatusFromOwnResults below, which reads this season's own
+  // final position/play-off result directly — that's what lets the
+  // Season Summary be generated and shown BEFORE the in-game rollover
+  // even happens (the "final save point" flow — see checkFinalSavePoint).
+  let relegated = false;
   if (leagueResult) {
     const nextSeasonRes = db.exec(`SELECT id FROM seasons WHERE save_id = ${saveId} AND id > ${seasonId} ORDER BY id ASC LIMIT 1;`);
     if (nextSeasonRes.length > 0 && nextSeasonRes[0].values.length > 0) {
       const nextResult = getSeasonPrimaryLeagueResult(nextSeasonRes[0].values[0][0]);
       if (nextResult) {
         relegated = nextResult.tier > leagueResult.tier;
-        promoted = nextResult.tier < leagueResult.tier;
       }
     }
   }
+  const { promoted, viaPlayoff: promotedViaPlayoff } = getPromotionStatusFromOwnResults(seasonId, leagueResult);
 
   const leagueHistoryRes = db.exec(`
     SELECT r.comp_name, r.standing, se.year_label, se.id
@@ -830,7 +938,8 @@ function getSeasonOverview(saveId, seasonId) {
       position: leaguePosition,
       won: wonLeague,
       relegated,
-      promoted
+      promoted,
+      promoted_via_playoff: promotedViaPlayoff
     } : null,
     league_history: leagueHistory,
     standings: getSeasonStandings(seasonId),
@@ -885,9 +994,147 @@ function getPendingSeasonOverview(saveId = activeSaveId) {
     WHERE save_id = ${saveId} AND is_current = 0 AND overview_acknowledged = 0
     ORDER BY id DESC;
   `);
-  if (res.length === 0) return null;
-  const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
-  return row ? getSeasonOverview(saveId, row[0]) : null;
+  if (res.length > 0) {
+    const row = res[0].values.find(([, year_label]) => isSeasonYearLabelTracked(year_label));
+    if (row) return getSeasonOverview(saveId, row[0]);
+  }
+
+  // Final Save Point: the CURRENT season's own Season Summary, frozen
+  // early — before the in-game rollover — once checkFinalSavePoint below
+  // confirms the season's data is complete. Surfaced through this same
+  // pending-overview flow so it auto-pops the existing splash exactly
+  // once, the same way an already-ended season's overview does above;
+  // returns the FROZEN snapshot rather than recomputing live, since the
+  // whole point of a save point is to lock in data that's known-good
+  // right now rather than trust it stays that way through the rollover.
+  const currentRes = db.exec(`
+    SELECT final_save_point_overview_json FROM seasons
+    WHERE save_id = ${saveId} AND is_current = 1 AND overview_acknowledged = 0
+      AND final_save_point_overview_json IS NOT NULL;
+  `);
+  if (currentRes.length > 0 && currentRes[0].values.length > 0) {
+    try {
+      return JSON.parse(currentRes[0].values[0][0]);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+// ------------------------------------------------------------------
+// Final Save Point — a one-time-per-season safety net around the end
+// of the football season. On or after June 20th, once this season's
+// own results show it's genuinely finished (not "Not Started"), its
+// Season Summary is computed and frozen (see getPendingSeasonOverview
+// above) — this is what protects that data from whatever race/timing
+// issue might otherwise corrupt it during the actual in-game rollover
+// (see the league-stats season-resolution race this was built after).
+// Runs on every calendar sync ("on refresh") — if the season isn't
+// finished yet by the 20th, it just silently re-checks on the next
+// sync; if it's STILL not locked in by the 29th, getSeasonAlerts below
+// starts returning show_final_alert so the UI can nag about it.
+// ------------------------------------------------------------------
+
+function parseYMD(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr || '');
+  return m ? { year: parseInt(m[1], 10), month: parseInt(m[2], 10), day: parseInt(m[3], 10) } : null;
+}
+
+function seasonEndYear(yearLabel) {
+  const parts = String(yearLabel || '').split('/');
+  return parts.length === 2 ? parseInt(parts[1], 10) : null;
+}
+
+// Last week of May — the softer, dismissible heads-up.
+function isInMayReminderWindow(ymd, endYear) {
+  return !!ymd && ymd.year === endYear && ymd.month === 5 && ymd.day >= 24;
+}
+
+// June 20-29 — the window the final check actively runs in.
+function isInFinalCheckWindow(ymd, endYear) {
+  return !!ymd && ymd.year === endYear && ymd.month === 6 && ymd.day >= 20 && ymd.day <= 29;
+}
+
+// June 29 through July 1 inclusive — the non-dismissible banner window;
+// per the user's explicit call, this stays up through July 1st
+// regardless of whether the check already completed, only clearing once
+// the date moves past it.
+function isInFinalAlertWindow(ymd, endYear) {
+  if (!ymd || ymd.year !== endYear) return false;
+  if (ymd.month === 6) return ymd.day >= 29;
+  if (ymd.month === 7) return ymd.day <= 1;
+  return false;
+}
+
+// Called on every calendar sync for the CURRENT season with that sync's
+// own in-game date. Idempotent/cheap to call repeatedly — that's what
+// makes "just keep syncing" the retry mechanism, no separate retry loop
+// needed.
+function checkSeasonFinalSavePoint(saveId, seasonId, currentDateStr) {
+  if (!db || !saveId || !seasonId || !currentDateStr) return;
+
+  const seasonRes = db.exec(`SELECT year_label, final_save_point_at FROM seasons WHERE id = ${seasonId};`);
+  if (seasonRes.length === 0 || seasonRes[0].values.length === 0) return;
+  const [yearLabel, finalSavePointAt] = seasonRes[0].values[0];
+
+  db.run('UPDATE seasons SET last_known_date = ? WHERE id = ?;', [currentDateStr, seasonId]);
+
+  const ymd = parseYMD(currentDateStr);
+  const endYear = seasonEndYear(yearLabel);
+  if (!ymd || !endYear || finalSavePointAt || !isInFinalCheckWindow(ymd, endYear)) {
+    saveDatabaseToDisk();
+    return;
+  }
+
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  const seasonComplete = !!leagueResult && leagueResult.standing !== 'Not Started';
+  if (seasonComplete) {
+    const overview = getSeasonOverview(saveId, seasonId);
+    if (overview) {
+      db.run(
+        'UPDATE seasons SET final_save_point_at = CURRENT_TIMESTAMP, final_save_point_overview_json = ? WHERE id = ?;',
+        [JSON.stringify(overview), seasonId]
+      );
+      console.log(`[Final Save Point] Season ${yearLabel} (id ${seasonId}) locked in.`);
+    }
+  }
+  saveDatabaseToDisk();
+}
+
+// Read-only status for the renderer's alert banners — recomputed live
+// from last_known_date on every call, so it stays correct across app
+// restarts without needing a fresh sync first.
+function getSeasonAlerts(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const seasonId = getCurrentSeasonForSave(saveId);
+  if (!seasonId) return null;
+
+  const res = db.exec(`
+    SELECT year_label, last_known_date, final_save_point_at, final_reminder_may_shown_at
+    FROM seasons WHERE id = ${seasonId};
+  `);
+  if (res.length === 0 || res[0].values.length === 0) return null;
+  const [yearLabel, lastKnownDate, finalSavePointAt, mayReminderShownAt] = res[0].values[0];
+
+  const ymd = parseYMD(lastKnownDate);
+  const endYear = seasonEndYear(yearLabel);
+
+  return {
+    season_id: seasonId,
+    year_label: yearLabel,
+    show_may_reminder: !mayReminderShownAt && isInMayReminderWindow(ymd, endYear),
+    show_final_alert: isInFinalAlertWindow(ymd, endYear),
+    final_save_point_complete: !!finalSavePointAt
+  };
+}
+
+function dismissMayReminder(saveId, seasonId) {
+  if (!db || !saveId || !seasonId) return { success: false };
+  db.run('UPDATE seasons SET final_reminder_may_shown_at = CURRENT_TIMESTAMP WHERE id = ? AND save_id = ?;', [seasonId, saveId]);
+  saveDatabaseToDisk();
+  return { success: true };
 }
 
 function acknowledgeSeasonOverview(saveId, seasonId) {
@@ -915,6 +1162,12 @@ function getSeasonOverviewPreview(saveId = activeSaveId) {
 // Current youth academy roster for a save — see importYouthAcademy.
 // potential_low/potential_high are a deliberate range, not the exact
 // potential (see export_all.lua's YOUTH ACADEMY EXPORT block for why).
+// youth_academy_snapshot rows are never deleted once seen (see
+// importYouthAcademy), so a player promoted to the senior squad since
+// their last youth export would otherwise still show up here — excluded
+// via NOT IN player_season_stats for this season, which is what the
+// senior squad view (getSquadFromDB) is built from, so a duplicate
+// never appears in both tables at once.
 function getYouthAcademy(saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const seasonId = getCurrentSeasonForSave(saveId);
@@ -926,6 +1179,9 @@ function getYouthAcademy(saveId = activeSaveId) {
     FROM youth_academy_snapshot y
     JOIN players p ON p.player_id = y.player_id
     WHERE y.season_id = ${seasonId}
+      AND y.player_id NOT IN (
+        SELECT s.player_id FROM player_season_stats s WHERE s.season_id = ${seasonId}
+      )
     ORDER BY y.potential_high DESC;
   `);
   if (res.length === 0) return [];
@@ -1306,6 +1562,30 @@ function parseStandingPositionServer(standingText) {
   return match ? parseInt(match[1], 10) : null;
 }
 
+// Whether a season counts as "promoted", read directly from that
+// season's own recorded results — never needs a later season to exist,
+// unlike the tier-comparison approach still used for relegated in
+// getSeasonOverview. In the Championship/League One/League Two, only 1st
+// and 2nd go up automatically; 3rd-6th enter a play-off and only its
+// winner is also promoted — so this checks position first, then falls
+// back to a play-off competition result (matched by name — the game
+// varies the exact string per tier, e.g. "Lg Two Play-Offs") with
+// standing "Winner". The Premier League (tier 1) has nothing above it.
+function getPromotionStatusFromOwnResults(seasonId, leagueResult) {
+  if (!leagueResult || leagueResult.tier === 1) return { promoted: false, viaPlayoff: false };
+
+  const position = parseStandingPositionServer(leagueResult.standing);
+  if (position !== null && position <= 2) return { promoted: true, viaPlayoff: false };
+
+  const playoffRes = db.exec(`
+    SELECT standing FROM season_competition_results
+    WHERE season_id = ${seasonId}
+      AND (LOWER(comp_name) LIKE '%play-off%' OR LOWER(comp_name) LIKE '%play off%' OR LOWER(comp_name) LIKE '%playoff%');
+  `);
+  const wonPlayoff = playoffRes.length > 0 && playoffRes[0].values.some(([standing]) => standing === 'Winner');
+  return { promoted: wonPlayoff, viaPlayoff: wonPlayoff };
+}
+
 // Permanently enables Youth Squad Career Mode for a save. One-way by
 // design — there is no corresponding disable function or IPC channel.
 function enableYouthMode(saveId) {
@@ -1350,6 +1630,9 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
     && enabledRes[0].values[0][0] === 1;
   if (!youthModeEnabled) return;
 
+  // Same "Not Started" ambiguity as getSeasonPrimaryLeagueResult — a
+  // pending promotion/relegation can leave next season's not-yet-started
+  // league sitting in this same season's results alongside the real one.
   const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${endedSeasonId};`);
   const compRows = compRes.length > 0 ? compRes[0].values : [];
   let leagueName = null;
@@ -1357,7 +1640,9 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
   let standingText = null;
   for (const [name, standing] of compRows) {
     const t = findPyramidTierServer(name);
-    if (t) { leagueName = name; tierInfo = t; standingText = standing; break; }
+    if (!t) continue;
+    if (standing !== 'Not Started') { leagueName = name; tierInfo = t; standingText = standing; break; }
+    if (!tierInfo) { leagueName = name; tierInfo = t; standingText = standing; }
   }
   if (!tierInfo) return; // no recognized league this season — nothing to enforce
 
@@ -2403,7 +2688,7 @@ function getSignedPlayers(saveId = activeSaveId) {
 function getPlayerHistory(playerId, saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const res = db.exec(`
-    SELECT se.id, se.year_label, s.overall, s.potential, s.goals, s.assists, s.appearances,
+    SELECT se.id, se.year_label, se.league_name, s.overall, s.potential, s.goals, s.assists, s.appearances,
            s.clean_sheets, s.avg_rating, s.attributes_json, s.competitions_json
     FROM player_season_stats s
     JOIN seasons se ON se.id = s.season_id
@@ -2418,20 +2703,21 @@ function getPlayerHistory(playerId, saveId = activeSaveId) {
     return {
       seasonOrder: row[0],
       season: row[1],
-      overall: row[2],
-      potential: row[3],
-      goals: row[4],
-      assists: row[5],
-      appearances: row[6],
-      clean_sheets: row[7],
-      avg_rating: row[8],
-      attributes: JSON.parse(row[9] || '{}'),
-      competitions: JSON.parse(row[10] || '[]')
+      league_name: row[2],
+      overall: row[3],
+      potential: row[4],
+      goals: row[5],
+      assists: row[6],
+      appearances: row[7],
+      clean_sheets: row[8],
+      avg_rating: row[9],
+      attributes: JSON.parse(row[10] || '{}'),
+      competitions: JSON.parse(row[11] || '[]')
     };
   });
 
   const formerRes = db.exec(`
-    SELECT se.id, se.year_label, f.overall, f.potential, f.attributes_json,
+    SELECT se.id, se.year_label, se.league_name, f.overall, f.potential, f.attributes_json,
            l.goals, l.assists, l.appearances, l.clean_sheets
     FROM former_player_snapshots f
     JOIN seasons se ON se.id = f.season_id
@@ -2441,11 +2727,12 @@ function getPlayerHistory(playerId, saveId = activeSaveId) {
   `);
   if (formerRes.length > 0) {
     formerRes[0].values.forEach(row => {
-      const [seasonId, yearLabel, overall, potential, attributesJson, goals, assists, appearances, cleanSheets] = row;
+      const [seasonId, yearLabel, leagueName, overall, potential, attributesJson, goals, assists, appearances, cleanSheets] = row;
       if (coveredSeasonIds.has(seasonId)) return; // already have a with-us row for this season
       combined.push({
         seasonOrder: seasonId,
         season: yearLabel,
+        league_name: leagueName,
         overall,
         potential,
         goals: goals || 0,
@@ -2815,11 +3102,14 @@ ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId
 ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
+ipcMain.handle('get-season-alerts', (_event, saveId) => getSeasonAlerts(saveId));
+ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayReminder(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
 
 app.whenReady().then(async () => {
   await initDatabase();
+  backfillSeasonLeagueNames();
   refreshCurrentSeasonFromCalendar();
   createWindow();
 
@@ -2831,7 +3121,9 @@ app.whenReady().then(async () => {
         refreshLeagueTeamsFromCalendar(startupCalendarPayload);
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
+        syncSeasonLeagueNameFromResults(currentSeasonId);
         persistSeasonStandings(currentSeasonId, startupCalendarPayload.standings);
+        checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, startupCalendarPayload.current_date);
         saveSnapshotForActiveSave(rawCalendar);
         mainWindow.webContents.send('calendar-updated', { save_id: activeSaveId, data: startupCalendarPayload });
       } catch (err) {
@@ -2843,7 +3135,7 @@ app.whenReady().then(async () => {
       try {
         const startupLeagueStats = JSON.parse(fs.readFileSync(leagueStatsExportPath, 'utf-8'));
         latestLeagueStatsPayload = startupLeagueStats;
-        persistLeagueStats(currentSeasonId, startupLeagueStats);
+        persistLeagueStats(resolveLeagueStatsSeasonId(startupLeagueStats), startupLeagueStats);
         mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: startupLeagueStats.players || [], league_name: startupLeagueStats.league_name || null });
       } catch (err) {
         console.error('[Startup] Failed to load existing league stats export:', err);
@@ -2874,7 +3166,9 @@ app.whenReady().then(async () => {
             refreshLeagueTeamsFromCalendar(calendarPayload);
             importCalendarMatches(calendarPayload);
             persistSeasonCompetitionResults(calendarPayload);
+            syncSeasonLeagueNameFromResults(currentSeasonId);
             persistSeasonStandings(currentSeasonId, calendarPayload.standings);
+            checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, calendarPayload.current_date);
             saveSnapshotForActiveSave(rawCalendar);
 
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2941,7 +3235,7 @@ app.whenReady().then(async () => {
         const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
         const leagueStatsPayload = JSON.parse(rawLeagueStats);
         latestLeagueStatsPayload = leagueStatsPayload;
-        persistLeagueStats(currentSeasonId, leagueStatsPayload);
+        persistLeagueStats(resolveLeagueStatsSeasonId(leagueStatsPayload), leagueStatsPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('league-stats-updated', { save_id: activeSaveId, data: leagueStatsPayload.players || [], league_name: leagueStatsPayload.league_name || null });

@@ -1803,11 +1803,21 @@ do
         end
     end
 
+    -- Same GetCurrentDate() call the SQUAD EXPORT block above already
+    -- makes every F10 press without issue — added here so the companion
+    -- app can resolve which season this payload actually belongs to from
+    -- its own data instead of trusting whatever season happens to be
+    -- "current" globally at the moment this file gets picked up, which
+    -- raced against the calendar sync right at a season rollover and
+    -- mislabeled a season's league name (see persistLeagueStats in main.js).
+    local league_current_date_tbl = GetCurrentDate()
+    local league_current_date_str = string.format("%04d-%02d-%02d", league_current_date_tbl.year, league_current_date_tbl.month, league_current_date_tbl.day)
+
     local league_save_uid_escaped = save_uid:gsub('"', '\\"')
     local league_name_escaped = (primary_league_comp_name or ""):gsub('"', '\\"')
     local league_json_output = string.format(
-        '{"save_uid":"%s","league_name":"%s","players":[\n    %s\n  ]}',
-        league_save_uid_escaped, league_name_escaped, table.concat(league_players_json_list, ",\n    ")
+        '{"save_uid":"%s","current_date":"%s","league_name":"%s","players":[\n    %s\n  ]}',
+        league_save_uid_escaped, league_current_date_str, league_name_escaped, table.concat(league_players_json_list, ",\n    ")
     )
 
     local league_file = io.open("C:\\Users\\Public\\ea_fc_league_stats_export.json", "w+")
