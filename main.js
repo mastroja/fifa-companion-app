@@ -747,6 +747,11 @@ function getSeasonOverview(saveId, seasonId) {
       }
     }
   }
+  // In the Championship/League One/League Two, only 1st and 2nd go up
+  // automatically — 3rd-6th enter a playoff and only its winner is also
+  // promoted. So any promotion recorded from a final position outside the
+  // top 2 has to have come via the playoffs.
+  const promotedViaPlayoff = promoted && leaguePosition !== null && leaguePosition > 2;
 
   const leagueHistoryRes = db.exec(`
     SELECT r.comp_name, r.standing, se.year_label, se.id
@@ -830,7 +835,8 @@ function getSeasonOverview(saveId, seasonId) {
       position: leaguePosition,
       won: wonLeague,
       relegated,
-      promoted
+      promoted,
+      promoted_via_playoff: promotedViaPlayoff
     } : null,
     league_history: leagueHistory,
     standings: getSeasonStandings(seasonId),

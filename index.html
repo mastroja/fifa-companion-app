@@ -4368,8 +4368,12 @@
       const rows = trace.map((t, i) => {
         let badge = '';
         if (i < trace.length - 1) {
-          if (trace[i + 1].tier < t.tier) badge = '<span class="promo-badge promo-up">Promoted</span>';
-          else if (trace[i + 1].tier > t.tier) badge = '<span class="promo-badge promo-down">Relegated</span>';
+          if (trace[i + 1].tier < t.tier) {
+            // Championship/League One/League Two only send 1st and 2nd up
+            // automatically — anything else promoted came via the playoffs.
+            const viaPlayoff = t.position && t.position > 2;
+            badge = `<span class="promo-badge promo-up">Promoted${viaPlayoff ? ' via Play-off' : ''}</span>`;
+          } else if (trace[i + 1].tier > t.tier) badge = '<span class="promo-badge promo-down">Relegated</span>';
         }
         const posLabel = t.position ? ordinal(t.position) : 'Not started yet';
         return `<tr><td>${t.season}</td><td>${t.tier_name}</td><td>${posLabel}</td><td>${badge}</td></tr>`;
@@ -5600,7 +5604,8 @@
           headlineText = `Relegated — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         } else if (d.league.promoted) {
           headlineIcon = seasonOverviewTrendIcon('up');
-          headlineText = `Promoted — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
+          const promoLabel = d.league.promoted_via_playoff ? 'Promoted via Play-off' : 'Promoted';
+          headlineText = `${promoLabel} — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         } else {
           headlineText = `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
         }
