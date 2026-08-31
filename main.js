@@ -509,11 +509,39 @@ function resolveLeagueStatsSeasonId(leagueStatsPayload) {
   return currentSeasonId;
 }
 
+// Keeps seasons.league_name authoritative and self-healing: derived from
+// season_competition_results via getSeasonPrimaryLeagueResult (which
+// already prefers a real result over a "Not Started" placeholder — see
+// its own comment) instead of trusted directly from whatever competition
+// the league-stats export's memory read currently considers "primary".
+// That memory read can flip to next season's league before the season
+// actually rolls over (a promoted/relegated club sees its new league's
+// fixtures appear during the close season), which was overwriting an
+// about-to-end season's league_name with the WRONG, not-yet-started
+// league. Called after every calendar AND league-stats sync (see both
+// below) so whichever runs last always leaves the correct value,
+// regardless of which file's watcher fires first.
+function syncSeasonLeagueNameFromResults(seasonId) {
+  if (!db || !seasonId) return;
+  const leagueResult = getSeasonPrimaryLeagueResult(seasonId);
+  if (leagueResult) {
+    db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueResult.comp_name, seasonId]);
+  }
+}
+
 function persistLeagueStats(seasonId, leagueStatsPayload) {
   if (!db || !seasonId || !leagueStatsPayload || !Array.isArray(leagueStatsPayload.players)) return;
 
-  if (leagueStatsPayload.league_name) {
+  // season_competition_results (populated by the calendar sync) is the
+  // authoritative source once it has anything for this season — only
+  // fall back to this payload's own league_name before that's happened
+  // yet (e.g. a squad/league-stats sync that beat the first calendar
+  // sync), and even then syncSeasonLeagueNameFromResults will correct it
+  // as soon as calendar data arrives.
+  if (!getSeasonPrimaryLeagueResult(seasonId) && leagueStatsPayload.league_name) {
     db.run('UPDATE seasons SET league_name = ? WHERE id = ?;', [leagueStatsPayload.league_name, seasonId]);
+  } else {
+    syncSeasonLeagueNameFromResults(seasonId);
   }
 
   const stmt = db.prepare(`
@@ -3073,6 +3101,7 @@ app.whenReady().then(async () => {
         refreshLeagueTeamsFromCalendar(startupCalendarPayload);
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
+        syncSeasonLeagueNameFromResults(currentSeasonId);
         persistSeasonStandings(currentSeasonId, startupCalendarPayload.standings);
         checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, startupCalendarPayload.current_date);
         saveSnapshotForActiveSave(rawCalendar);
@@ -3117,6 +3146,7 @@ app.whenReady().then(async () => {
             refreshLeagueTeamsFromCalendar(calendarPayload);
             importCalendarMatches(calendarPayload);
             persistSeasonCompetitionResults(calendarPayload);
+            syncSeasonLeagueNameFromResults(currentSeasonId);
             persistSeasonStandings(currentSeasonId, calendarPayload.standings);
             checkSeasonFinalSavePoint(activeSaveId, currentSeasonId, calendarPayload.current_date);
             saveSnapshotForActiveSave(rawCalendar);
