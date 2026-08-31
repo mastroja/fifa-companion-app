@@ -915,6 +915,12 @@ function getSeasonOverviewPreview(saveId = activeSaveId) {
 // Current youth academy roster for a save — see importYouthAcademy.
 // potential_low/potential_high are a deliberate range, not the exact
 // potential (see export_all.lua's YOUTH ACADEMY EXPORT block for why).
+// youth_academy_snapshot rows are never deleted once seen (see
+// importYouthAcademy), so a player promoted to the senior squad since
+// their last youth export would otherwise still show up here — excluded
+// via NOT IN player_season_stats for this season, which is what the
+// senior squad view (getSquadFromDB) is built from, so a duplicate
+// never appears in both tables at once.
 function getYouthAcademy(saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const seasonId = getCurrentSeasonForSave(saveId);
@@ -926,6 +932,9 @@ function getYouthAcademy(saveId = activeSaveId) {
     FROM youth_academy_snapshot y
     JOIN players p ON p.player_id = y.player_id
     WHERE y.season_id = ${seasonId}
+      AND y.player_id NOT IN (
+        SELECT s.player_id FROM player_season_stats s WHERE s.season_id = ${seasonId}
+      )
     ORDER BY y.potential_high DESC;
   `);
   if (res.length === 0) return [];
