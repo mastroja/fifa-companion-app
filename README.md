@@ -34,7 +34,7 @@ If your game has *already* auto-updated past `1.0.139.20381`, Steam's client doe
 
 ## 2. Install Live Editor
 
-1. Download **FC 26 Live Editor v26.3.6** from wherever you originally got it (Patreon/official site — not linked here since it changes over time; get it from the current official source).
+1. Download **FC 26 Live Editor v26.3.6** from [(Patreon/official site — not linked here since it changes over time; get it from the current official source)](https://www.patreon.com/xAranaktu/posts/fc-26-live-v26-3-166271704).
 2. Extract it to a folder **outside** `Program Files` (e.g. `D:\Mods\fc26\FC 26 LE v26.3.6\`) — Windows permission restrictions inside `Program Files` can interfere with how Live Editor patches the running game.
 3. Confirm the extracted folder's `le_offsets.json` has `"GAME_VER": "1.0.139.20381"` — if it says a different build number, this Live Editor version doesn't match your game and you need a different LE build (or a different game build — see section 1).
 
