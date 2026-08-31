@@ -605,11 +605,23 @@ function getSeasonCompetitionResults(seasonId) {
 function getSeasonPrimaryLeagueResult(seasonId) {
   const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${seasonId};`);
   const compRows = compRes.length > 0 ? compRes[0].values : [];
+  // A promotion/relegation can register BOTH the league actually being
+  // played AND the incoming season's not-yet-started league under the
+  // SAME season_id before rollover happens — the game's calendar starts
+  // surfacing next season's fixtures/table early, and persistSeasonCompetitionResults
+  // just writes whatever it's handed into whichever season is still
+  // current. Row order here isn't guaranteed, so picking the first
+  // tier-matching row could pick the "Not Started" placeholder for next
+  // season instead of the real, finished result for the one actually
+  // being reported on — prefer any tier match with a real standing.
+  let notStartedFallback = null;
   for (const [comp_name, standing] of compRows) {
     const tier = findPyramidTierServer(comp_name);
-    if (tier) return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+    if (!tier) continue;
+    if (standing !== 'Not Started') return { comp_name, standing, tier: tier.tier, tier_name: tier.name };
+    if (!notStartedFallback) notStartedFallback = { comp_name, standing, tier: tier.tier, tier_name: tier.name };
   }
-  return null;
+  return notStartedFallback;
 }
 
 function getSeasonTransfersForSeason(saveId, seasonId, yearLabel) {
@@ -1571,6 +1583,9 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
     && enabledRes[0].values[0][0] === 1;
   if (!youthModeEnabled) return;
 
+  // Same "Not Started" ambiguity as getSeasonPrimaryLeagueResult — a
+  // pending promotion/relegation can leave next season's not-yet-started
+  // league sitting in this same season's results alongside the real one.
   const compRes = db.exec(`SELECT comp_name, standing FROM season_competition_results WHERE season_id = ${endedSeasonId};`);
   const compRows = compRes.length > 0 ? compRes[0].values : [];
   let leagueName = null;
@@ -1578,7 +1593,9 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
   let standingText = null;
   for (const [name, standing] of compRows) {
     const t = findPyramidTierServer(name);
-    if (t) { leagueName = name; tierInfo = t; standingText = standing; break; }
+    if (!t) continue;
+    if (standing !== 'Not Started') { leagueName = name; tierInfo = t; standingText = standing; break; }
+    if (!tierInfo) { leagueName = name; tierInfo = t; standingText = standing; }
   }
   if (!tierInfo) return; // no recognized league this season — nothing to enforce
 

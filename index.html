@@ -4365,7 +4365,13 @@
         const seasons = await window.api.getSeasonsList();
         for (const season of (seasons || [])) {
           const results = await window.api.getSeasonCompetitionResults(season.id);
-          const match = (results || []).find(r => findPyramidTier(r.comp_name));
+          // A promotion/relegation can register BOTH the league actually
+          // played AND next season's not-yet-started league under the same
+          // season before rollover — prefer a real result over "Not
+          // Started" so an about-to-end season isn't mistaken for one that
+          // hasn't begun (same fix as getSeasonPrimaryLeagueResult in main.js).
+          const tierMatches = (results || []).filter(r => findPyramidTier(r.comp_name));
+          const match = tierMatches.find(r => r.standing !== 'Not Started') || tierMatches[0];
           if (match) {
             // Read the actual recorded play-off result rather than
             // guessing from final position — the game names the
