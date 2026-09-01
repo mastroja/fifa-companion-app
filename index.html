@@ -216,6 +216,17 @@
     .home-grid-mid { grid-template-columns: 1fr 1fr; }
     .home-grid-mid .profile-card:has(#home-team-record-competitions) { display: flex; flex-direction: column; }
     .home-grid-mid .profile-card:has(#home-team-record-competitions) > .home-toggle-btn { margin-top: auto; }
+    /* Bottom-anchoring the button (above) wasn't enough on its own — the
+       content itself still reads as sparse against the taller neighbor.
+       Scoped to THIS card's specific stat grid/competitions list (not the
+       shared .stats-summary-grid/.stat-box-item classes used elsewhere —
+       Trophies, the Calendar tab's Match Performance box, etc. — which
+       must stay their normal compact size) so just this instance reads as
+       substantial content instead of a few small numbers floating in a
+       big box. */
+    #home-team-record-body { padding: 20px 12px; }
+    #home-team-record-body .stat-box-item span { font-size: 12px; }
+    #home-team-record-body .stat-box-item strong { font-size: 26px; }
     .home-widget-stack { display: flex; flex-direction: column; gap: 20px; }
     .home-grid-stats { grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 1100px) {
@@ -4649,9 +4660,9 @@
       }
 
       container.innerHTML = `
-        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Competitions</div>
+        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Competitions</div>
         ${results.map(r => `
-          <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0;">
+          <div style="display: flex; justify-content: space-between; font-size: 15px; padding: 5px 0;">
             <span>${normalizeCompetitionName(r.comp_name)}</span>
             <strong style="color: var(--accent-color);">${r.standing || '—'}</strong>
           </div>
