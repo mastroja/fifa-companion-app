@@ -4,6 +4,7 @@ const fs = require('fs');
 const chokidar = require('chokidar');
 const initSqlJs = require('sql.js');
 const { execFile } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow = null;
 let db = null;
@@ -3056,6 +3057,35 @@ async function exportSeasonOverviewPdf(suggestedFileName) {
 // Electron boilerplate
 // ------------------------------------------------------------------
 
+function setupAutoUpdater() {
+  // No app-update.yml exists outside a real electron-builder package, so
+  // checking in a dev run (`npm start`) just throws — skip entirely there.
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update ready',
+      message: 'A new version of EA FC Companion App has been downloaded.',
+      detail: 'Restart now to install it, or it will install automatically the next time you quit.',
+      buttons: ['Restart Now', 'Later'],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall();
+    });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.error('[AutoUpdater] Error checking for updates:', err);
+  });
+
+  autoUpdater.checkForUpdates();
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -3112,6 +3142,7 @@ app.whenReady().then(async () => {
   backfillSeasonLeagueNames();
   refreshCurrentSeasonFromCalendar();
   createWindow();
+  setupAutoUpdater();
 
   mainWindow.webContents.once('did-finish-load', () => {
     if (fs.existsSync(calendarExportPath)) {
