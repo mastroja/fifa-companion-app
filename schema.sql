@@ -390,3 +390,52 @@ CREATE TABLE IF NOT EXISTS transfer_fees (
     FOREIGN KEY(save_id) REFERENCES saves(id),
     UNIQUE(save_id, player_id, from_team_id, to_team_id, deal_date)
 );
+
+-- One row per injury EPISODE (not per sync) — opened the first time a
+-- squad sync sees teamplayerlinks.injury flip to true for a player with
+-- no already-open episode, closed (end_date set) the first sync that
+-- sees it flip back to false. See the injury-transition detection in
+-- importFifaData in main.js. Live Editor only exposes a boolean injury
+-- flag (no type/duration field exists in its DB schema), so start_date/
+-- end_date mean "the date our own polling first noticed the change",
+-- not the game's true injury onset/recovery date — accurate to within
+-- one sync interval, not exact. end_date IS NULL means still ongoing
+-- (or the game was closed before we ever saw the recovery sync). Scoped
+-- by save_id like transfer_fees, since player_id is a global EA FC id
+-- that could reappear in a different save.
+CREATE TABLE IF NOT EXISTS player_injury_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    start_date TEXT NOT NULL,  -- in-game date (YYYY-MM-DD), from the squad export's current_date
+    end_date TEXT,             -- NULL while the episode is still open
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(save_id) REFERENCES saves(id)
+);
+
+-- One row per (player, current contract stint) tracking whether the
+-- player's contract has ever been RENEWED since they joined. tracked_
+-- contract_date pins this row to one specific contract stint: if
+-- player_season_stats.contract_date ever changes (a brand new signing —
+-- re-joining after leaving, or a new deal with a fresh start date), the
+-- row is reset from scratch rather than comparing across two unrelated
+-- contracts. baseline_contract_expiry is the expiry date first seen for
+-- THIS stint; last_known_contract_expiry is compared against it (then
+-- against itself) each sync so a SECOND renewal also gets a fresh
+-- last_renewal_date instead of freezing on the first one. See the
+-- contract-renewal detection in importFifaData in main.js. Renewal
+-- dates are in-game dates (the squad export's current_date), same
+-- caveat as player_injury_history: "the date our polling first
+-- noticed", not the exact in-game renewal date.
+CREATE TABLE IF NOT EXISTS player_contract_state (
+    player_id INTEGER NOT NULL,
+    save_id INTEGER NOT NULL,
+    tracked_contract_date TEXT,
+    baseline_contract_expiry TEXT,
+    last_known_contract_expiry TEXT,
+    last_renewal_date TEXT,
+    PRIMARY KEY (player_id, save_id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(save_id) REFERENCES saves(id)
+);
