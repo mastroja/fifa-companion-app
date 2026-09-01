@@ -80,7 +80,9 @@ async function initDatabase() {
     ['overall_delta', 'INTEGER DEFAULT 0'],
     ['attribute_deltas_json', 'TEXT'],
     ['season_start_overall', 'INTEGER'],
-    ['season_start_attributes_json', 'TEXT']
+    ['season_start_attributes_json', 'TEXT'],
+    ['jersey_number', 'INTEGER'],
+    ['injury', 'INTEGER DEFAULT 0']
   ];
   seasonStatsMigrations.forEach(([column, type]) => {
     try {
@@ -1995,10 +1997,11 @@ function importFifaData(jsonPayload) {
         (player_id, season_id, overall, potential, skill_moves, weak_foot,
          club_id, club_name, contract_expiry, contract_date, duration_months, player_role_, last_status_change_date,
          on_loan, loan_team_from, loan_club_name, loan_date_end, is_loan_to_buy, wage,
+         jersey_number, injury,
          goals, assists, appearances, clean_sheets, saves, yellow_cards, red_cards, avg_rating,
          attributes_json, competitions_json, traits_json, play_styles_json,
          overall_delta, attribute_deltas_json, season_start_overall, season_start_attributes_json, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       -- season_start_overall/season_start_attributes_json are deliberately
       -- NOT in this SET list — see the column comment in schema.sql. The
       -- values bound for them below only ever take effect on a fresh
@@ -2023,6 +2026,8 @@ function importFifaData(jsonPayload) {
         loan_date_end=excluded.loan_date_end,
         is_loan_to_buy=excluded.is_loan_to_buy,
         wage=excluded.wage,
+        jersey_number=excluded.jersey_number,
+        injury=excluded.injury,
         goals=excluded.goals,
         assists=excluded.assists,
         appearances=excluded.appearances,
@@ -2085,6 +2090,8 @@ function importFifaData(jsonPayload) {
         p.loan_date_end || '',
         p.is_loan_to_buy ? 1 : 0,
         p.wage || 0,
+        p.jersey_number || 0,
+        p.injury ? 1 : 0,
         p.goals || 0,
         p.assists || 0,
         p.appearances || 0,
@@ -2204,6 +2211,7 @@ function getSquadFromDB(seasonId = currentSeasonId) {
            s.overall, s.potential, s.skill_moves, s.weak_foot, s.club_id, s.club_name, s.contract_expiry,
            s.contract_date, s.duration_months, s.player_role_, s.last_status_change_date,
            s.on_loan, s.loan_team_from, s.loan_club_name, s.loan_date_end, s.is_loan_to_buy, s.wage,
+           s.jersey_number, s.injury,
            s.goals, s.assists, s.appearances, s.clean_sheets, s.saves,
            s.yellow_cards, s.red_cards, s.avg_rating, s.attributes_json, s.competitions_json,
            s.traits_json, s.play_styles_json, s.updated_at, s.overall_delta, s.attribute_deltas_json,
@@ -2244,22 +2252,24 @@ function getSquadFromDB(seasonId = currentSeasonId) {
     loan_date_end: row[24],
     is_loan_to_buy: row[25] === 1,
     wage: row[26],
-    goals: row[27],
-    assists: row[28],
-    appearances: row[29],
-    clean_sheets: row[30],
-    saves: row[31],
-    yellow_cards: row[32],
-    red_cards: row[33],
-    avg_rating: row[34],
-    attributes: JSON.parse(row[35] || '{}'),
-    competitions: JSON.parse(row[36] || '[]'),
-    traits: JSON.parse(row[37] || '[]'),
-    play_styles: JSON.parse(row[38] || '[]'),
-    updated_at: row[39],
-    overall_delta: row[40] || 0,
-    attribute_deltas: JSON.parse(row[41] || '{}'),
-    youth_reveal_tier: row[42]
+    jersey_number: row[27],
+    injury: row[28] === 1,
+    goals: row[29],
+    assists: row[30],
+    appearances: row[31],
+    clean_sheets: row[32],
+    saves: row[33],
+    yellow_cards: row[34],
+    red_cards: row[35],
+    avg_rating: row[36],
+    attributes: JSON.parse(row[37] || '{}'),
+    competitions: JSON.parse(row[38] || '[]'),
+    traits: JSON.parse(row[39] || '[]'),
+    play_styles: JSON.parse(row[40] || '[]'),
+    updated_at: row[41],
+    overall_delta: row[42] || 0,
+    attribute_deltas: JSON.parse(row[43] || '{}'),
+    youth_reveal_tier: row[44]
   }));
 }
 
@@ -2301,6 +2311,7 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
            cur.overall, cur.potential, cur.skill_moves, cur.weak_foot, cur.club_id, cur.club_name, cur.contract_expiry,
            cur.contract_date, cur.duration_months, cur.player_role_, cur.last_status_change_date,
            cur.on_loan, cur.loan_team_from, cur.loan_club_name, cur.loan_date_end, cur.is_loan_to_buy, cur.wage,
+           cur.jersey_number, cur.injury,
            cur.attributes_json, cur.competitions_json, cur.traits_json, cur.play_styles_json,
            SUM(s.goals) as t_goals, SUM(s.assists) as t_assists, SUM(s.appearances) as t_apps,
            SUM(s.clean_sheets) as t_cs, SUM(s.saves) as t_saves,
@@ -2318,7 +2329,7 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
   if (res.length === 0) return [];
 
   return res[0].values.map(row => {
-    const totalApps = row[33] || 0;
+    const totalApps = row[35] || 0;
     return {
       player_id: row[0], name: row[1], position_id: row[2], alt_positions: row[3], nationality: row[4], dob: row[5],
       height: row[6], weight: row[7], preferred_foot: row[8], photo_id: row[9],
@@ -2327,13 +2338,14 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
       duration_months: row[18], player_role_: row[19], last_status_change_date: row[20],
       on_loan: row[21] === 1, loan_team_from: row[22], loan_club_name: row[23], loan_date_end: row[24],
       is_loan_to_buy: row[25] === 1, wage: row[26],
-      attributes: JSON.parse(row[27] || '{}'), competitions: JSON.parse(row[28] || '[]'),
-      traits: JSON.parse(row[29] || '[]'), play_styles: JSON.parse(row[30] || '[]'),
-      goals: row[31] || 0, assists: row[32] || 0, appearances: totalApps,
-      clean_sheets: row[34] || 0, saves: row[35] || 0, yellow_cards: row[36] || 0, red_cards: row[37] || 0,
-      avg_rating: totalApps > 0 ? (row[38] || 0) / totalApps : 0,
-      updated_at: row[39],
-      youth_reveal_tier: row[40]
+      jersey_number: row[27], injury: row[28] === 1,
+      attributes: JSON.parse(row[29] || '{}'), competitions: JSON.parse(row[30] || '[]'),
+      traits: JSON.parse(row[31] || '[]'), play_styles: JSON.parse(row[32] || '[]'),
+      goals: row[33] || 0, assists: row[34] || 0, appearances: totalApps,
+      clean_sheets: row[36] || 0, saves: row[37] || 0, yellow_cards: row[38] || 0, red_cards: row[39] || 0,
+      avg_rating: totalApps > 0 ? (row[40] || 0) / totalApps : 0,
+      updated_at: row[41],
+      youth_reveal_tier: row[42]
     };
   });
 }

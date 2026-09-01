@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     loan_date_end TEXT,
     is_loan_to_buy INTEGER DEFAULT 0,
     wage INTEGER,
+    jersey_number INTEGER,
+    injury INTEGER DEFAULT 0,
 
     -- stats accumulated so far this season
     goals INTEGER DEFAULT 0,
