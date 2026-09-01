@@ -53,7 +53,11 @@ This companion app gets all its data from `assets/export_all.lua` in this repo �
 1. In Live Editor, find the **Lua Engine** / **Hotkeys** section (added in v26.3.6 — "Option to assign lua script to hotkey").
 2. Point it at `export_all.lua`:
    - **Running from source**: wherever you cloned this repo, e.g. `C:\path\to\fifa-companion-app\assets\export_all.lua`.
-   - **Installed via the packaged .exe**: the installer unpacks the Lua scripts to a real, plain path (not zipped inside the app) — `<install folder>\resources\app.asar.unpacked\assets\export_all.lua`, e.g. `C:\Program Files\EA FC Companion App\resources\app.asar.unpacked\assets\export_all.lua` if you installed to the default location.
+   - **Installed via the packaged .exe**: the installer unpacks the Lua scripts to a real, plain path (not zipped inside the app) — `<install folder>\resources\app.asar.unpacked\assets\export_all.lua`. By default (unless you changed the install directory in the setup wizard) that's:
+     ```
+     C:\Users\<your username>\AppData\Local\Programs\EA FC Companion App\resources\app.asar.unpacked\assets\export_all.lua
+     ```
+     If you're not sure where you installed it, right-click the app's Desktop or Start Menu shortcut → **Open file location** to jump straight to the install folder.
 3. Assign it to **F10**.
 4. Test it once: press F10 in-game, then check that `C:\Users\Public\` now has `ea_fc_squad_export.json`, `ea_fc_calendar_export.json`, `ea_fc_transfers_export.json`, `ea_fc_youth_export.json`, and `ea_fc_league_stats_export.json`. Those five fixed paths are hardcoded on both sides (the Lua script and the companion app) — nothing to configure there.
 
