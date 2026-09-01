@@ -2459,18 +2459,26 @@ function getCurrentSeasonForSave(saveId) {
   return (fallback.length > 0 && fallback[0].values.length > 0) ? fallback[0].values[0][0] : null;
 }
 
-// "All Time" squad view: current roster's bio/contract/club info (same as
-// getSquadFromDB for the current season), but goals/assists/appearances/etc
-// summed across every season each player has been with the club, and
-// avg_rating as an appearances-weighted average across those seasons —
-// same aggregation pattern already used client-side for a player's
+// "All Time" squad view: current/last-known bio/contract/club info (same
+// shape as getSquadFromDB), but goals/assists/appearances/etc summed
+// across every season each player has been with the club, and avg_rating
+// as an appearances-weighted average across those seasons — same
+// aggregation pattern already used client-side for a player's
 // competitions breakdown. Scoped to this save specifically (a player_id
 // is a global EA FC id — the same real player could theoretically show
 // up in a different save too, so the aggregation must not cross saves).
+//
+// FIXED: previously joined "cur" to the CURRENT season specifically
+// (cur.season_id = ${seasonId}), an INNER JOIN — so anyone who left the
+// club before the current season (no row for that exact season_id) was
+// silently excluded from "All Time" entirely, not just missing their
+// stats. "latest" now resolves each player's most recent season_id FOR
+// THIS SAVE regardless of whether that's the current season, so a
+// long-departed player still shows up with their last-known bio/overall/
+// club from whenever they actually left — same "last known" convention
+// getPastPlayers already uses for the Former Players tab.
 function getAllTimeSquadStats(saveId = activeSaveId) {
   if (!db || !saveId) return [];
-  const seasonId = getCurrentSeasonForSave(saveId);
-  if (!seasonId) return [];
 
   const res = db.exec(`
     SELECT p.player_id, p.name, p.position_id, p.alt_positions, p.nationality, p.dob, p.height, p.weight,
@@ -2486,7 +2494,13 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
            SUM(s.avg_rating * s.appearances) as t_rating_weighted,
            cur.updated_at, p.youth_reveal_tier
     FROM players p
-    JOIN player_season_stats cur ON cur.player_id = p.player_id AND cur.season_id = ${seasonId}
+    JOIN (
+      SELECT ps.player_id, MAX(ps.season_id) as latest_season_id
+      FROM player_season_stats ps
+      JOIN seasons se3 ON se3.id = ps.season_id AND se3.save_id = ${saveId}
+      GROUP BY ps.player_id
+    ) latest ON latest.player_id = p.player_id
+    JOIN player_season_stats cur ON cur.player_id = p.player_id AND cur.season_id = latest.latest_season_id
     JOIN player_season_stats s ON s.player_id = p.player_id
     JOIN seasons se2 ON se2.id = s.season_id AND se2.save_id = ${saveId}
     GROUP BY p.player_id
@@ -2752,7 +2766,7 @@ function getSignedPlayers(saveId = activeSaveId) {
   if (!currentSeasonForSave) return [];
 
   const currentRes = db.exec(`
-    SELECT player_id, club_id, on_loan, updated_at, contract_date FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+    SELECT player_id, club_id, on_loan, updated_at, contract_date, overall FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
   `);
   const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
 
@@ -2774,12 +2788,14 @@ function getSignedPlayers(saveId = activeSaveId) {
   // negotiation-memory deal which only exists if a sync happened to catch
   // it while it was still in memory.
   const contractDateByPlayer = new Map();
-  currentRows.forEach(([player_id, club_id, on_loan, updated_at, contract_date]) => {
+  const overallByPlayer = new Map();
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at, contract_date, overall]) => {
     const isActive = !maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt;
     if (isActive) {
       activeIds.push(player_id);
       if (!on_loan && userTeamId === null) userTeamId = club_id;
       contractDateByPlayer.set(player_id, contract_date || '');
+      overallByPlayer.set(player_id, overall || 0);
     }
   });
   if (userTeamId === null || activeIds.length === 0) return [];
@@ -2844,6 +2860,7 @@ function getSignedPlayers(saveId = activeSaveId) {
       name: bio.name || 'Unknown',
       position_id: bio.position_id || 0,
       dob: bio.dob || '',
+      overall: overallByPlayer.get(playerId) || 0,
       from_team: fromTeam,
       is_academy: isAcademy,
       signed_season: earliest ? earliest.year_label : null,

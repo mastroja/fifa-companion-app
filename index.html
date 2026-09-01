@@ -796,6 +796,9 @@
         <thead>
           <tr>
             <th onclick="sortTransfers('player_name')">Player ↕</th>
+            <th onclick="sortTransfers('position_id')">Pos ↕</th>
+            <th onclick="sortTransfers('age')">Age ↕</th>
+            <th onclick="sortTransfers('overall')">OVR ↕</th>
             <th onclick="sortTransfers('from_team')">From ↕</th>
             <th onclick="sortTransfers('to_team')">To ↕</th>
             <th id="transfer-detail-header" onclick="sortTransfers('detail')">Signed ↕</th>
@@ -803,7 +806,7 @@
           </tr>
         </thead>
         <tbody id="transfers-tbody">
-          <tr><td colspan="5" class="empty-state">No transfer data loaded.</td></tr>
+          <tr><td colspan="8" class="empty-state">No transfer data loaded.</td></tr>
         </tbody>
       </table>
     </div>
@@ -1995,6 +1998,39 @@
       return kept;
     }
 
+    // Merges a player's per-season `.competitions` breakdowns (as returned
+    // by getPlayerHistory) into one all-time per-competition total,
+    // appearances-weighted avg rating same as everywhere else. Shared by
+    // the profile's "All Time" Stats view and the Former Players table's
+    // expandable competitions row — both want the exact same aggregation
+    // over a player's full history at the club, current or departed.
+    function buildAllTimeCompetitionsBreakdown(seasonsList) {
+      const map = new Map();
+      (seasonsList || []).forEach(s => {
+        (s.competitions || []).forEach(c => {
+          const key = c.comp_name || 'League/Cup';
+          if (!map.has(key)) {
+            map.set(key, { comp_name: key, appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
+          }
+          const entry = map.get(key);
+          const apps = Number(c.appearances || 0);
+          entry.appearances += apps;
+          entry.goals += Number(c.goals || 0);
+          entry.assists += Number(c.assists || 0);
+          entry.clean_sheets += Number(c.clean_sheets || 0);
+          entry.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
+        });
+      });
+      return Array.from(map.values()).map(e => ({
+        comp_name: e.comp_name,
+        appearances: e.appearances,
+        goals: e.goals,
+        assists: e.assists,
+        clean_sheets: e.clean_sheets,
+        avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
+      }));
+    }
+
     async function openPlayerProfile(identifier) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
@@ -2287,30 +2323,7 @@
       // All-time per-competition breakdown (appearances-weighted avg
       // rating, same convention as everywhere else) for the Stats card's
       // "All Time" view — summed across every season already loaded above.
-      const allTimeCompetitionsMap = new Map();
-      seasonsList.forEach(s => {
-        (s.competitions || []).forEach(c => {
-          const key = c.comp_name || 'League/Cup';
-          if (!allTimeCompetitionsMap.has(key)) {
-            allTimeCompetitionsMap.set(key, { comp_name: key, appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
-          }
-          const entry = allTimeCompetitionsMap.get(key);
-          const apps = Number(c.appearances || 0);
-          entry.appearances += apps;
-          entry.goals += Number(c.goals || 0);
-          entry.assists += Number(c.assists || 0);
-          entry.clean_sheets += Number(c.clean_sheets || 0);
-          entry.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
-        });
-      });
-      const allTimeCompetitions = Array.from(allTimeCompetitionsMap.values()).map(e => ({
-        comp_name: e.comp_name,
-        appearances: e.appearances,
-        goals: e.goals,
-        assists: e.assists,
-        clean_sheets: e.clean_sheets,
-        avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
-      }));
+      const allTimeCompetitions = buildAllTimeCompetitionsBreakdown(seasonsList);
 
       // One entry per season the player has ever recorded stats for (most
       // recent first, since seasonsList is already reversed for the
@@ -3011,6 +3024,9 @@
           return {
             player_id: p.player_id,
             player_name: p.name,
+            position_id: p.position_id,
+            dob: p.dob,
+            overall: p.overall,
             from_team: ourClub,
             to_team: p.current_club || 'Unknown',
             detail: dateLabel || p.departed_season || '—',
@@ -3038,6 +3054,9 @@
           return {
             player_id: p.player_id,
             player_name: p.name,
+            position_id: p.position_id,
+            dob: p.dob,
+            overall: p.overall,
             from_team: ourClub,
             to_team: p.club_name || 'Unknown Club',
             detail: rangeLabel,
@@ -3058,6 +3077,9 @@
         return {
           player_id: p.player_id,
           player_name: p.name,
+          position_id: p.position_id,
+          dob: p.dob,
+          overall: p.overall,
           from_team: p.from_team,
           to_team: ourClub,
           detail: dateLabel || p.signed_season || '—',
@@ -3108,8 +3130,22 @@
       }
 
       rows.sort((a, b) => {
-        if (currentTransferSortColumn === 'fee') {
-          const valA = Number(a.fee || 0), valB = Number(b.fee || 0);
+        if (currentTransferSortColumn === 'player_name') {
+          const valA = getLastName(a.player_name).toLowerCase();
+          const valB = getLastName(b.player_name).toLowerCase();
+          return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        if (currentTransferSortColumn === 'fee' || currentTransferSortColumn === 'overall') {
+          const valA = Number(a[currentTransferSortColumn] || 0), valB = Number(b[currentTransferSortColumn] || 0);
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
+        if (currentTransferSortColumn === 'age') {
+          const valA = computeAge(a.dob) ?? -1, valB = computeAge(b.dob) ?? -1;
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
+        if (currentTransferSortColumn === 'position_id') {
+          const valA = POSITION_SORT_ORDER[getPositionInfo(a.position_id).label] || 99;
+          const valB = POSITION_SORT_ORDER[getPositionInfo(b.position_id).label] || 99;
           return transferSortAscending ? valA - valB : valB - valA;
         }
         // detail now shows a formatted date ("Jul 6, 2025") or a date range,
@@ -3148,19 +3184,25 @@
       }
 
       if (rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No ${view} players found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No ${view} players found.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map(t => `
+      tbody.innerHTML = rows.map(t => {
+        const posInfo = getPositionInfo(t.position_id);
+        return `
         <tr class="transfer-row">
           <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_id ?? t.player_name}')">${t.player_name}</strong></td>
+          <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+          <td>${computeAge(t.dob) ?? '—'}</td>
+          <td><span class="rating-badge">${t.overall || '—'}</span></td>
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
           <td style="color: var(--accent-color); font-weight: 600;">${t.detail}</td>
           <td style="color: var(--text-dim); ${t.fee ? 'font-weight: 600; color: var(--accent-color);' : 'font-style: italic;'}">${t.feeDisplay || (t.fee ? formatMoney(t.fee) : 'Unknown')}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function transformPlayersForTable(rawList) {
@@ -3280,6 +3322,22 @@
     async function changeSquadSeason(value) {
       squadSeasonSelection = value;
 
+      // All Time is every season the player has ever been with the club —
+      // a departed/transferred player is exactly what makes up the
+      // "former" part of that history, so hiding them would make the
+      // view lie about who's actually included. Forced on (and locked)
+      // here rather than just defaulting it, so it can't drift back off
+      // via the checkbox's own onchange while All Time stays selected.
+      const includeTransferredEl = document.getElementById('squad-include-transferred');
+      if (includeTransferredEl) {
+        if (value === 'all_time') {
+          includeTransferredEl.checked = true;
+          includeTransferredEl.disabled = true;
+        } else {
+          includeTransferredEl.disabled = false;
+        }
+      }
+
       if (value === 'current') {
         squadTableRows = currentPlayers;
         sortTable(currentSortColumn);
@@ -3363,10 +3421,19 @@
     let pastPlayersSortColumn = 'departed_season';
     let pastPlayersSortAscending = false;
 
+    // Lazy-fetched all-time per-competition breakdown for each former
+    // player's expandable row (see toggleFormerPlayerCompetitions) —
+    // fetched once per player_id via getPlayerHistory (works for a
+    // departed player same as a current one — see main.js), not
+    // preloaded for the whole table since most rows never get expanded.
+    // Cleared whenever the Former Players list itself is refreshed.
+    let formerPlayerCompetitionsCache = new Map();
+
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
       const pastPlayers = await window.api.getPastPlayers(currentSaveId);
       currentPastPlayers = pastPlayers || [];
+      formerPlayerCompetitionsCache.clear();
       filterAndRenderTransfers(); // Sold view reads currentPastPlayers directly
       renderPastPlayersRows();
     }
@@ -3424,7 +3491,11 @@
       rows.sort((a, b) => {
         let valA = a[pastPlayersSortColumn];
         let valB = b[pastPlayersSortColumn];
-        if (pastPlayersSortColumn === 'position_id') {
+        if (pastPlayersSortColumn === 'name') {
+          valA = getLastName(a.name).toLowerCase();
+          valB = getLastName(b.name).toLowerCase();
+          return pastPlayersSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else if (pastPlayersSortColumn === 'position_id') {
           valA = getPositionInfo(a.position_id).label;
           valB = getPositionInfo(b.position_id).label;
         } else if (pastPlayersSortColumn === '__value' || pastPlayersSortColumn === '__soldFor') {
@@ -3443,8 +3514,11 @@
         const posInfo = getPositionInfo(p.position_id);
         const ovrLabel = p.overall_is_live ? p.overall : `${p.overall ?? '—'} (last known)`;
         return `
-          <tr>
-            <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
+          <tr class="player-row" id="former-row-${p.player_id}">
+            <td>
+              <span class="expand-icon" style="cursor: pointer; margin-right: 4px;" onclick="toggleFormerPlayerCompetitions(${p.player_id})" title="All-time competitions breakdown while at the club">▶</span>
+              <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong>
+            </td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
             <td>${p.__age ?? '—'}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
@@ -3455,8 +3529,86 @@
             <td>${formatYearsActiveRange(p.joined_season, p.departed_season)}</td>
             <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
           </tr>
+          <tr class="detail-row" id="former-detail-${p.player_id}">
+            <td colspan="10"><div class="detail-wrapper"></div></td>
+          </tr>
         `;
       }).join('');
+    }
+
+    // All-time per-competition breakdown for one former player's
+    // expandable row — lazy-fetched via getPlayerHistory (works for a
+    // departed player exactly like a current one, see main.js) and
+    // cached in formerPlayerCompetitionsCache since most rows never get
+    // expanded and the underlying history never changes mid-session.
+    async function toggleFormerPlayerCompetitions(playerId) {
+      const mainRow = document.getElementById(`former-row-${playerId}`);
+      const detailRow = document.getElementById(`former-detail-${playerId}`);
+      if (!mainRow || !detailRow) return;
+
+      const isOpen = detailRow.classList.contains('open');
+      if (isOpen) {
+        detailRow.classList.remove('open');
+        mainRow.classList.remove('expanded');
+        return;
+      }
+      detailRow.classList.add('open');
+      mainRow.classList.add('expanded');
+
+      const wrapper = detailRow.querySelector('.detail-wrapper');
+      if (!wrapper) return;
+
+      if (formerPlayerCompetitionsCache.has(playerId)) {
+        renderFormerPlayerCompetitionsTable(wrapper, formerPlayerCompetitionsCache.get(playerId));
+        return;
+      }
+
+      wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Loading...</div>`;
+      if (!window.api || !window.api.getPlayerHistory) return;
+
+      const rawHistory = await window.api.getPlayerHistory(parseInt(playerId, 10)) || [];
+      const cleanedSeasons = rawHistory.map(cleanSeasonStats);
+      const breakdown = buildAllTimeCompetitionsBreakdown(cleanedSeasons);
+      formerPlayerCompetitionsCache.set(playerId, breakdown);
+
+      // The row may have been collapsed again while the fetch was in
+      // flight — don't paint into a wrapper the user already closed.
+      if (detailRow.classList.contains('open')) {
+        renderFormerPlayerCompetitionsTable(wrapper, breakdown);
+      }
+    }
+
+    function renderFormerPlayerCompetitionsTable(wrapper, competitions) {
+      if (!competitions || competitions.length === 0) {
+        wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded.</div>`;
+        return;
+      }
+      wrapper.innerHTML = `
+        <table class="sub-table">
+          <thead>
+            <tr>
+              <th>Competition</th>
+              <th>Apps</th>
+              <th>Goals</th>
+              <th>Assists</th>
+              <th>Clean Sheets</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${competitions.map(c => `
+              <tr>
+                <td>${c.comp_name || 'League/Cup'}</td>
+                <td>${c.appearances || 0}</td>
+                <td>${c.goals || 0}</td>
+                <td>${c.assists || 0}</td>
+                <td>${c.clean_sheets || 0}</td>
+                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
     }
 
     // No longer feeds the Transfer Hub table (see getTransferHubRows) —
