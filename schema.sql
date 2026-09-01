@@ -361,6 +361,23 @@ CREATE TABLE IF NOT EXISTS academy_graduate_overrides (
     FOREIGN KEY(save_id) REFERENCES saves(id)
 );
 
+-- Manually-assigned PlayStyles/PlayStyle+ (see the "+ Playstyle" picker on
+-- the player profile's Abilities & Traits card). Live Editor's real
+-- playstyle data source was never confirmed working (see
+-- feedback_live_editor_data_safety memory — playerperks/archetypes tables
+-- couldn't be safely probed), so this lets the user record what they see
+-- in-game by hand instead. Keyed on player_id alone, not save_id — a
+-- player's PlayStyles are a property of the real player, not of any one
+-- save. playstyles_json is a JSON array of {name, plus} objects, e.g.
+-- [{"name":"Finesse Shot","plus":true}]; replaced wholesale on every save
+-- from the picker rather than diffed.
+CREATE TABLE IF NOT EXISTS player_manual_playstyles (
+    player_id INTEGER PRIMARY KEY,
+    playstyles_json TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id)
+);
+
 -- Real transfer/loan fees, read directly from the Career Mode Transfer
 -- Manager's negotiation-storage memory (see export_all.lua's TRANSFERS
 -- EXPORT block) rather than the "transfers"/"transferhistory" DB tables,
@@ -396,19 +413,32 @@ CREATE TABLE IF NOT EXISTS transfer_fees (
 -- no already-open episode, closed (end_date set) the first sync that
 -- sees it flip back to false. See the injury-transition detection in
 -- importFifaData in main.js. Live Editor only exposes a boolean injury
--- flag (no type/duration field exists in its DB schema), so start_date/
--- end_date mean "the date our own polling first noticed the change",
--- not the game's true injury onset/recovery date — accurate to within
--- one sync interval, not exact. end_date IS NULL means still ongoing
--- (or the game was closed before we ever saw the recovery sync). Scoped
--- by save_id like transfer_fees, since player_id is a global EA FC id
--- that could reappear in a different save.
+-- flag (no type/duration field exists in its DB schema, and in practice
+-- the flag itself doesn't reliably flip back to false when a player
+-- actually recovers in-game — a game/Live Editor data quirk, not
+-- something fixable from our side), so start_date/end_date mean "the
+-- date our own polling first noticed the change", not the game's true
+-- injury onset/recovery date — accurate to within one sync interval, not
+-- exact, and an episode can stay open indefinitely if the real recovery
+-- was never caught by a sync. end_date IS NULL means still ongoing (or
+-- never confirmed closed). Scoped by save_id like transfer_fees, since
+-- player_id is a global EA FC id that could reappear in a different save.
+--
+-- injury_type_id is a manual workaround for the same Live Editor
+-- limitation: since no injury-type field exists to read automatically,
+-- the user classifies each episode by hand from the profile's Injury
+-- History card, picking from the INJURY_TYPES catalog in index.html
+-- (matches EA FC's real in-game injury list/ids). NULL until classified.
+-- The associated recovery-day figure from that catalog is intentionally
+-- not surfaced in the UI yet — injury_type_id is stored so it's available
+-- for that later, without needing another migration.
 CREATE TABLE IF NOT EXISTS player_injury_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     save_id INTEGER NOT NULL,
     player_id INTEGER NOT NULL,
     start_date TEXT NOT NULL,  -- in-game date (YYYY-MM-DD), from the squad export's current_date
     end_date TEXT,             -- NULL while the episode is still open
+    injury_type_id INTEGER,    -- see INJURY_TYPES in index.html; NULL = not yet classified
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(player_id) REFERENCES players(player_id),
     FOREIGN KEY(save_id) REFERENCES saves(id)

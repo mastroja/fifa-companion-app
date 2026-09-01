@@ -230,6 +230,15 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Manual injury-type classification (see player_injury_history in
+  // schema.sql), added after some users already had a DB on disk — same
+  // ignore-already-exists migration pattern as above.
+  try {
+    db.run(`ALTER TABLE player_injury_history ADD COLUMN injury_type_id INTEGER;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   saveDatabaseToDisk();
   console.log('[DB] Schema verified/created (existing data preserved).');
 }
@@ -1314,6 +1323,36 @@ function markAcademyGraduate(playerId, saveId = activeSaveId) {
   return { success: true };
 }
 
+// Manually-recorded PlayStyles/PlayStyle+ for a player — see the
+// "+ Playstyle" picker on the player profile and player_manual_playstyles
+// in schema.sql. Not save-scoped: a player's PlayStyles belong to the
+// real player, not to any one save.
+function getManualPlayStyles(playerId) {
+  if (!db || !playerId) return [];
+  const res = db.exec(`SELECT playstyles_json FROM player_manual_playstyles WHERE player_id = ${playerId};`);
+  if (res.length === 0 || res[0].values.length === 0) return [];
+  try {
+    const parsed = JSON.parse(res[0].values[0][0] || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+// Replaces the whole set in one go (the picker always submits the full
+// current selection, not a delta).
+function setManualPlayStyles(playerId, styles) {
+  if (!db || !playerId) return { success: false };
+  const json = JSON.stringify(Array.isArray(styles) ? styles : []);
+  db.run(`
+    INSERT INTO player_manual_playstyles (player_id, playstyles_json, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(player_id) DO UPDATE SET playstyles_json = excluded.playstyles_json, updated_at = CURRENT_TIMESTAMP;
+  `, [playerId, json]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
 // The real "transfers" DB table crashes the game when Live Editor's Lua
 // API tries to read it (confirmed 2026-08-25 — crashes inside its own
 // GetFirstRecord(), before a single field is read; not fixable from a
@@ -1551,21 +1590,85 @@ function getPlayerTransferHistory(playerId, saveId = activeSaveId) {
 // recent first. start_date/end_date are already ISO YYYY-MM-DD (the
 // squad export's own current_date — see the injury-transition detection
 // in importFifaData), which sorts correctly as a plain string, unlike
-// transfer_fees' MM-DD-YYYY deal_date. end_date NULL means still
-// ongoing. This is deliberately just dates for now (no injury type/
-// duration — Live Editor's DB schema has no such field to read); the
-// episode COUNT here is what a future "injury prone" label would key
-// off of.
+// transfer_fees' MM-DD-YYYY deal_date. end_date NULL means still ongoing
+// (or never confirmed closed — see player_injury_history in schema.sql).
+// injury_type_id is the user's own manual classification (NULL until set
+// via setInjuryEpisodeType) — the episode COUNT here is what a future
+// "injury prone" label would key off of.
 function getPlayerInjuryHistory(playerId, saveId = activeSaveId) {
   if (!db || !saveId || !playerId) return [];
   const res = db.exec(`
-    SELECT start_date, end_date
+    SELECT id, start_date, end_date, injury_type_id
     FROM player_injury_history
     WHERE save_id = ${saveId} AND player_id = ${playerId}
     ORDER BY start_date DESC;
   `);
   if (res.length === 0) return [];
-  return res[0].values.map(([start_date, end_date]) => ({ start_date, end_date }));
+  return res[0].values.map(([id, start_date, end_date, injury_type_id]) => ({ id, start_date, end_date, injury_type_id }));
+}
+
+// Manual injury-type classification for one episode — see
+// player_injury_history in schema.sql and the INJURY_TYPES catalog in
+// index.html. Pass null to clear back to "not yet classified".
+function setInjuryEpisodeType(episodeId, injuryTypeId) {
+  if (!db || !episodeId) return { success: false };
+  db.run('UPDATE player_injury_history SET injury_type_id = ? WHERE id = ?;', [injuryTypeId, episodeId]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// Manual fail-safe for Live Editor's injury boolean not reliably
+// resetting to false on a real in-game recovery (confirmed by the user —
+// see feedback_injury_tracking_workaround memory) — lets the user close a
+// still-open episode by hand from the profile's "Returned to Full
+// Fitness" button, locking in a return date so duration can be computed.
+// The episode UPDATE's WHERE clause is deliberately AND end_date IS NULL,
+// so calling this twice (e.g. a stale button click) can't clobber an
+// already-closed episode's real end_date — that also doubles as the
+// signal for whether this call is acting on a real open episode, which
+// is what gates the injury-flag clear below.
+//
+// Also clears player_season_stats.injury for the CURRENT season, so the
+// visible "INJURED" badge (Squad tab, profile header) reflects the
+// confirmed recovery immediately instead of staying stuck. That column is
+// still overwritten from Live Editor's raw export on every sync, so if
+// the game's own flag really never resets, the badge can reappear on the
+// next sync — this only fixes what the app itself is showing right now.
+function returnPlayerToFullFitness(episodeId, endDate) {
+  if (!db || !episodeId || !endDate) return { success: false };
+  const episodeRes = db.exec(`SELECT player_id FROM player_injury_history WHERE id = ${episodeId} AND end_date IS NULL;`);
+  if (episodeRes.length === 0 || episodeRes[0].values.length === 0) return { success: false };
+  const playerId = episodeRes[0].values[0][0];
+
+  db.run('UPDATE player_injury_history SET end_date = ? WHERE id = ? AND end_date IS NULL;', [endDate, episodeId]);
+  if (currentSeasonId) {
+    db.run('UPDATE player_season_stats SET injury = 0 WHERE player_id = ? AND season_id = ?;', [playerId, currentSeasonId]);
+  }
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// Lets the user remove a bad/duplicate/test injury record entirely from
+// the profile's Injury History card — irreversible, gated behind a
+// confirm() client-side.
+function deleteInjuryEpisode(episodeId) {
+  if (!db || !episodeId) return { success: false };
+  db.run('DELETE FROM player_injury_history WHERE id = ?;', [episodeId]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// Full manual edit of an already-recorded episode — the "Edit" button on
+// a closed entry in the Injury History card, for fixing dates/type after
+// the fact. Unlike returnPlayerToFullFitness (which only ever closes an
+// OPEN episode once, guarded by end_date IS NULL), this can freely
+// rewrite any episode, since Live Editor's own dates were always just
+// "when our polling noticed the change" approximations to begin with.
+function updateInjuryEpisode(episodeId, startDate, endDate, injuryTypeId) {
+  if (!db || !episodeId || !startDate || !endDate) return { success: false };
+  db.run('UPDATE player_injury_history SET start_date = ?, end_date = ?, injury_type_id = ? WHERE id = ?;', [startDate, endDate, injuryTypeId, episodeId]);
+  saveDatabaseToDisk();
+  return { success: true };
 }
 
 // Contract Renewal for the profile's Contract & Financials card: null
@@ -3312,6 +3415,10 @@ ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfer
 ipcMain.handle('get-transfer-fees', (_event, saveId) => getTransferFees(saveId));
 ipcMain.handle('get-player-transfer-history', (_event, playerId, saveId) => getPlayerTransferHistory(playerId, saveId));
 ipcMain.handle('get-player-injury-history', (_event, playerId, saveId) => getPlayerInjuryHistory(playerId, saveId));
+ipcMain.handle('set-injury-episode-type', (_event, episodeId, injuryTypeId) => setInjuryEpisodeType(episodeId, injuryTypeId));
+ipcMain.handle('return-player-to-full-fitness', (_event, episodeId, endDate) => returnPlayerToFullFitness(episodeId, endDate));
+ipcMain.handle('delete-injury-episode', (_event, episodeId) => deleteInjuryEpisode(episodeId));
+ipcMain.handle('update-injury-episode', (_event, episodeId, startDate, endDate, injuryTypeId) => updateInjuryEpisode(episodeId, startDate, endDate, injuryTypeId));
 ipcMain.handle('get-player-contract-renewal', (_event, playerId, saveId) => getPlayerContractRenewal(playerId, saveId));
 ipcMain.handle('get-saves-list', () => getSavesList());
 ipcMain.handle('select-save', (_event, saveId) => selectSave(saveId));
@@ -3328,6 +3435,8 @@ ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSea
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
 ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
+ipcMain.handle('get-manual-play-styles', (_event, playerId) => getManualPlayStyles(playerId));
+ipcMain.handle('set-manual-play-styles', (_event, playerId, styles) => setManualPlayStyles(playerId, styles));
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
 ipcMain.handle('get-season-alerts', (_event, saveId) => getSeasonAlerts(saveId));
