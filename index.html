@@ -203,7 +203,19 @@
     .home-grid-top { grid-template-columns: 1fr 1fr; }
     .home-grid-top .profile-card:has(#home-league-table-body) { display: flex; flex-direction: column; }
     #home-league-table-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    /* .home-grid-mid pairs Team Record against .home-widget-stack (Captain
+       + Manager, TWO full cards stacked) — stretch makes Team Record's
+       card match that combined height, but its own content (a compact
+       stats grid + short competitions list + one button) is much shorter,
+       leaving a big dead gap at the bottom. Unlike League Table's fix
+       (centering a short, simple table), this card has three stacked
+       content blocks that should stay grouped together right under the
+       header, with only the trailing "View League History" button
+       pushed down to actually use the leftover space — margin-top: auto
+       on that button (inside a flex column) does exactly that. */
     .home-grid-mid { grid-template-columns: 1fr 1fr; }
+    .home-grid-mid .profile-card:has(#home-team-record-competitions) { display: flex; flex-direction: column; }
+    .home-grid-mid .profile-card:has(#home-team-record-competitions) > .home-toggle-btn { margin-top: auto; }
     .home-widget-stack { display: flex; flex-direction: column; gap: 20px; }
     .home-grid-stats { grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 1100px) {
@@ -608,8 +620,8 @@
           </select>
         </h3>
         <div class="stats-summary-grid" id="home-team-record-body"></div>
-        <div id="home-team-record-competitions" style="margin-top: 8px;"></div>
-        <button class="home-toggle-btn" style="margin-top: 10px;" onclick="openLeagueHierarchyModal()">View League History</button>
+        <div id="home-team-record-competitions" style="margin-top: 8px; margin-bottom: 10px;"></div>
+        <button class="home-toggle-btn" onclick="openLeagueHierarchyModal()">View League History</button>
       </div>
     </div>
 
