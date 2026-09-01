@@ -2407,12 +2407,114 @@
     // full openPlayerProfile so the rest of the page doesn't flicker.
     let editingInjuryEpisodeId = null;
 
+    // Whether the "Mark as Currently Injured" inline form is open — see
+    // openNewInjuryForm/saveNewInjuryEpisode. Reset on every profile open
+    // (buildInjuryHistoryCardHtml) so switching players never leaves a
+    // stale form open on the wrong player.
+    let showingNewInjuryForm = false;
+
+    // Single source of truth for the whole Injury History card body — the
+    // "+ Mark as Currently Injured" button (only shown when there's no
+    // already-open episode to avoid creating a duplicate), the inline
+    // add-injury form when that button's been clicked, and the episode
+    // list itself. Used both for the initial profile render and every
+    // subsequent lightweight re-render (rerenderInjuryHistoryList) so the
+    // two can never drift out of sync with each other.
+    function buildInjuryHistoryCardHtml() {
+      const history = currentProfileInjuryHistory || [];
+      const hasOpenEpisode = history.some(ep => !ep.end_date);
+
+      const addFormHtml = showingNewInjuryForm ? `
+        <div class="injury-entry injury-entry-editing">
+          <div class="injury-entry-icon">${injuryEntryIconSvg()}</div>
+          <div class="injury-entry-body">
+            <div class="injury-summary-grid">
+              <div class="injury-summary-item"><span>Injury Date</span><input type="date" id="new-injury-date" value="${currentIngameDate || new Date().toISOString().slice(0, 10)}"></div>
+              <div class="injury-summary-item"><span>Injury Type</span>${buildInjuryTypeSelectHtml({ injury_type_id: null }, 'new-injury-type', false)}</div>
+            </div>
+            <div class="injury-entry-edit-actions">
+              <button class="refresh-btn" onclick="cancelNewInjuryForm()">Cancel</button>
+              <button class="refresh-btn" style="background: var(--accent-color); color: #0d1117; border-color: var(--accent-color);" onclick="saveNewInjuryEpisode()">Save</button>
+            </div>
+          </div>
+        </div>
+      ` : '';
+
+      const addButtonHtml = (!showingNewInjuryForm && !hasOpenEpisode) ? `
+        <button class="refresh-btn" style="margin-bottom: 10px;" onclick="openNewInjuryForm()" title="Use this if a player is actually injured in-game but Live Editor's injury flag never flipped on its own">🩹 Mark as Currently Injured</button>
+      ` : '';
+
+      const listHtml = history.length > 0
+        ? history.map(buildInjuryHistoryEntryHtml).join('')
+        : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
+
+      return addButtonHtml + addFormHtml + listHtml;
+    }
+
     function rerenderInjuryHistoryList() {
       const container = document.getElementById('injury-history-list');
       if (!container) return;
-      container.innerHTML = (currentProfileInjuryHistory && currentProfileInjuryHistory.length > 0)
-        ? currentProfileInjuryHistory.map(buildInjuryHistoryEntryHtml).join('')
-        : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
+      container.innerHTML = buildInjuryHistoryCardHtml();
+    }
+
+    function openNewInjuryForm() {
+      showingNewInjuryForm = true;
+      rerenderInjuryHistoryList();
+    }
+
+    function cancelNewInjuryForm() {
+      showingNewInjuryForm = false;
+      rerenderInjuryHistoryList();
+    }
+
+    // Creates a brand new OPEN episode by hand — see markPlayerCurrently
+    // Injured in main.js for why this exists (Live Editor's injury flag
+    // doesn't reliably flip to true for a real in-game injury either, not
+    // just failing to clear on recovery). Refuses server-side if an open
+    // episode already exists, so this is only ever reachable via the
+    // button that itself only shows when there isn't one.
+    async function saveNewInjuryEpisode() {
+      const dateInput = document.getElementById('new-injury-date');
+      const typeSelect = document.getElementById('new-injury-type');
+      const startDate = dateInput ? dateInput.value : '';
+      const rawType = typeSelect ? parseInt(typeSelect.value, 10) : 0;
+      const injuryTypeId = rawType === 0 ? null : rawType;
+
+      if (!startDate) {
+        alert('Enter the date the player was injured.');
+        return;
+      }
+      if (!currentProfilePlayerId || !window.api || !window.api.markPlayerCurrentlyInjured) return;
+
+      let result;
+      try {
+        result = await window.api.markPlayerCurrentlyInjured(currentProfilePlayerId, startDate, injuryTypeId, currentSaveId);
+      } catch (e) {
+        console.error('Failed to mark player currently injured:', e);
+        alert('Could not save this injury: ' + (e && e.message ? e.message : e));
+        return;
+      }
+      if (!result || !result.success) {
+        alert(result && result.error === 'already_open'
+          ? 'This player already has an open injury record — classify or close that one instead.'
+          : 'Could not save this injury.');
+        return;
+      }
+
+      showingNewInjuryForm = false;
+
+      // Same reasoning as returnPlayerToFullFitness: patch the cached
+      // squad objects directly so the INJURED badge appears immediately
+      // everywhere (Squad tab, this profile) instead of waiting on a sync
+      // that may never even flip the game's own flag to begin with.
+      [currentPlayers, squadTableRows].forEach(list => {
+        if (!Array.isArray(list)) return;
+        const cachedPlayer = list.find(p => p.player_id === currentProfilePlayerId);
+        if (cachedPlayer) cachedPlayer.injury = true;
+      });
+      renderTableRows();
+
+      if (currentProfilePlayerId) openPlayerProfile(currentProfilePlayerId);
     }
 
     function startEditInjuryEpisode(episodeId) {
@@ -2801,6 +2903,8 @@
         }
       }
       currentProfileInjuryHistory = playerInjuryHistory;
+      showingNewInjuryForm = false; // fresh profile open — never carry a stale open form to a different player
+      editingInjuryEpisodeId = null;
 
       // Manually-recorded PlayStyles (see the "+ Playstyle" picker) — not
       // save-scoped, see player_manual_playstyles in schema.sql.
@@ -3082,10 +3186,10 @@
       // boolean flip (see playerInjuryHistory fetch above); the type is a
       // manual classification (see buildInjuryHistoryEntryHtml/INJURY_TYPES)
       // since no type field exists to read automatically. Most recent
-      // episode first, matching Transfer History's ordering.
-      const injuryHistoryHtml = playerInjuryHistory.length > 0
-        ? playerInjuryHistory.map(buildInjuryHistoryEntryHtml).join('')
-        : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
+      // episode first, matching Transfer History's ordering. Includes the
+      // "Mark as Currently Injured" button/form — see
+      // buildInjuryHistoryCardHtml.
+      const injuryHistoryHtml = buildInjuryHistoryCardHtml();
 
       // Fail-safe for when the automatic Academy Graduate detection
       // (based on ever appearing in a youth_academy_snapshot export)

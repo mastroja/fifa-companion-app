@@ -1648,6 +1648,38 @@ function returnPlayerToFullFitness(episodeId, endDate) {
   return { success: true };
 }
 
+// Manual fail-safe for the OTHER half of the same Live Editor problem —
+// not only does teamplayerlinks.injury not reliably clear on recovery
+// (see returnPlayerToFullFitness above), it doesn't reliably flip to
+// true in the first place either, so a real in-game injury can simply
+// never open an episode for the user to then classify. This is the
+// "Mark as Currently Injured" button's handler: opens a brand new
+// episode by hand (bypassing the boolean-flip detection in importFifaData
+// entirely) so the normal type-picker/Returned-to-Full-Fitness flow has
+// something to act on. Refuses if an open episode already exists for
+// this player — the existing one should be classified/closed instead of
+// creating a duplicate.
+function markPlayerCurrentlyInjured(playerId, startDate, injuryTypeId, saveId = activeSaveId) {
+  if (!db || !playerId || !startDate || !saveId) return { success: false };
+
+  const openRes = db.exec(`SELECT id FROM player_injury_history WHERE save_id = ${saveId} AND player_id = ${playerId} AND end_date IS NULL;`);
+  if (openRes.length > 0 && openRes[0].values.length > 0) return { success: false, error: 'already_open' };
+
+  db.run('INSERT INTO player_injury_history (save_id, player_id, start_date, injury_type_id) VALUES (?, ?, ?, ?);', [saveId, playerId, startDate, injuryTypeId]);
+  const idRes = db.exec('SELECT last_insert_rowid();');
+  const episodeId = idRes[0].values[0][0];
+
+  // Same badge-sync reasoning as returnPlayerToFullFitness — this only
+  // takes effect for the player_season_stats row currently marked as
+  // "current" for THIS ACTIVE save, so the visible INJURED badge (Squad
+  // tab, profile header) reflects the manual entry immediately.
+  if (currentSeasonId) {
+    db.run('UPDATE player_season_stats SET injury = 1 WHERE player_id = ? AND season_id = ?;', [playerId, currentSeasonId]);
+  }
+  saveDatabaseToDisk();
+  return { success: true, episode_id: episodeId };
+}
+
 // Lets the user remove a bad/duplicate/test injury record entirely from
 // the profile's Injury History card — irreversible, gated behind a
 // confirm() client-side.
@@ -3417,6 +3449,7 @@ ipcMain.handle('get-player-transfer-history', (_event, playerId, saveId) => getP
 ipcMain.handle('get-player-injury-history', (_event, playerId, saveId) => getPlayerInjuryHistory(playerId, saveId));
 ipcMain.handle('set-injury-episode-type', (_event, episodeId, injuryTypeId) => setInjuryEpisodeType(episodeId, injuryTypeId));
 ipcMain.handle('return-player-to-full-fitness', (_event, episodeId, endDate) => returnPlayerToFullFitness(episodeId, endDate));
+ipcMain.handle('mark-player-currently-injured', (_event, playerId, startDate, injuryTypeId, saveId) => markPlayerCurrentlyInjured(playerId, startDate, injuryTypeId, saveId));
 ipcMain.handle('delete-injury-episode', (_event, episodeId) => deleteInjuryEpisode(episodeId));
 ipcMain.handle('update-injury-episode', (_event, episodeId, startDate, endDate, injuryTypeId) => updateInjuryEpisode(episodeId, startDate, endDate, injuryTypeId));
 ipcMain.handle('get-player-contract-renewal', (_event, playerId, saveId) => getPlayerContractRenewal(playerId, saveId));

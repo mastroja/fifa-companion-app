@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   getPlayerInjuryHistory: (playerId, saveId) => ipcRenderer.invoke('get-player-injury-history', playerId, saveId),
   setInjuryEpisodeType: (episodeId, injuryTypeId) => ipcRenderer.invoke('set-injury-episode-type', episodeId, injuryTypeId),
   returnPlayerToFullFitness: (episodeId, endDate) => ipcRenderer.invoke('return-player-to-full-fitness', episodeId, endDate),
+  markPlayerCurrentlyInjured: (playerId, startDate, injuryTypeId, saveId) => ipcRenderer.invoke('mark-player-currently-injured', playerId, startDate, injuryTypeId, saveId),
   deleteInjuryEpisode: (episodeId) => ipcRenderer.invoke('delete-injury-episode', episodeId),
   updateInjuryEpisode: (episodeId, startDate, endDate, injuryTypeId) => ipcRenderer.invoke('update-injury-episode', episodeId, startDate, endDate, injuryTypeId),
   getPlayerContractRenewal: (playerId, saveId) => ipcRenderer.invoke('get-player-contract-renewal', playerId, saveId),
