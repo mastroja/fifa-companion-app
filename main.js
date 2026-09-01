@@ -108,6 +108,31 @@ async function initDatabase() {
     console.error('[DB] Failed to backfill season_start_overall/attributes:', e);
   }
 
+  // One-time cleanup for season_competition_results rows already
+  // persisted for a preseason/exhibition competition (see
+  // isExhibitionCompetitionName below) BEFORE persistSeasonCompetition
+  // Results started skipping them — without this, an old sync's rows for
+  // "European International Cup" (or a randomized code like "COBJ1924")
+  // would keep showing up in Trophies/Team Record forever, since those
+  // tables are only ever upserted, never re-derived from scratch. Reads
+  // every distinct comp_name and tests each in JS (isExhibitionCompeti
+  // tionName covers the pattern-matched codes too, which a plain SQL IN
+  // list can't) rather than a single DELETE...IN. Idempotent (a no-op
+  // once cleaned), safe to run on every launch.
+  try {
+    const distinctRes = db.exec(`SELECT DISTINCT comp_name FROM season_competition_results;`);
+    const toDelete = (distinctRes.length > 0 ? distinctRes[0].values : [])
+      .map(row => row[0])
+      .filter(isExhibitionCompetitionName);
+    if (toDelete.length > 0) {
+      const list = toDelete.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
+      db.run(`DELETE FROM season_competition_results WHERE comp_name IN (${list});`);
+      console.log('[DB] Cleaned up exhibition competition results:', toDelete);
+    }
+  } catch (e) {
+    console.error('[DB] Failed to clean up exhibition competition results:', e);
+  }
+
   // Multi-save support, added after some users already had a DB on disk —
   // same ignore-already-exists migration pattern as above. The unique
   // index has to be created separately since SQLite can't add a UNIQUE
@@ -401,6 +426,31 @@ function importCalendarMatches(calendarPayload) {
   saveDatabaseToDisk();
 }
 
+// Preseason/exhibition competitions that are real enough to show up in
+// EA's competitions data but aren't real competitions the club actually
+// competed in — never worth a "place finished" or a trophy. Unlike
+// "World's Game" (filtered client-side in index.html, fully excluded
+// from a player's stats too), these should still count toward a
+// player's own goals/assists/appearances — see bucketExhibitionCompetitions
+// in index.html — just never appear as club-level records. Keep this in
+// sync with index.html's copy of the same lists/function.
+//
+// "COBk1924" turned out to be "COBJ1924" in a later sync — EA generates
+// this one with a varying single letter, not a fixed string, so it's
+// matched by pattern (COB + one letter + digits) instead of an exact
+// name. Add new one-off real names to EXHIBITION_COMPETITION_NAMES; add
+// new randomized-code FORMATS to EXHIBITION_COMPETITION_PATTERNS.
+const EXHIBITION_COMPETITION_NAMES = new Set([
+  'European International Cup'
+]);
+const EXHIBITION_COMPETITION_PATTERNS = [
+  /^COB[A-Za-z]\d+$/
+];
+function isExhibitionCompetitionName(name) {
+  if (!name) return false;
+  return EXHIBITION_COMPETITION_NAMES.has(name) || EXHIBITION_COMPETITION_PATTERNS.some(p => p.test(name));
+}
+
 // Persists each competition's current standing/progress (from the
 // calendar export's "competitions" array — see export_all.lua) into
 // season_competition_results, upserted per (season, comp_name). Same
@@ -420,7 +470,7 @@ function persistSeasonCompetitionResults(calendarPayload) {
 
   try {
     calendarPayload.competitions.forEach(comp => {
-      if (!comp.name) return;
+      if (!comp.name || isExhibitionCompetitionName(comp.name)) return;
       stmt.run([currentSeasonId, comp.name, comp.standing || '']);
     });
   } finally {
@@ -1497,6 +1547,39 @@ function getPlayerTransferHistory(playerId, saveId = activeSaveId) {
   });
 }
 
+// Every injury episode on record for one player in this save, most
+// recent first. start_date/end_date are already ISO YYYY-MM-DD (the
+// squad export's own current_date — see the injury-transition detection
+// in importFifaData), which sorts correctly as a plain string, unlike
+// transfer_fees' MM-DD-YYYY deal_date. end_date NULL means still
+// ongoing. This is deliberately just dates for now (no injury type/
+// duration — Live Editor's DB schema has no such field to read); the
+// episode COUNT here is what a future "injury prone" label would key
+// off of.
+function getPlayerInjuryHistory(playerId, saveId = activeSaveId) {
+  if (!db || !saveId || !playerId) return [];
+  const res = db.exec(`
+    SELECT start_date, end_date
+    FROM player_injury_history
+    WHERE save_id = ${saveId} AND player_id = ${playerId}
+    ORDER BY start_date DESC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([start_date, end_date]) => ({ start_date, end_date }));
+}
+
+// Contract Renewal for the profile's Contract & Financials card: null
+// (displayed as "N/A") if contract_expiry has never changed since this
+// contract stint began, otherwise the in-game date of the most recent
+// change. See player_contract_state in schema.sql and the detection
+// logic in importFifaData.
+function getPlayerContractRenewal(playerId, saveId = activeSaveId) {
+  if (!db || !saveId || !playerId) return { renewal_date: null };
+  const res = db.exec(`SELECT last_renewal_date FROM player_contract_state WHERE save_id = ${saveId} AND player_id = ${playerId};`);
+  if (res.length === 0 || res[0].values.length === 0) return { renewal_date: null };
+  return { renewal_date: res[0].values[0][0] };
+}
+
 // ------------------------------------------------------------------
 // Youth Squad Career Mode — gameplay balancing
 // ------------------------------------------------------------------
@@ -1959,6 +2042,41 @@ function importFifaData(jsonPayload) {
     }
   }
 
+  // Currently-open injury episodes (end_date IS NULL) for this save, so
+  // the sync loop below can tell "still injured from before" apart from
+  // "newly injured this sync" without a query per player. See
+  // player_injury_history in schema.sql for why this is episode-based
+  // rather than a running flag on player_season_stats.
+  const openInjuryEpisodeByPlayer = new Map();
+  if (activeSaveId) {
+    const openRes = db.exec(`SELECT player_id, id FROM player_injury_history WHERE save_id = ${activeSaveId} AND end_date IS NULL;`);
+    if (openRes.length > 0) {
+      openRes[0].values.forEach(([playerId, episodeId]) => openInjuryEpisodeByPlayer.set(playerId, episodeId));
+    }
+  }
+
+  // Existing contract-renewal tracking state for this save, so the sync
+  // loop below can tell "same contract stint as last sync" apart from
+  // "brand new contract" without a query per player. See
+  // player_contract_state in schema.sql.
+  const contractStateByPlayer = new Map();
+  if (activeSaveId) {
+    const contractStateRes = db.exec(`SELECT player_id, tracked_contract_date, baseline_contract_expiry, last_known_contract_expiry, last_renewal_date FROM player_contract_state WHERE save_id = ${activeSaveId};`);
+    if (contractStateRes.length > 0) {
+      contractStateRes[0].values.forEach(([playerId, trackedContractDate, baselineExpiry, lastKnownExpiry, lastRenewalDate]) => {
+        contractStateByPlayer.set(playerId, { trackedContractDate, baselineExpiry, lastKnownExpiry, lastRenewalDate });
+      });
+    }
+  }
+
+  // The squad export's own in-game current_date (see the season-
+  // resolution comment above) — falls back to today's real-world date
+  // only in the unlikely case an export predates current_date existing.
+  // Shared by both the injury-episode and contract-renewal detection
+  // below, since both want "the in-game date we first noticed this
+  // change", not wall-clock sync time.
+  const syncInGameDate = jsonPayload.current_date || new Date().toISOString().slice(0, 10);
+
   // One shared timestamp for every row in this sync batch. Previously each
   // row's updated_at was set via SQL's CURRENT_TIMESTAMP, evaluated
   // per-row at execution time — SQLite's CURRENT_TIMESTAMP only has
@@ -1977,6 +2095,19 @@ function importFifaData(jsonPayload) {
 
   db.run('BEGIN TRANSACTION;');
   try {
+    const injuryOpenStmt = db.prepare(`INSERT INTO player_injury_history (save_id, player_id, start_date) VALUES (?, ?, ?);`);
+    const injuryCloseStmt = db.prepare(`UPDATE player_injury_history SET end_date = ? WHERE id = ?;`);
+
+    const contractStateUpsertStmt = db.prepare(`
+      INSERT INTO player_contract_state (player_id, save_id, tracked_contract_date, baseline_contract_expiry, last_known_contract_expiry, last_renewal_date)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(player_id, save_id) DO UPDATE SET
+        tracked_contract_date=excluded.tracked_contract_date,
+        baseline_contract_expiry=excluded.baseline_contract_expiry,
+        last_known_contract_expiry=excluded.last_known_contract_expiry,
+        last_renewal_date=excluded.last_renewal_date;
+    `);
+
     const playerStmt = db.prepare(`
       INSERT INTO players (player_id, name, position_id, alt_positions, nationality, dob, height, weight, preferred_foot, photo_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -2110,8 +2241,44 @@ function importFifaData(jsonPayload) {
         JSON.stringify(p.attributes || {}),   // season_start_attributes_json — same
         syncTimestamp
       ]);
+
+      // Injury episode transitions — see player_injury_history in
+      // schema.sql. Only reacts to a CHANGE from last sync (via
+      // openInjuryEpisodeByPlayer, built before this loop started), so a
+      // player who's been injured for 10 syncs in a row gets exactly one
+      // row, not one per sync.
+      if (activeSaveId) {
+        const hadOpenEpisode = openInjuryEpisodeByPlayer.has(p.player_id);
+        if (p.injury && !hadOpenEpisode) {
+          injuryOpenStmt.run([activeSaveId, p.player_id, syncInGameDate]);
+        } else if (!p.injury && hadOpenEpisode) {
+          injuryCloseStmt.run([syncInGameDate, openInjuryEpisodeByPlayer.get(p.player_id)]);
+        }
+      }
+
+      // Contract renewal tracking — see player_contract_state in
+      // schema.sql. A new contract_date (re-signing after leaving, or a
+      // fresh deal) resets the baseline from scratch; otherwise, any
+      // change in contract_expiry from what was last recorded stamps a
+      // fresh last_renewal_date, so a second renewal isn't stuck showing
+      // the first one's date.
+      if (activeSaveId) {
+        const existing = contractStateByPlayer.get(p.player_id);
+        const contractDate = p.contract_date || '';
+        const contractExpiry = p.contract_expiry || '';
+        if (!existing || existing.trackedContractDate !== contractDate) {
+          // Fresh contract stint — no renewal yet by definition.
+          contractStateUpsertStmt.run([p.player_id, activeSaveId, contractDate, contractExpiry, contractExpiry, null]);
+        } else if (contractExpiry !== existing.lastKnownExpiry) {
+          contractStateUpsertStmt.run([p.player_id, activeSaveId, contractDate, existing.baselineExpiry, contractExpiry, syncInGameDate]);
+        }
+        // else: same contract, same expiry as last sync — no-op, row unchanged.
+      }
     });
 
+    injuryOpenStmt.free();
+    injuryCloseStmt.free();
+    contractStateUpsertStmt.free();
     playerStmt.free();
     statsStmt.free();
     db.run('COMMIT;');
@@ -2292,18 +2459,26 @@ function getCurrentSeasonForSave(saveId) {
   return (fallback.length > 0 && fallback[0].values.length > 0) ? fallback[0].values[0][0] : null;
 }
 
-// "All Time" squad view: current roster's bio/contract/club info (same as
-// getSquadFromDB for the current season), but goals/assists/appearances/etc
-// summed across every season each player has been with the club, and
-// avg_rating as an appearances-weighted average across those seasons —
-// same aggregation pattern already used client-side for a player's
+// "All Time" squad view: current/last-known bio/contract/club info (same
+// shape as getSquadFromDB), but goals/assists/appearances/etc summed
+// across every season each player has been with the club, and avg_rating
+// as an appearances-weighted average across those seasons — same
+// aggregation pattern already used client-side for a player's
 // competitions breakdown. Scoped to this save specifically (a player_id
 // is a global EA FC id — the same real player could theoretically show
 // up in a different save too, so the aggregation must not cross saves).
+//
+// FIXED: previously joined "cur" to the CURRENT season specifically
+// (cur.season_id = ${seasonId}), an INNER JOIN — so anyone who left the
+// club before the current season (no row for that exact season_id) was
+// silently excluded from "All Time" entirely, not just missing their
+// stats. "latest" now resolves each player's most recent season_id FOR
+// THIS SAVE regardless of whether that's the current season, so a
+// long-departed player still shows up with their last-known bio/overall/
+// club from whenever they actually left — same "last known" convention
+// getPastPlayers already uses for the Former Players tab.
 function getAllTimeSquadStats(saveId = activeSaveId) {
   if (!db || !saveId) return [];
-  const seasonId = getCurrentSeasonForSave(saveId);
-  if (!seasonId) return [];
 
   const res = db.exec(`
     SELECT p.player_id, p.name, p.position_id, p.alt_positions, p.nationality, p.dob, p.height, p.weight,
@@ -2319,7 +2494,13 @@ function getAllTimeSquadStats(saveId = activeSaveId) {
            SUM(s.avg_rating * s.appearances) as t_rating_weighted,
            cur.updated_at, p.youth_reveal_tier
     FROM players p
-    JOIN player_season_stats cur ON cur.player_id = p.player_id AND cur.season_id = ${seasonId}
+    JOIN (
+      SELECT ps.player_id, MAX(ps.season_id) as latest_season_id
+      FROM player_season_stats ps
+      JOIN seasons se3 ON se3.id = ps.season_id AND se3.save_id = ${saveId}
+      GROUP BY ps.player_id
+    ) latest ON latest.player_id = p.player_id
+    JOIN player_season_stats cur ON cur.player_id = p.player_id AND cur.season_id = latest.latest_season_id
     JOIN player_season_stats s ON s.player_id = p.player_id
     JOIN seasons se2 ON se2.id = s.season_id AND se2.save_id = ${saveId}
     GROUP BY p.player_id
@@ -2585,7 +2766,7 @@ function getSignedPlayers(saveId = activeSaveId) {
   if (!currentSeasonForSave) return [];
 
   const currentRes = db.exec(`
-    SELECT player_id, club_id, on_loan, updated_at, contract_date FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
+    SELECT player_id, club_id, on_loan, updated_at, contract_date, overall FROM player_season_stats WHERE season_id = ${currentSeasonForSave};
   `);
   const currentRows = currentRes.length > 0 ? currentRes[0].values : [];
 
@@ -2607,12 +2788,14 @@ function getSignedPlayers(saveId = activeSaveId) {
   // negotiation-memory deal which only exists if a sync happened to catch
   // it while it was still in memory.
   const contractDateByPlayer = new Map();
-  currentRows.forEach(([player_id, club_id, on_loan, updated_at, contract_date]) => {
+  const overallByPlayer = new Map();
+  currentRows.forEach(([player_id, club_id, on_loan, updated_at, contract_date, overall]) => {
     const isActive = !maxUpdatedAt || !updated_at || updated_at === maxUpdatedAt;
     if (isActive) {
       activeIds.push(player_id);
       if (!on_loan && userTeamId === null) userTeamId = club_id;
       contractDateByPlayer.set(player_id, contract_date || '');
+      overallByPlayer.set(player_id, overall || 0);
     }
   });
   if (userTeamId === null || activeIds.length === 0) return [];
@@ -2677,6 +2860,7 @@ function getSignedPlayers(saveId = activeSaveId) {
       name: bio.name || 'Unknown',
       position_id: bio.position_id || 0,
       dob: bio.dob || '',
+      overall: overallByPlayer.get(playerId) || 0,
       from_team: fromTeam,
       is_academy: isAcademy,
       signed_season: earliest ? earliest.year_label : null,
@@ -3127,6 +3311,8 @@ ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
 ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfers(saveId));
 ipcMain.handle('get-transfer-fees', (_event, saveId) => getTransferFees(saveId));
 ipcMain.handle('get-player-transfer-history', (_event, playerId, saveId) => getPlayerTransferHistory(playerId, saveId));
+ipcMain.handle('get-player-injury-history', (_event, playerId, saveId) => getPlayerInjuryHistory(playerId, saveId));
+ipcMain.handle('get-player-contract-renewal', (_event, playerId, saveId) => getPlayerContractRenewal(playerId, saveId));
 ipcMain.handle('get-saves-list', () => getSavesList());
 ipcMain.handle('select-save', (_event, saveId) => selectSave(saveId));
 ipcMain.handle('delete-save', (_event, saveId) => deleteSave(saveId));

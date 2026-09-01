@@ -1,6 +1,6 @@
 {
   "name": "fifa-career-companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Companion app for EA FC Career Mode",
   "main": "main.js",
   "scripts": {

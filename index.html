@@ -189,8 +189,44 @@
     }
 
     .home-dashboard-grid { display: grid; gap: 20px; margin-bottom: 20px; }
+    /* .home-grid-top's two cards (Upcoming Match / League Table) stretch to
+       match each other's height via grid's default align-items: stretch —
+       Upcoming Match is naturally taller, so League Table's short 5-row
+       table (plus an optional toggle button once there are >5 teams) used
+       to leave a big dead gap at the bottom of its now-taller card.
+       Centering vertically splits that leftover height evenly above/below
+       instead of dumping it all below the content — works whether there's
+       1 child (just the table) or 2 (table + button). Scoped to
+       #home-league-table-body specifically (not every .home-grid-top
+       card) since Upcoming Match's several stacked divs rely on their own
+       explicit margins to stay compactly grouped, not this. */
     .home-grid-top { grid-template-columns: 1fr 1fr; }
+    .home-grid-top .profile-card:has(#home-league-table-body) { display: flex; flex-direction: column; }
+    #home-league-table-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    /* .home-grid-mid pairs Team Record against .home-widget-stack (Captain
+       + Manager, TWO full cards stacked) — stretch makes Team Record's
+       card match that combined height, but its own content (a compact
+       stats grid + short competitions list + one button) is much shorter,
+       leaving a big dead gap at the bottom. Unlike League Table's fix
+       (centering a short, simple table), this card has three stacked
+       content blocks that should stay grouped together right under the
+       header, with only the trailing "View League History" button
+       pushed down to actually use the leftover space — margin-top: auto
+       on that button (inside a flex column) does exactly that. */
     .home-grid-mid { grid-template-columns: 1fr 1fr; }
+    .home-grid-mid .profile-card:has(#home-team-record-competitions) { display: flex; flex-direction: column; }
+    .home-grid-mid .profile-card:has(#home-team-record-competitions) > .home-toggle-btn { margin-top: auto; }
+    /* Bottom-anchoring the button (above) wasn't enough on its own — the
+       content itself still reads as sparse against the taller neighbor.
+       Scoped to THIS card's specific stat grid/competitions list (not the
+       shared .stats-summary-grid/.stat-box-item classes used elsewhere —
+       Trophies, the Calendar tab's Match Performance box, etc. — which
+       must stay their normal compact size) so just this instance reads as
+       substantial content instead of a few small numbers floating in a
+       big box. */
+    #home-team-record-body { padding: 20px 12px; }
+    #home-team-record-body .stat-box-item span { font-size: 12px; }
+    #home-team-record-body .stat-box-item strong { font-size: 26px; }
     .home-widget-stack { display: flex; flex-direction: column; gap: 20px; }
     .home-grid-stats { grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 1100px) {
@@ -595,8 +631,8 @@
           </select>
         </h3>
         <div class="stats-summary-grid" id="home-team-record-body"></div>
-        <div id="home-team-record-competitions" style="margin-top: 8px;"></div>
-        <button class="home-toggle-btn" style="margin-top: 10px;" onclick="openLeagueHierarchyModal()">View League History</button>
+        <div id="home-team-record-competitions" style="margin-top: 8px; margin-bottom: 10px;"></div>
+        <button class="home-toggle-btn" onclick="openLeagueHierarchyModal()">View League History</button>
       </div>
     </div>
 
@@ -757,6 +793,12 @@
           <option value="loaned">Loaned</option>
         </select>
       </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <label for="transfer-season-select" style="font-weight: bold; font-size: 14px;">Season:</label>
+        <select id="transfer-season-select" onchange="changeTransferSeason(this.value)">
+          <option value="current">Current Season</option>
+        </select>
+      </div>
       <input
         type="text"
         id="transfer-search"
@@ -766,11 +808,20 @@
       />
     </div>
 
+    <!-- Total Spent (Signed view) / Total Sale Value (Sold view) for
+         whatever season/search filter is currently applied — hidden for
+         Loaned, which has no fee data or season scoping (see
+         changeTransferSeason). -->
+    <div id="transfer-hub-total" style="font-size: 13px; color: var(--text-dim); margin-bottom: 10px; display: none;"></div>
+
     <div class="table-container">
       <table>
         <thead>
           <tr>
             <th onclick="sortTransfers('player_name')">Player ↕</th>
+            <th onclick="sortTransfers('position_id')">Pos ↕</th>
+            <th onclick="sortTransfers('age')">Age ↕</th>
+            <th onclick="sortTransfers('overall')">OVR ↕</th>
             <th onclick="sortTransfers('from_team')">From ↕</th>
             <th onclick="sortTransfers('to_team')">To ↕</th>
             <th id="transfer-detail-header" onclick="sortTransfers('detail')">Signed ↕</th>
@@ -778,7 +829,7 @@
           </tr>
         </thead>
         <tbody id="transfers-tbody">
-          <tr><td colspan="5" class="empty-state">No transfer data loaded.</td></tr>
+          <tr><td colspan="8" class="empty-state">No transfer data loaded.</td></tr>
         </tbody>
       </table>
     </div>
@@ -1285,6 +1336,14 @@
     let transferSortAscending = false;
     let previousActiveTab = 'home';
 
+    // Transfer Hub's season selector state — 'current' | a season id
+    // (string, since it comes off a <select>) | 'all_time'. Only affects
+    // the Signed/Sold views (filtered by signed_season/departed_season —
+    // see getTransferHubRows); Loaned always shows currently-active loans
+    // regardless of this, since loan tracking is current-state only,
+    // there's no historical loan list to filter (see changeTransferSeason).
+    let transferSeasonSelection = 'current';
+
     const POSITION_SORT_ORDER = {
       'GK': 1, 'SW': 2, 'LWB': 3, 'LB': 4, 'LCB': 5, 'CB': 6, 'RCB': 7, 'RB': 8, 'RWB': 9,
       'LDM': 10, 'CDM': 11, 'RDM': 12, 'LM': 13, 'LCM': 14, 'CM': 15, 'RCM': 16, 'RM': 17, 
@@ -1729,6 +1788,24 @@
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
+    // A loan's start/end always lands on a real transfer window boundary
+    // (June 1 = "Summer", January 1 = "Winter" — see
+    // getNextTransferWindowStart), so showing the exact calendar date
+    // ("Jun 1, 2026") was needless noise on top of already being easy to
+    // misread next to a second exact date right beside it — the window
+    // name alone says everything that actually varies. Falls back to the
+    // precise pretty date for the rare case a date DOESN'T land exactly
+    // on a window boundary, so nothing unusual is silently mislabeled.
+    function formatTransferWindowLabel(dateInput) {
+      const d = dateInput instanceof Date ? dateInput : parseBirthDate(dateInput);
+      if (!d || isNaN(d.getTime())) return dateInput ? String(dateInput) : null;
+      const month = d.getMonth() + 1;
+      const day = d.getDate();
+      if (month === 6 && day === 1) return `Summer ${d.getFullYear()}`;
+      if (month === 1 && day === 1) return `Winter ${d.getFullYear()}`;
+      return formatPrettyDate(d);
+    }
+
     // Single source of truth for an active loan's real start (window-
     // snapped, not the deal's agreement date), end, and snapped length —
     // shared by the profile header badge, the Transfer History card, and
@@ -1743,8 +1820,8 @@
       return {
         loanFee: (loanDeal && loanDeal.fee > 0) ? loanDeal.fee : null,
         startDate: windowStart,
-        startLabel: windowStart ? formatPrettyDate(windowStart) : null,
-        endLabel: player.loan_date_end ? formatPrettyDate(player.loan_date_end) : null,
+        startLabel: windowStart ? formatTransferWindowLabel(windowStart) : null,
+        endLabel: player.loan_date_end ? formatTransferWindowLabel(player.loan_date_end) : null,
         lengthLabel: snappedMonths !== null ? formatLoanLength(snappedMonths) : null,
         isOptionToBuy: !!player.is_loan_to_buy
       };
@@ -1864,6 +1941,119 @@
     // having the id baked into its onclick like the rest of the page does.
     let currentProfilePlayerId = null;
 
+    // Preseason/exhibition competitions that are real matches — so a
+    // player's own goals/assists/appearances from them should still
+    // count toward their stats — but aren't a real competition worth a
+    // named row of its own anywhere (Competitions breakdown or club-
+    // level records). Merged into one "Preseason Friendlies" bucket
+    // instead of being dropped, unlike "World's Game" (an established,
+    // separate decision to exclude it entirely, stats included too).
+    // Club-level records (Trophies/Team Record) are filtered
+    // server-side — see isExhibitionCompetitionName in main.js, which
+    // must be kept in sync with this one. Top-level (not nested in
+    // openPlayerProfile) since transformPlayersForTable needs it too.
+    //
+    // "COBk1924" turned out to be "COBJ1924" in a later sync — EA
+    // generates this one with a varying single letter, not a fixed
+    // string, so it's matched by pattern (COB + one letter + digits)
+    // instead of an exact name. Add new one-off real names (like
+    // "European International Cup") to EXHIBITION_COMPETITION_NAMES;
+    // add new randomized-code FORMATS to EXHIBITION_COMPETITION_PATTERNS.
+    const EXHIBITION_COMPETITION_NAMES = new Set([
+      'European International Cup'
+    ]);
+    const EXHIBITION_COMPETITION_PATTERNS = [
+      /^COB[A-Za-z]\d+$/
+    ];
+    function isExhibitionCompetitionName(name) {
+      if (!name) return false;
+      return EXHIBITION_COMPETITION_NAMES.has(name) || EXHIBITION_COMPETITION_PATTERNS.some(p => p.test(name));
+    }
+
+    // EA's play-off competitions sometimes carry an abbreviated "Lg <N>"
+    // tier prefix ("Lg Two Play-Offs") instead of the league's real name
+    // — unlike the PRIMARY league's own name, which already carries a
+    // real, version-dependent sponsor prefix ("EFL League Two"/"Sky Bet
+    // Championship") that must never be overwritten. Only rewrites names
+    // that literally START with the "Lg" abbreviation, so an
+    // already-correct sponsor-prefixed name is never touched. Applied at
+    // every place a raw comp_name reaches the screen — extend
+    // ABBREVIATED_TIER_NAMES below as new abbreviated forms turn up.
+    const ABBREVIATED_TIER_NAMES = {
+      one: 'EFL League One', '1': 'EFL League One',
+      two: 'EFL League Two', '2': 'EFL League Two',
+      three: 'EFL League Three', '3': 'EFL League Three'
+    };
+    function normalizeCompetitionName(name) {
+      if (!name) return name;
+      const abbrevMatch = /^lg\.?\s*(one|two|three|1|2|3)\b(.*)$/i.exec(name.trim());
+      if (!abbrevMatch) return name;
+      const full = ABBREVIATED_TIER_NAMES[abbrevMatch[1].toLowerCase()];
+      return full ? `${full}${abbrevMatch[2]}` : name;
+    }
+
+    function bucketExhibitionCompetitions(rawCompetitions) {
+      const kept = [];
+      let bucket = null;
+      (rawCompetitions || []).forEach(c => {
+        if (!isExhibitionCompetitionName(c.comp_name)) {
+          kept.push(c.comp_name ? { ...c, comp_name: normalizeCompetitionName(c.comp_name) } : c);
+          return;
+        }
+        if (!bucket) bucket = { appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 };
+        const apps = Number(c.appearances || 0);
+        bucket.appearances += apps;
+        bucket.goals += Number(c.goals || 0);
+        bucket.assists += Number(c.assists || 0);
+        bucket.clean_sheets += Number(c.clean_sheets || 0);
+        bucket.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
+      });
+      if (bucket) {
+        kept.push({
+          comp_name: 'Preseason Friendlies',
+          appearances: bucket.appearances,
+          goals: bucket.goals,
+          assists: bucket.assists,
+          clean_sheets: bucket.clean_sheets,
+          avg_rating: bucket.appearances > 0 ? bucket.__ratingWeightedSum / bucket.appearances : 0
+        });
+      }
+      return kept;
+    }
+
+    // Merges a player's per-season `.competitions` breakdowns (as returned
+    // by getPlayerHistory) into one all-time per-competition total,
+    // appearances-weighted avg rating same as everywhere else. Shared by
+    // the profile's "All Time" Stats view and the Former Players table's
+    // expandable competitions row — both want the exact same aggregation
+    // over a player's full history at the club, current or departed.
+    function buildAllTimeCompetitionsBreakdown(seasonsList) {
+      const map = new Map();
+      (seasonsList || []).forEach(s => {
+        (s.competitions || []).forEach(c => {
+          const key = c.comp_name || 'League/Cup';
+          if (!map.has(key)) {
+            map.set(key, { comp_name: key, appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
+          }
+          const entry = map.get(key);
+          const apps = Number(c.appearances || 0);
+          entry.appearances += apps;
+          entry.goals += Number(c.goals || 0);
+          entry.assists += Number(c.assists || 0);
+          entry.clean_sheets += Number(c.clean_sheets || 0);
+          entry.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
+        });
+      });
+      return Array.from(map.values()).map(e => ({
+        comp_name: e.comp_name,
+        appearances: e.appearances,
+        goals: e.goals,
+        assists: e.assists,
+        clean_sheets: e.clean_sheets,
+        avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
+      }));
+    }
+
     async function openPlayerProfile(identifier) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
@@ -1980,6 +2170,34 @@
         }
       }
 
+      // Injury episode history (see getPlayerInjuryHistory in main.js) —
+      // just onset/recovery dates for now, since Live Editor's DB schema
+      // has no injury-type/duration field to read. Feeds the Injury
+      // History card below; the episode count here is also what a future
+      // "injury prone" label would be based on.
+      let playerInjuryHistory = [];
+      if (player.player_id && window.api && window.api.getPlayerInjuryHistory) {
+        try {
+          playerInjuryHistory = (await window.api.getPlayerInjuryHistory(player.player_id, currentSaveId)) || [];
+        } catch (e) {
+          console.error('Failed to load player injury history:', e);
+        }
+      }
+
+      // "Contract Renewal" in the Contract & Financials card below — null
+      // (shown as N/A) means contract_expiry hasn't changed since this
+      // contract stint began; otherwise the in-game date of the most
+      // recent change (see getPlayerContractRenewal in main.js).
+      let playerContractRenewal = null;
+      if (player.player_id && window.api && window.api.getPlayerContractRenewal) {
+        try {
+          const renewal = await window.api.getPlayerContractRenewal(player.player_id, currentSaveId);
+          playerContractRenewal = (renewal && renewal.renewal_date) || null;
+        } catch (e) {
+          console.error('Failed to load player contract renewal:', e);
+        }
+      }
+
       // Career-cumulative stats (across every season, not just this
       // one) feed the Youth Mode potential reveal — see
       // formatPotentialDisplay/getCareerStatsMap.
@@ -2034,8 +2252,9 @@
       // instead of trusting the (possibly contaminated) raw columns.
       function cleanSeasonStats(raw) {
         const rawCompetitions = raw.competitions || [];
-        const competitions = rawCompetitions.filter(c => c.comp_name !== "World's Game");
-        const contaminated = competitions.length !== rawCompetitions.length;
+        const worldsGameFiltered = rawCompetitions.filter(c => c.comp_name !== "World's Game");
+        const contaminated = worldsGameFiltered.length !== rawCompetitions.length;
+        const competitions = bucketExhibitionCompetitions(worldsGameFiltered);
         if (!contaminated) {
           return {
             appearances: raw.appearances || 0,
@@ -2127,30 +2346,7 @@
       // All-time per-competition breakdown (appearances-weighted avg
       // rating, same convention as everywhere else) for the Stats card's
       // "All Time" view — summed across every season already loaded above.
-      const allTimeCompetitionsMap = new Map();
-      seasonsList.forEach(s => {
-        (s.competitions || []).forEach(c => {
-          const key = c.comp_name || 'League/Cup';
-          if (!allTimeCompetitionsMap.has(key)) {
-            allTimeCompetitionsMap.set(key, { comp_name: key, appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
-          }
-          const entry = allTimeCompetitionsMap.get(key);
-          const apps = Number(c.appearances || 0);
-          entry.appearances += apps;
-          entry.goals += Number(c.goals || 0);
-          entry.assists += Number(c.assists || 0);
-          entry.clean_sheets += Number(c.clean_sheets || 0);
-          entry.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
-        });
-      });
-      const allTimeCompetitions = Array.from(allTimeCompetitionsMap.values()).map(e => ({
-        comp_name: e.comp_name,
-        appearances: e.appearances,
-        goals: e.goals,
-        assists: e.assists,
-        clean_sheets: e.clean_sheets,
-        avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
-      }));
+      const allTimeCompetitions = buildAllTimeCompetitionsBreakdown(seasonsList);
 
       // One entry per season the player has ever recorded stats for (most
       // recent first, since seasonsList is already reversed for the
@@ -2286,6 +2482,18 @@
       const transferHistoryHtml = transferHistoryEntries.length > 0
         ? transferHistoryEntries.join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
+
+      // Just onset/recovery dates for now (see playerInjuryHistory fetch
+      // above) — no injury type/duration to show yet. Most recent episode
+      // first, matching Transfer History's ordering.
+      const injuryHistoryHtml = playerInjuryHistory.length > 0
+        ? playerInjuryHistory.map(ep => `
+            <div class="timeline-item">
+              <div class="timeline-title">Injured on ${formatPrettyDate(ep.start_date)}</div>
+              ${ep.end_date ? `<div style="font-size: 13px; color: var(--text-dim);">Recovered ${formatPrettyDate(ep.end_date)}</div>` : `<div style="font-size: 13px; color: #f85149;">Ongoing</div>`}
+            </div>
+          `).join('')
+        : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
 
       // Fail-safe for when the automatic Academy Graduate detection
       // (based on ever appearing in a youth_academy_snapshot export)
@@ -2532,12 +2740,10 @@
               ` : `
                 <div class="attr-list">
                   <div class="attr-item"><span>Market Value:</span> <strong style="color: var(--accent-color);">${formatMoney(player.market_value || player.value || estimateMarketValue(baseOvr, player.potential, playerAge, player.wage))}</strong></div>
-                  <div class="attr-item" title="Real fee from the game's transfer negotiation data, when known — this is what was actually paid to sign them, not an estimate of what they're worth now."><span>Transfer Fee:</span> <strong style="${getTransferFeeForPlayer(player.player_id) ? '' : 'color: var(--text-dim); font-style: italic; font-weight: normal;'}">${getTransferFeeForPlayer(player.player_id) ? formatMoney(getTransferFeeForPlayer(player.player_id)) : 'Unknown'}</strong></div>
                   <div class="attr-item"><span>Wage:</span> <strong>${formatWageAmount(player.wage)} / wk</strong></div>
                   <div class="attr-item"><span>Duration:</span> <strong>${formatDuration(player.duration_months)}</strong></div>
-                  <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.playerjointeamdate)}</strong></div>
-                  <div class="attr-item"><span>Contract Date:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
-                  <div class="attr-item"><span>Last Status Change:</span> <strong>${formatDateMMDDYYYY(player.last_status_change_date)}</strong></div>
+                  <div class="attr-item"><span>Joined Team:</span> <strong>${formatDateMMDDYYYY(player.contract_date)}</strong></div>
+                  <div class="attr-item" title="The in-game date this contract's expiry date last changed — N/A if it's never been renewed since joining."><span>Contract Renewal:</span> <strong>${playerContractRenewal ? formatDateMMDDYYYY(playerContractRenewal) : 'N/A'}</strong></div>
                   <div class="attr-item"><span>Contract Expires:</span> <strong>${player.contract_expiry || '2028'}</strong></div>
                 </div>
               `}
@@ -2550,6 +2756,13 @@
               </h3>
               <div>
                 ${transferHistoryHtml}
+              </div>
+            </div>
+
+            <div class="profile-card">
+              <h3>Injury History</h3>
+              <div>
+                ${injuryHistoryHtml}
               </div>
             </div>
           </div>
@@ -2586,7 +2799,7 @@
 
       const trophyLine = trophies.map(t => {
         const isLeague = !!findPyramidTier(t.comp_name);
-        return `${t.comp_name} ${isLeague ? 'Champion' : 'Winner'} ${shortenSeasonLabel(t.year_label)}`;
+        return `${normalizeCompetitionName(t.comp_name)} ${isLeague ? 'Champion' : 'Winner'} ${shortenSeasonLabel(t.year_label)}`;
       }).join(', ');
 
       const awardIcons = { golden_boot: '👟', playmaker: '🎯', golden_glove: '🧤' };
@@ -2834,11 +3047,15 @@
           return {
             player_id: p.player_id,
             player_name: p.name,
+            position_id: p.position_id,
+            dob: p.dob,
+            overall: p.overall,
             from_team: ourClub,
             to_team: p.current_club || 'Unknown',
             detail: dateLabel || p.departed_season || '—',
             detailSort: (soldDeal && soldDeal.deal_date) ? toSortableDateStr(soldDeal.deal_date) : '',
-            fee: getTransferFeeForPlayer(p.player_id)
+            fee: getTransferFeeForPlayer(p.player_id),
+            season_label: p.departed_season || null
           };
         });
       }
@@ -2860,6 +3077,9 @@
           return {
             player_id: p.player_id,
             player_name: p.name,
+            position_id: p.position_id,
+            dob: p.dob,
+            overall: p.overall,
             from_team: ourClub,
             to_team: p.club_name || 'Unknown Club',
             detail: rangeLabel,
@@ -2880,6 +3100,9 @@
         return {
           player_id: p.player_id,
           player_name: p.name,
+          position_id: p.position_id,
+          dob: p.dob,
+          overall: p.overall,
           from_team: p.from_team,
           to_team: ourClub,
           detail: dateLabel || p.signed_season || '—',
@@ -2888,7 +3111,8 @@
           // "Unknown" distinguishes "there's deliberately no fee" from
           // "we don't have fee data for this external signing".
           fee: p.is_academy ? null : getTransferFeeForPlayer(p.player_id),
-          feeDisplay: p.is_academy ? 'N/A' : null
+          feeDisplay: p.is_academy ? 'N/A' : null,
+          season_label: p.signed_season || null
         };
       });
     }
@@ -2911,11 +3135,40 @@
       const detailHeader = document.getElementById('transfer-detail-header');
       if (detailHeader) detailHeader.textContent = `${TRANSFER_HUB_DETAIL_LABELS[view] || 'Detail'} ↕`;
 
+      // Season selector's <select> is disabled to reflect that it does
+      // nothing for Loaned (loan tracking is current-state only — see
+      // transferSeasonSelection) rather than silently having no effect.
+      const seasonSelectEl = document.getElementById('transfer-season-select');
+      if (seasonSelectEl) seasonSelectEl.disabled = (view === 'loaned');
+
       let rows = getTransferHubRows(view);
 
+      // Season filter — Signed/Sold only (both carry season_label from
+      // getTransferHubRows); Loaned always shows every currently-active
+      // loan regardless of the selector, since there's no historical loan
+      // data to filter against.
+      if (view !== 'loaned') {
+        const yearLabel = resolveTransferSeasonYearLabel();
+        if (yearLabel) rows = rows.filter(t => t.season_label === yearLabel);
+      }
+
       rows.sort((a, b) => {
-        if (currentTransferSortColumn === 'fee') {
-          const valA = Number(a.fee || 0), valB = Number(b.fee || 0);
+        if (currentTransferSortColumn === 'player_name') {
+          const valA = getLastName(a.player_name).toLowerCase();
+          const valB = getLastName(b.player_name).toLowerCase();
+          return transferSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        }
+        if (currentTransferSortColumn === 'fee' || currentTransferSortColumn === 'overall') {
+          const valA = Number(a[currentTransferSortColumn] || 0), valB = Number(b[currentTransferSortColumn] || 0);
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
+        if (currentTransferSortColumn === 'age') {
+          const valA = computeAge(a.dob) ?? -1, valB = computeAge(b.dob) ?? -1;
+          return transferSortAscending ? valA - valB : valB - valA;
+        }
+        if (currentTransferSortColumn === 'position_id') {
+          const valA = POSITION_SORT_ORDER[getPositionInfo(a.position_id).label] || 99;
+          const valB = POSITION_SORT_ORDER[getPositionInfo(b.position_id).label] || 99;
           return transferSortAscending ? valA - valB : valB - valA;
         }
         // detail now shows a formatted date ("Jul 6, 2025") or a date range,
@@ -2937,20 +3190,42 @@
         );
       }
 
+      // Total Spent (Signed) / Total Sale Value (Sold) — sums whatever's
+      // currently filtered (season + search), so it stays accurate as
+      // either changes. Academy signings/unknown-fee sales contribute 0,
+      // same as their table row shows "N/A"/"Unknown" instead of a number.
+      const totalEl = document.getElementById('transfer-hub-total');
+      if (totalEl) {
+        if (view === 'signed' || view === 'sold') {
+          const total = rows.reduce((sum, t) => sum + (Number(t.fee) || 0), 0);
+          const label = view === 'signed' ? 'Total Spent' : 'Total Sale Value';
+          totalEl.textContent = `${label}: ${formatMoney(total)}`;
+          totalEl.style.display = '';
+        } else {
+          totalEl.style.display = 'none';
+        }
+      }
+
       if (rows.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No ${view} players found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-state">No ${view} players found.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = rows.map(t => `
+      tbody.innerHTML = rows.map(t => {
+        const posInfo = getPositionInfo(t.position_id);
+        return `
         <tr class="transfer-row">
           <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_id ?? t.player_name}')">${t.player_name}</strong></td>
+          <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
+          <td>${computeAge(t.dob) ?? '—'}</td>
+          <td><span class="rating-badge">${t.overall || '—'}</span></td>
           <td>${t.from_team}</td>
           <td>${t.to_team}</td>
           <td style="color: var(--accent-color); font-weight: 600;">${t.detail}</td>
           <td style="color: var(--text-dim); ${t.fee ? 'font-weight: 600; color: var(--accent-color);' : 'font-style: italic;'}">${t.feeDisplay || (t.fee ? formatMoney(t.fee) : 'Unknown')}</td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function transformPlayersForTable(rawList) {
@@ -2965,8 +3240,14 @@
         // breakdown instead of trusting the (possibly contaminated) raw
         // columns.
         const rawCompetitions = p.competitions || [];
-        const filteredCompetitions = rawCompetitions.filter(c => c.comp_name !== "World's Game");
-        const wasContaminated = filteredCompetitions.length !== rawCompetitions.length;
+        const worldsGameFiltered = rawCompetitions.filter(c => c.comp_name !== "World's Game");
+        const wasContaminated = worldsGameFiltered.length !== rawCompetitions.length;
+        // Preseason/exhibition entries (COBk1924, European International
+        // Cup, ...) are real matches that already count toward p.goals/
+        // p.appearances etc at export time (unlike World's Game above),
+        // so this only needs to relabel/merge them for display — see
+        // bucketExhibitionCompetitions.
+        const filteredCompetitions = bucketExhibitionCompetitions(worldsGameFiltered);
 
         const sumField = field => filteredCompetitions.reduce((s, c) => s + (c[field] || 0), 0);
         const goals = wasContaminated ? sumField('goals') : (p.goals || 0);
@@ -3064,6 +3345,22 @@
     async function changeSquadSeason(value) {
       squadSeasonSelection = value;
 
+      // All Time is every season the player has ever been with the club —
+      // a departed/transferred player is exactly what makes up the
+      // "former" part of that history, so hiding them would make the
+      // view lie about who's actually included. Forced on (and locked)
+      // here rather than just defaulting it, so it can't drift back off
+      // via the checkbox's own onchange while All Time stays selected.
+      const includeTransferredEl = document.getElementById('squad-include-transferred');
+      if (includeTransferredEl) {
+        if (value === 'all_time') {
+          includeTransferredEl.checked = true;
+          includeTransferredEl.disabled = true;
+        } else {
+          includeTransferredEl.disabled = false;
+        }
+      }
+
       if (value === 'current') {
         squadTableRows = currentPlayers;
         sortTable(currentSortColumn);
@@ -3099,6 +3396,47 @@
       `;
     }
 
+    // Resolves 'current'/'all_time'/a season id (string, off the <select>)
+    // to the year_label getTransferHubRows tagged each row with
+    // (signed_season/departed_season — see main.js) — null means "no
+    // filter" (all_time). Cached from the same getSeasonsList call the
+    // Squad page's selector already makes, so this doesn't need its own
+    // round trip on every render.
+    let transferSeasonsList = [];
+    function resolveTransferSeasonYearLabel() {
+      if (transferSeasonSelection === 'all_time') return null;
+      if (transferSeasonSelection === 'current') {
+        const current = transferSeasonsList.find(s => s.is_current);
+        return current ? current.year_label : null;
+      }
+      const match = transferSeasonsList.find(s => String(s.id) === String(transferSeasonSelection));
+      return match ? match.year_label : null;
+    }
+
+    function changeTransferSeason(value) {
+      transferSeasonSelection = value;
+      filterAndRenderTransfers();
+    }
+
+    async function populateTransferSeasonSelector() {
+      if (!window.api || !window.api.getSeasonsList) return;
+      transferSeasonsList = await window.api.getSeasonsList();
+      const select = document.getElementById('transfer-season-select');
+      if (!select) return;
+
+      const pastOptions = transferSeasonsList
+        .filter(s => !s.is_current)
+        .map(s => `<option value="${s.id}">${s.year_label}</option>`)
+        .join('');
+
+      select.innerHTML = `
+        <option value="current">Current Season</option>
+        ${pastOptions}
+        <option value="all_time">All Time</option>
+      `;
+      select.value = transferSeasonSelection;
+    }
+
     // Cached so the Transfer Hub's Sold view and a player's profile page
     // (Transfer History) can reuse this same fetch instead of each making
     // their own round trip — refreshed alongside the Former Players table.
@@ -3106,10 +3444,19 @@
     let pastPlayersSortColumn = 'departed_season';
     let pastPlayersSortAscending = false;
 
+    // Lazy-fetched all-time per-competition breakdown for each former
+    // player's expandable row (see toggleFormerPlayerCompetitions) —
+    // fetched once per player_id via getPlayerHistory (works for a
+    // departed player same as a current one — see main.js), not
+    // preloaded for the whole table since most rows never get expanded.
+    // Cleared whenever the Former Players list itself is refreshed.
+    let formerPlayerCompetitionsCache = new Map();
+
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
       const pastPlayers = await window.api.getPastPlayers(currentSaveId);
       currentPastPlayers = pastPlayers || [];
+      formerPlayerCompetitionsCache.clear();
       filterAndRenderTransfers(); // Sold view reads currentPastPlayers directly
       renderPastPlayersRows();
     }
@@ -3167,7 +3514,11 @@
       rows.sort((a, b) => {
         let valA = a[pastPlayersSortColumn];
         let valB = b[pastPlayersSortColumn];
-        if (pastPlayersSortColumn === 'position_id') {
+        if (pastPlayersSortColumn === 'name') {
+          valA = getLastName(a.name).toLowerCase();
+          valB = getLastName(b.name).toLowerCase();
+          return pastPlayersSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else if (pastPlayersSortColumn === 'position_id') {
           valA = getPositionInfo(a.position_id).label;
           valB = getPositionInfo(b.position_id).label;
         } else if (pastPlayersSortColumn === '__value' || pastPlayersSortColumn === '__soldFor') {
@@ -3186,8 +3537,11 @@
         const posInfo = getPositionInfo(p.position_id);
         const ovrLabel = p.overall_is_live ? p.overall : `${p.overall ?? '—'} (last known)`;
         return `
-          <tr>
-            <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong></td>
+          <tr class="player-row" id="former-row-${p.player_id}">
+            <td>
+              <span class="expand-icon" style="cursor: pointer; margin-right: 4px;" onclick="toggleFormerPlayerCompetitions(${p.player_id})" title="All-time competitions breakdown while at the club">▶</span>
+              <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong>
+            </td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
             <td>${p.__age ?? '—'}</td>
             <td><span class="rating-badge">${ovrLabel}</span></td>
@@ -3198,8 +3552,86 @@
             <td>${formatYearsActiveRange(p.joined_season, p.departed_season)}</td>
             <td>${p.years_active !== null && p.years_active !== undefined ? p.years_active : '—'}</td>
           </tr>
+          <tr class="detail-row" id="former-detail-${p.player_id}">
+            <td colspan="10"><div class="detail-wrapper"></div></td>
+          </tr>
         `;
       }).join('');
+    }
+
+    // All-time per-competition breakdown for one former player's
+    // expandable row — lazy-fetched via getPlayerHistory (works for a
+    // departed player exactly like a current one, see main.js) and
+    // cached in formerPlayerCompetitionsCache since most rows never get
+    // expanded and the underlying history never changes mid-session.
+    async function toggleFormerPlayerCompetitions(playerId) {
+      const mainRow = document.getElementById(`former-row-${playerId}`);
+      const detailRow = document.getElementById(`former-detail-${playerId}`);
+      if (!mainRow || !detailRow) return;
+
+      const isOpen = detailRow.classList.contains('open');
+      if (isOpen) {
+        detailRow.classList.remove('open');
+        mainRow.classList.remove('expanded');
+        return;
+      }
+      detailRow.classList.add('open');
+      mainRow.classList.add('expanded');
+
+      const wrapper = detailRow.querySelector('.detail-wrapper');
+      if (!wrapper) return;
+
+      if (formerPlayerCompetitionsCache.has(playerId)) {
+        renderFormerPlayerCompetitionsTable(wrapper, formerPlayerCompetitionsCache.get(playerId));
+        return;
+      }
+
+      wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Loading...</div>`;
+      if (!window.api || !window.api.getPlayerHistory) return;
+
+      const rawHistory = await window.api.getPlayerHistory(parseInt(playerId, 10)) || [];
+      const cleanedSeasons = rawHistory.map(cleanSeasonStats);
+      const breakdown = buildAllTimeCompetitionsBreakdown(cleanedSeasons);
+      formerPlayerCompetitionsCache.set(playerId, breakdown);
+
+      // The row may have been collapsed again while the fetch was in
+      // flight — don't paint into a wrapper the user already closed.
+      if (detailRow.classList.contains('open')) {
+        renderFormerPlayerCompetitionsTable(wrapper, breakdown);
+      }
+    }
+
+    function renderFormerPlayerCompetitionsTable(wrapper, competitions) {
+      if (!competitions || competitions.length === 0) {
+        wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded.</div>`;
+        return;
+      }
+      wrapper.innerHTML = `
+        <table class="sub-table">
+          <thead>
+            <tr>
+              <th>Competition</th>
+              <th>Apps</th>
+              <th>Goals</th>
+              <th>Assists</th>
+              <th>Clean Sheets</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${competitions.map(c => `
+              <tr>
+                <td>${c.comp_name || 'League/Cup'}</td>
+                <td>${c.appearances || 0}</td>
+                <td>${c.goals || 0}</td>
+                <td>${c.assists || 0}</td>
+                <td>${c.clean_sheets || 0}</td>
+                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
     }
 
     // No longer feeds the Transfer Hub table (see getTransferHubRows) —
@@ -3351,6 +3783,7 @@
       processIncomingTransfers(bundle.transfers || []);
 
       populateSquadSeasonSelector();
+      populateTransferSeasonSelector();
       renderPastPlayersTable();
       refreshSignedPlayers();
       refreshTransferFees();
@@ -4227,10 +4660,10 @@
       }
 
       container.innerHTML = `
-        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;">Competitions</div>
+        <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Competitions</div>
         ${results.map(r => `
-          <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0;">
-            <span>${r.comp_name}</span>
+          <div style="display: flex; justify-content: space-between; font-size: 15px; padding: 5px 0;">
+            <span>${normalizeCompetitionName(r.comp_name)}</span>
             <strong style="color: var(--accent-color);">${r.standing || '—'}</strong>
           </div>
         `).join('')}
@@ -4463,7 +4896,7 @@
             <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: ${items.length > 0 ? '12px' : '0'} 0 6px;">Won This Save</div>
             ${won.map(w => `
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
-                <span>🏆 ${w.comp_name}${w.count > 1 ? ` <span style="color: var(--text-dim); font-size: 11px;">×${w.count}</span>` : ''}</span>
+                <span>🏆 ${normalizeCompetitionName(w.comp_name)}${w.count > 1 ? ` <span style="color: var(--text-dim); font-size: 11px;">×${w.count}</span>` : ''}</span>
                 <span style="font-size: 12px; color: var(--text-dim);">Last Won: <strong style="color: var(--accent-color);">${w.last_won}</strong></span>
               </div>
             `).join('')}
@@ -5544,7 +5977,7 @@
       const fullTable = (d.standings && d.standings.length > 0) ? buildStandingsTableHtml(d.standings, d.club_name) : '';
 
       return `
-        <div class="season-overview-title" style="font-size:20px;">${l.comp_name}</div>
+        <div class="season-overview-title" style="font-size:20px;">${normalizeCompetitionName(l.comp_name)}</div>
         <div class="season-overview-center" style="height:auto; padding: 4px 0 12px;">
           <div style="font-size:40px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:12px;">
             <span>${l.position ? ordinal(l.position) : l.standing_text}</span>
@@ -5566,7 +5999,7 @@
         <div style="margin-top: 28px;">
           ${d.other_competitions.map(c => `
             <div class="season-overview-comp-row">
-              <span>${c.comp_name}</span>
+              <span>${normalizeCompetitionName(c.comp_name)}</span>
               <span class="${c.standing === 'Winner' ? 'won' : ''}">${c.standing === 'Winner' ? '🏆 Winner' : c.standing}</span>
             </div>
           `).join('')}
@@ -5615,7 +6048,7 @@
 
     function seasonOverviewPageLeagueLeaders(d) {
       const l = d.league_leaders;
-      const leagueName = (d.league && d.league.comp_name) || 'League';
+      const leagueName = normalizeCompetitionName(d.league && d.league.comp_name) || 'League';
       return `
         <div class="season-overview-title" style="font-size:20px;">${leagueName} ${d.year_label} Leaders</div>
         <div class="season-overview-grid2" style="margin-top:24px;">
@@ -5726,17 +6159,18 @@
       let headlineIcon = '';
       let headlineText = 'No league recorded this season';
       if (d.league) {
+        const leagueDisplayName = normalizeCompetitionName(d.league.comp_name);
         if (d.league.won) {
-          headlineText = `Champions of ${d.league.comp_name}`;
+          headlineText = `Champions of ${leagueDisplayName}`;
         } else if (d.league.relegated) {
           headlineIcon = seasonOverviewTrendIcon('down');
-          headlineText = `Relegated — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
+          headlineText = `Relegated — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${leagueDisplayName}`;
         } else if (d.league.promoted) {
           headlineIcon = seasonOverviewTrendIcon('up');
           const promoLabel = d.league.promoted_via_playoff ? 'Promoted via Play-off' : 'Promoted';
-          headlineText = `${promoLabel} — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
+          headlineText = `${promoLabel} — ${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${leagueDisplayName}`;
         } else {
-          headlineText = `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${d.league.comp_name}`;
+          headlineText = `${d.league.position ? ordinal(d.league.position) : d.league.standing_text} in ${leagueDisplayName}`;
         }
       }
 
@@ -5755,7 +6189,7 @@
               ${headlineIcon}<span>${headlineText}</span>
             </div>
             ${seasonOverviewLeagueRecordLine(d.league_record)}
-            ${otherWins.length > 0 ? `<div style="color:var(--accent-color); font-weight:700; margin-top:4px;">${otherWins.map(c => c.comp_name).join(' · ')}</div>` : ''}
+            ${otherWins.length > 0 ? `<div style="color:var(--accent-color); font-weight:700; margin-top:4px;">${otherWins.map(c => normalizeCompetitionName(c.comp_name)).join(' · ')}</div>` : ''}
           </div>
 
           <div class="season-overview-grid2">
@@ -5779,7 +6213,7 @@
             </div>
 
             <div class="season-overview-stat-block">
-              <h4>${(d.league && d.league.comp_name) || 'League'} Leaders</h4>
+              <h4>${normalizeCompetitionName(d.league && d.league.comp_name) || 'League'} Leaders</h4>
               ${l.goals[0] ? `<div class="season-overview-stat-row"><span>Golden Boot</span><span>${l.goals[0].name} (${l.goals[0].value})</span></div>` : ''}
               ${l.assists[0] ? `<div class="season-overview-stat-row"><span>Most Assists</span><span>${l.assists[0].name} (${l.assists[0].value})</span></div>` : ''}
               ${l.clean_sheets[0] ? `<div class="season-overview-stat-row"><span>Golden Glove</span><span>${l.clean_sheets[0].name} (${l.clean_sheets[0].value})</span></div>` : ''}
@@ -5806,7 +6240,7 @@
           ${otherResults.length > 0 ? `
             <div style="margin-top:16px;">
               <h4 style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--accent-color); margin-bottom:8px;">Other Competitions</h4>
-              ${otherResults.map(c => `<div class="season-overview-stat-row"><span>${c.comp_name}</span><span>${c.standing}</span></div>`).join('')}
+              ${otherResults.map(c => `<div class="season-overview-stat-row"><span>${normalizeCompetitionName(c.comp_name)}</span><span>${c.standing}</span></div>`).join('')}
             </div>
           ` : ''}
         </div>
@@ -6010,6 +6444,7 @@
         processIncomingPlayers(envelope.data);
         refreshInferredTransfers();
         populateSquadSeasonSelector();
+        populateTransferSeasonSelector();
         // Awaited (unlike refreshInferredTransfers/populateSquadSeasonSelector
         // above, which don't feed the profile page) so that if a player's
         // profile is open when they transfer out/get promoted, it's rebuilt
