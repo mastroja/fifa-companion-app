@@ -387,11 +387,67 @@
     .attr-item strong { float: right; }
     
     .trait-badge { display: inline-block; background: #21262d; border: 1px solid var(--border-color); padding: 4px 8px; border-radius: 4px; font-size: 12px; margin: 2px; color: var(--accent-color); }
+
+    /* Manually-recorded PlayStyles — see buildPlaystyleBadge. Silver by
+       default, gold (.playstyle-plus) for PlayStyle+, mirroring the
+       in-game badge coloring. */
+    .playstyle-badge { display: inline-flex; align-items: center; gap: 8px; background: #21262d; border: 1px solid var(--border-color); padding: 4px 12px 4px 4px; border-radius: 20px; font-size: 12px; margin: 3px 4px 3px 0; color: var(--text-color); }
+    .playstyle-badge sup { font-size: 9px; }
+    /* Outer box reserves the full diamond footprint so the rotated inner
+       square (a diamond) doesn't overflow into the badge text next to it. */
+    .playstyle-badge-icon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .playstyle-badge-icon-inner { width: 20px; height: 20px; border-radius: 5px; transform: rotate(45deg); display: flex; align-items: center; justify-content: center; background: linear-gradient(145deg, #e6e9ee, #8b95a1); color: #20242b; }
+    .playstyle-badge-icon svg { width: 15px; height: 15px; transform: rotate(-45deg); }
+    .playstyle-badge.playstyle-plus { border-color: #b8860b88; color: #f0c419; }
+    .playstyle-badge.playstyle-plus .playstyle-badge-icon-inner { background: linear-gradient(145deg, #ffe08a, #b8860b); color: #3a2a00; }
+
+    /* "+ Playstyle" picker dialog */
+    .playstyle-picker-body { max-height: 60vh; overflow-y: auto; padding-right: 4px; }
+    .playstyle-picker-category { margin-bottom: 14px; }
+    .playstyle-picker-category:last-child { margin-bottom: 0; }
+    .playstyle-picker-category h4 { font-size: 12px; color: var(--accent-color); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .playstyle-picker-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .playstyle-picker-row { display: flex; align-items: center; gap: 8px; background: var(--expand-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+    .playstyle-picker-row.selected { border-color: #58a6ff88; }
+    .playstyle-picker-row.plus { border-color: #b8860b88; }
+    .playstyle-picker-name { flex: 1; }
+    .playstyle-picker-plus-toggle { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border-color); border-radius: 10px; padding: 2px 8px; white-space: nowrap; }
+    .playstyle-picker-row.plus .playstyle-picker-plus-toggle { color: #f0c419; border-color: #b8860b88; background: #b8860b1a; }
+    .playstyle-picker-plus-toggle.disabled { opacity: 0.4; pointer-events: none; }
     .timeline-item { position: relative; padding-left: 20px; border-left: 2px solid var(--border-color); margin-bottom: 12px; }
     .timeline-item:last-child { margin-bottom: 0; }
     .timeline-item::before { content: ''; position: absolute; left: -5px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-color); }
     .timeline-year { font-size: 12px; color: var(--text-dim); }
     .timeline-title { font-weight: 600; font-size: 14px; }
+
+    /* Injury History card — see buildInjuryHistoryEntryHtml. Left accent
+       color and cross-icon badge are just to make a stack of entries read
+       clearly as an injury log at a glance: red while ongoing, green once
+       closed. */
+    .injury-entry { position: relative; display: flex; gap: 12px; align-items: flex-start; background: var(--expand-bg); border: 1px solid var(--border-color); border-left: 3px solid #f85149; border-radius: 8px; padding: 12px 58px 12px 14px; margin-bottom: 10px; }
+    .injury-entry:last-child { margin-bottom: 0; }
+    .injury-entry.injury-entry-closed { border-left-color: #3fb950; }
+    .injury-entry.injury-entry-editing { border-left-color: var(--accent-color); }
+    .injury-entry-icon { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: #f8514922; color: #f85149; }
+    .injury-entry-icon svg { width: 14px; height: 14px; }
+    .injury-entry.injury-entry-closed .injury-entry-icon { background: #3fb95022; color: #3fb950; }
+    .injury-entry-remove, .injury-entry-edit { position: absolute; top: 8px; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 3px 7px; border-radius: 4px; line-height: 1; }
+    .injury-entry-remove { right: 8px; }
+    .injury-entry-edit { right: 34px; }
+    .injury-entry-remove:hover { color: #f85149; background: #f8514922; }
+    .injury-entry-edit:hover { color: var(--accent-color); background: #58a6ff22; }
+    .injury-entry-body { flex: 1; min-width: 0; }
+    .injury-entry-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+    .injury-entry-date { font-weight: 600; font-size: 14px; }
+    .injury-entry-status-badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 8px; border-radius: 4px; background: #da363322; border: 1px solid #da363355; color: #f85149; margin-top: 4px; }
+    .injury-entry-type-row { margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .injury-entry-type-row span { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+    .injury-type-select { font-size: 12px; padding: 3px 8px; }
+    .injury-summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+    .injury-summary-item span { display: block; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+    .injury-summary-item strong { font-size: 14px; }
+    .injury-summary-item input[type="date"] { font-size: 12px; padding: 3px 8px; width: 100%; box-sizing: border-box; }
+    .injury-entry-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 
     /* ================= End of Season Overview ================= */
     .season-overview-overlay {
@@ -970,6 +1026,19 @@
       <button class="back-btn" style="margin: 0;" onclick="document.getElementById('league-hierarchy-dialog').close()">✕</button>
     </div>
     <div id="league-hierarchy-body"></div>
+  </dialog>
+
+  <!-- Manual PlayStyle / PlayStyle+ picker (see openPlaystylePicker) -->
+  <dialog id="playstyle-picker-dialog" class="league-history-dialog" style="max-width: 560px;">
+    <div class="league-history-header">
+      <h3>Add PlayStyles</h3>
+      <button class="back-btn" style="margin: 0;" onclick="closePlaystylePicker()">✕</button>
+    </div>
+    <div id="playstyle-picker-body" class="playstyle-picker-body"></div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+      <button class="back-btn" style="margin: 0;" onclick="closePlaystylePicker()">Cancel</button>
+      <button class="back-btn" style="margin: 0; background: var(--accent-color); color: #0d1117; border-color: var(--accent-color);" onclick="applyPlaystyleSelection()">Apply</button>
+    </div>
   </dialog>
 
   <!-- Youth Squad Career Mode: end-of-season review -->
@@ -1940,6 +2009,15 @@
     // rather than the rebuilt profile content, so it reads this instead of
     // having the id baked into its onclick like the rest of the page does.
     let currentProfilePlayerId = null;
+    // Manually-recorded PlayStyles for whichever player's profile is
+    // currently open — fetched in openPlayerProfile, read by the
+    // "+ Playstyle" picker (openPlaystylePicker) to seed its selection.
+    let currentProfileManualPlayStyles = [];
+    // Injury episodes for whichever player's profile is currently open —
+    // fetched in openPlayerProfile, mutated in place by setInjuryEpisodeType
+    // so returnPlayerToFullFitness can validate a type was picked without
+    // an extra round trip.
+    let currentProfileInjuryHistory = [];
 
     // Preseason/exhibition competitions that are real matches — so a
     // player's own goals/assists/appearances from them should still
@@ -2052,6 +2130,545 @@
         clean_sheets: e.clean_sheets,
         avg_rating: e.appearances > 0 ? e.__ratingWeightedSum / e.appearances : 0
       }));
+    }
+
+    // "World's Game" is a generic/unlicensed exhibition bucket, not a real
+    // competition — excluded at export time going forward, but seasons
+    // synced before that fix still have it baked into both the stored
+    // totals and the competitions breakdown. Strip it and, when found,
+    // recompute the season's stats from the filtered breakdown instead of
+    // trusting the (possibly contaminated) raw columns. Top-level (not
+    // nested in openPlayerProfile) so every "All Time" competitions view —
+    // the profile, the Squad tab's All Time toggle, Former Players — can
+    // share one aggregation path via buildAllTimeCompetitionsBreakdown.
+    function cleanSeasonStats(raw) {
+      const rawCompetitions = raw.competitions || [];
+      const worldsGameFiltered = rawCompetitions.filter(c => c.comp_name !== "World's Game");
+      const contaminated = worldsGameFiltered.length !== rawCompetitions.length;
+      const competitions = bucketExhibitionCompetitions(worldsGameFiltered);
+      if (!contaminated) {
+        return {
+          appearances: raw.appearances || 0,
+          goals: raw.goals || 0,
+          assists: raw.assists || 0,
+          clean_sheets: raw.clean_sheets || 0,
+          avg_rating: raw.avg_rating || 0,
+          competitions
+        };
+      }
+      const sumField = field => competitions.reduce((s, c) => s + (c[field] || 0), 0);
+      let weightedSum = 0, totalApps = 0;
+      competitions.forEach(c => {
+        const r = Number(c.avg_rating || 0);
+        const apps = Number(c.appearances || 0);
+        if (r > 0 && apps > 0) { weightedSum += r * apps; totalApps += apps; }
+      });
+      return {
+        appearances: sumField('appearances'),
+        goals: sumField('goals'),
+        assists: sumField('assists'),
+        clean_sheets: sumField('clean_sheets'),
+        avg_rating: totalApps > 0 ? weightedSum / totalApps : 0,
+        competitions
+      };
+    }
+
+    // Lazy-fetched, cached career-at-club competitions breakdown for one
+    // player — every season they were ever with the club (not just their
+    // latest/last-known row), exhibition/friendly matches merged into one
+    // "Preseason Friendlies" bucket rather than shown as named
+    // competitions (see bucketExhibitionCompetitions). Works identically
+    // for a current or departed player since getPlayerHistory unions in
+    // former_player_snapshots — see main.js. Shared by the Squad tab's
+    // All Time view and the Former Players table so both show a real
+    // career total instead of whatever happened to be in the player's
+    // final synced season (which can be just preseason friendlies, for
+    // someone who left before real fixtures were played that season).
+    let allTimeCompetitionsCache = new Map();
+    async function fetchAllTimeCompetitionsForPlayer(playerId) {
+      if (allTimeCompetitionsCache.has(playerId)) return allTimeCompetitionsCache.get(playerId);
+      if (!window.api || !window.api.getPlayerHistory) return [];
+      const rawHistory = await window.api.getPlayerHistory(parseInt(playerId, 10)) || [];
+      const cleanedSeasons = rawHistory.map(cleanSeasonStats);
+      const breakdown = buildAllTimeCompetitionsBreakdown(cleanedSeasons);
+      allTimeCompetitionsCache.set(playerId, breakdown);
+      return breakdown;
+    }
+
+    function renderCompetitionsTableHtml(competitions) {
+      if (!competitions || competitions.length === 0) {
+        return `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded.</div>`;
+      }
+      return `
+        <table class="sub-table">
+          <thead>
+            <tr>
+              <th>Competition</th>
+              <th>Apps</th>
+              <th>Goals</th>
+              <th>Assists</th>
+              <th>Clean Sheets</th>
+              <th>Avg Rating</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${competitions.map(c => `
+              <tr>
+                <td>${c.comp_name || 'League/Cup'}</td>
+                <td>${c.appearances || 0}</td>
+                <td>${c.goals || 0}</td>
+                <td>${c.assists || 0}</td>
+                <td>${c.clean_sheets || 0}</td>
+                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // EA FC's real injury-type catalog (id/name/recovery-days), used to
+    // manually classify each injury_history episode from the profile's
+    // Injury History card — see the injury_type_id comment on
+    // player_injury_history in schema.sql. Live Editor exposes only a
+    // plain injured/not-injured boolean (no type field, and in practice
+    // it doesn't reliably flip back to false on recovery either), so
+    // start/end dates come from watching that flag transition while the
+    // TYPE has to be entered by hand once the user sees which injury it
+    // actually was in-game. `days` is intentionally not shown anywhere
+    // yet — kept only so a future feature (e.g. an expected-return
+    // estimate) doesn't need another migration to add it.
+    const INJURY_TYPES = [
+      { id: 0, name: 'None', days: 0 },
+      { id: 1, name: 'Pulled Calf', days: 10 },
+      { id: 2, name: 'Pulled Quad', days: 12 },
+      { id: 3, name: 'Pulled Hamstring', days: 14 },
+      { id: 4, name: 'Pulled Groin', days: 14 },
+      { id: 5, name: 'Pulled Hip Flexor', days: 14 },
+      { id: 6, name: 'Torn Calf Muscle', days: 28 },
+      { id: 7, name: 'Torn Quadricep Muscle', days: 35 },
+      { id: 8, name: 'Torn Hamstring', days: 30 },
+      { id: 9, name: 'Torn Groin', days: 30 },
+      { id: 10, name: 'Torn Hip Flexor', days: 28 },
+      { id: 11, name: 'Concussion', days: 10 },
+      { id: 12, name: 'Head Cut', days: 3 },
+      { id: 13, name: 'Broken Toe', days: 21 },
+      { id: 14, name: 'Broken Metatarsal', days: 49 },
+      { id: 15, name: 'Broken Ankle', days: 70 },
+      { id: 16, name: 'Broken Tibia', days: 120 },
+      { id: 17, name: 'Bruised Leg', days: 7 },
+      { id: 18, name: 'Femur Contusion', days: 10 },
+      { id: 19, name: 'Broken Rib', days: 28 },
+      { id: 20, name: 'Bruised Rib', days: 12 },
+      { id: 21, name: 'Bruised Tailbone', days: 12 },
+      { id: 22, name: 'Broken Tailbone', days: 35 },
+      { id: 23, name: 'Broken Collarbone', days: 49 },
+      { id: 24, name: 'Broken Shoulder', days: 70 },
+      { id: 25, name: 'Anterior Cruciate Ligament', days: 270 },
+      { id: 26, name: 'Lateral Collateral Ligament', days: 120 },
+      { id: 27, name: 'Medial Collateral Ligament', days: 84 },
+      { id: 28, name: 'Sprained Knee', days: 14 },
+      { id: 29, name: 'Hyper Extended Knee', days: 21 },
+      { id: 30, name: 'Dislocated Shoulder', days: 35 },
+      { id: 31, name: 'Broken Elbow', days: 49 },
+      { id: 32, name: 'Bruised Elbow', days: 7 },
+      { id: 33, name: 'Sprained Ankle', days: 18 },
+      { id: 34, name: 'Abdominal Strain', days: 14 },
+      { id: 35, name: 'Achilles Strain', days: 21 },
+      { id: 36, name: 'Achilles Tendon Rupture', days: 210 },
+      { id: 37, name: 'Knock', days: 3 },
+      { id: 38, name: 'Illness', days: 5 },
+      { id: 39, name: 'Hamstring', days: 14 },
+      { id: 40, name: 'Fractured Cheekbone', days: 28 },
+      { id: 41, name: 'Dead Leg', days: 5 },
+      { id: 42, name: 'Chest Injury', days: 10 },
+      { id: 43, name: 'Broken Nose', days: 14 },
+      { id: 44, name: 'Broken Hand', days: 35 },
+      { id: 45, name: 'Broken Foot', days: 49 },
+      { id: 46, name: 'Broken Finger', days: 14 },
+      { id: 47, name: 'Broken Arm', days: 49 }
+    ];
+
+    function injuryTypeName(injuryTypeId) {
+      if (injuryTypeId == null) return 'Unclassified';
+      const type = INJURY_TYPES.find(t => t.id === injuryTypeId);
+      return type ? type.name : 'Unclassified';
+    }
+
+    function computeInjuryDurationDays(startDate, endDate) {
+      if (!startDate || !endDate) return null;
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+      return Math.max(0, Math.round((end - start) / 86400000));
+    }
+
+    // Persists an episode's injury-type classification (id 1-47, or null
+    // to clear back to unclassified) and updates the in-memory copy the
+    // whole card was rendered from, so returnPlayerToFullFitness below can
+    // validate synchronously without waiting on this IPC round trip. Any
+    // failure is surfaced with an alert (not just console.error) so a
+    // selection that silently didn't save is never mistaken for one that
+    // did — if it fails for you, the alert's message is exactly what to
+    // report back.
+    async function setInjuryEpisodeType(episodeId, injuryTypeId) {
+      const episode = (currentProfileInjuryHistory || []).find(e => e.id === episodeId);
+      if (episode) episode.injury_type_id = injuryTypeId;
+      if (!window.api || !window.api.setInjuryEpisodeType) {
+        alert('Injury type could not be saved — the app\'s API bridge is unavailable. Try restarting the app.');
+        return;
+      }
+      try {
+        await window.api.setInjuryEpisodeType(episodeId, injuryTypeId);
+      } catch (e) {
+        console.error('Failed to save injury type for episode', episodeId, e);
+        alert('Could not save the injury type: ' + (e && e.message ? e.message : e));
+      }
+    }
+
+    // id: unique per rendered instance, e.g. "select-42" for the live
+    // open-episode dropdown or "edit-type-42" for the edit form below —
+    // openEntry controls whether it persists immediately on change (open
+    // episodes) or just sits there for saveInjuryEpisodeEdit to read
+    // later (edit form on a closed episode).
+    function buildInjuryTypeSelectHtml(episode, idAttr, openEntry) {
+      const selectedId = episode.injury_type_id != null ? episode.injury_type_id : 0;
+      const onchange = openEntry
+        ? ` onchange="setInjuryEpisodeType(${episode.id}, parseInt(this.value, 10) === 0 ? null : parseInt(this.value, 10))"`
+        : '';
+      return `
+        <select id="${idAttr}" class="injury-type-select"${onchange}>
+          ${INJURY_TYPES.map(t => `<option value="${t.id}" ${t.id === selectedId ? 'selected' : ''}>${t.name}</option>`).join('')}
+        </select>
+      `;
+    }
+
+    // Manual fail-safe for when Live Editor's injury boolean doesn't
+    // reliably reset to false on a real in-game recovery (confirmed by
+    // the user for a specific case — see feedback_injury_tracking_
+    // workaround memory). Requires the injury type to already be set —
+    // once closed, the type is locked (see buildInjuryHistoryEntryHtml),
+    // so this is the last chance to get it right. Locks in the in-game
+    // "now" as the return date, same in-game-date source the automatic
+    // open/close detection uses server-side.
+    async function returnPlayerToFullFitness(episodeId) {
+      const episode = (currentProfileInjuryHistory || []).find(e => e.id === episodeId);
+      if (!episode || episode.injury_type_id == null) {
+        alert('Select an injury type before marking this player as returned to full fitness.');
+        return;
+      }
+      if (!window.api || !window.api.returnPlayerToFullFitness) return;
+      const endDate = currentIngameDate || new Date().toISOString().slice(0, 10);
+      try {
+        await window.api.returnPlayerToFullFitness(episodeId, endDate);
+      } catch (e) {
+        console.error('Failed to mark player returned to full fitness for episode', episodeId, e);
+        return;
+      }
+
+      // The DB's player_season_stats.injury is now cleared (see
+      // returnPlayerToFullFitness in main.js), but the client's own
+      // in-memory squad cache (currentPlayers/squadTableRows) won't pick
+      // that up until the next Live Editor sync rebuilds it from scratch
+      // — patch the cached player object directly so the "INJURED" badge
+      // clears everywhere right now (Squad tab, this profile) instead of
+      // silently waiting on a sync that may just re-set it anyway if the
+      // game's own flag is still stuck true.
+      [currentPlayers, squadTableRows].forEach(list => {
+        if (!Array.isArray(list)) return;
+        const cachedPlayer = list.find(p => p.player_id === currentProfilePlayerId);
+        if (cachedPlayer) cachedPlayer.injury = false;
+      });
+      renderTableRows();
+
+      if (currentProfilePlayerId) openPlayerProfile(currentProfilePlayerId);
+    }
+
+    // Lets the user delete a bad/duplicate/test injury record entirely —
+    // e.g. an episode opened from a false-positive sync, or one they just
+    // want off the list. Irreversible, hence the confirm().
+    async function deleteInjuryEpisode(episodeId) {
+      const confirmed = confirm('Remove this injury record? This cannot be undone.');
+      if (!confirmed) return;
+      if (!window.api || !window.api.deleteInjuryEpisode) return;
+      try {
+        await window.api.deleteInjuryEpisode(episodeId);
+      } catch (e) {
+        console.error('Failed to delete injury episode', episodeId, e);
+        alert('Could not remove this injury record: ' + (e && e.message ? e.message : e));
+        return;
+      }
+      if (currentProfilePlayerId) openPlayerProfile(currentProfilePlayerId);
+    }
+
+    // Which closed episode (if any) is currently showing its edit form —
+    // see startEditInjuryEpisode/buildInjuryHistoryEntryHtml. Only one at
+    // a time; re-rendered via rerenderInjuryHistoryList rather than a
+    // full openPlayerProfile so the rest of the page doesn't flicker.
+    let editingInjuryEpisodeId = null;
+
+    function rerenderInjuryHistoryList() {
+      const container = document.getElementById('injury-history-list');
+      if (!container) return;
+      container.innerHTML = (currentProfileInjuryHistory && currentProfileInjuryHistory.length > 0)
+        ? currentProfileInjuryHistory.map(buildInjuryHistoryEntryHtml).join('')
+        : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
+    }
+
+    function startEditInjuryEpisode(episodeId) {
+      editingInjuryEpisodeId = episodeId;
+      rerenderInjuryHistoryList();
+    }
+
+    function cancelEditInjuryEpisode() {
+      editingInjuryEpisodeId = null;
+      rerenderInjuryHistoryList();
+    }
+
+    // Commits the edit form's date/type inputs for a closed episode. Lets
+    // the user fix a wrong date or type after the fact — e.g. Live
+    // Editor's polling noticed the injury/recovery a sync late, or the
+    // type was picked wrong originally.
+    async function saveInjuryEpisodeEdit(episodeId) {
+      const startInput = document.getElementById(`edit-start-${episodeId}`);
+      const endInput = document.getElementById(`edit-end-${episodeId}`);
+      const typeSelect = document.getElementById(`edit-type-${episodeId}`);
+      const startDate = startInput ? startInput.value : '';
+      const endDate = endInput ? endInput.value : '';
+      const rawType = typeSelect ? parseInt(typeSelect.value, 10) : 0;
+      const injuryTypeId = rawType === 0 ? null : rawType;
+
+      if (!startDate || !endDate) {
+        alert('Both the injury date and return date are required.');
+        return;
+      }
+      if (new Date(endDate) < new Date(startDate)) {
+        alert("The return date can't be before the injury date.");
+        return;
+      }
+      if (injuryTypeId == null) {
+        alert('Select an injury type before saving.');
+        return;
+      }
+      if (!window.api || !window.api.updateInjuryEpisode) return;
+      try {
+        await window.api.updateInjuryEpisode(episodeId, startDate, endDate, injuryTypeId);
+      } catch (e) {
+        console.error('Failed to update injury episode', episodeId, e);
+        alert('Could not save changes: ' + (e && e.message ? e.message : e));
+        return;
+      }
+
+      const episode = (currentProfileInjuryHistory || []).find(e => e.id === episodeId);
+      if (episode) {
+        episode.start_date = startDate;
+        episode.end_date = endDate;
+        episode.injury_type_id = injuryTypeId;
+      }
+      editingInjuryEpisodeId = null;
+      rerenderInjuryHistoryList();
+    }
+
+    // Small custom "medical cross" glyph (not an emoji) for the entry
+    // icon — red while the episode's open, green once it's closed (see
+    // .injury-entry-closed .injury-entry-icon).
+    function injuryEntryIconSvg() {
+      return `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 3h4v6h6v4h-6v6h-4v-6H4V9h6z"/></svg>`;
+    }
+
+    // One episode's card in the Injury History list. An open episode gets
+    // an injury-type dropdown (see buildInjuryTypeSelectHtml) and the
+    // "Returned to Full Fitness" fail-safe button; a closed one (whether
+    // closed automatically or via that button) normally gets the clean
+    // 4-field "final entry" the user asked for — Injury Date, Injury
+    // Type, Return Date, Injury Length, read-only — but switches to an
+    // editable form (date inputs + type dropdown + Save/Cancel) when its
+    // id matches editingInjuryEpisodeId, via the "Edit" button next to
+    // Remove. The left accent color and icon are just to make a card
+    // visually read as "an injury" at a glance when several are stacked.
+    function buildInjuryHistoryEntryHtml(ep) {
+      const removeBtn = `<button class="injury-entry-remove" onclick="deleteInjuryEpisode(${ep.id})" title="Remove this injury record">✕</button>`;
+
+      if (!ep.end_date) {
+        return `
+          <div class="injury-entry injury-entry-open">
+            ${removeBtn}
+            <div class="injury-entry-icon">${injuryEntryIconSvg()}</div>
+            <div class="injury-entry-body">
+              <div class="injury-entry-row">
+                <div>
+                  <div class="injury-entry-date">Injured on ${formatPrettyDate(ep.start_date)}</div>
+                  <span class="injury-entry-status-badge">ONGOING</span>
+                </div>
+                <button class="refresh-btn" style="font-size: 12px; padding: 4px 10px;" onclick="returnPlayerToFullFitness(${ep.id})" title="Use this if the player has recovered in-game but Live Editor's injury flag hasn't cleared on its own">✅ Returned to Full Fitness</button>
+              </div>
+              <div class="injury-entry-type-row">
+                <span>Injury Type</span>
+                ${buildInjuryTypeSelectHtml(ep, `select-${ep.id}`, true)}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const editBtn = `<button class="injury-entry-edit" onclick="startEditInjuryEpisode(${ep.id})" title="Edit this injury record">✎</button>`;
+
+      if (editingInjuryEpisodeId === ep.id) {
+        return `
+          <div class="injury-entry injury-entry-closed injury-entry-editing">
+            ${removeBtn}
+            <div class="injury-entry-icon">${injuryEntryIconSvg()}</div>
+            <div class="injury-entry-body">
+              <div class="injury-summary-grid">
+                <div class="injury-summary-item"><span>Injury Date</span><input type="date" id="edit-start-${ep.id}" value="${ep.start_date}"></div>
+                <div class="injury-summary-item"><span>Injury Type</span>${buildInjuryTypeSelectHtml(ep, `edit-type-${ep.id}`, false)}</div>
+                <div class="injury-summary-item"><span>Return Date</span><input type="date" id="edit-end-${ep.id}" value="${ep.end_date}"></div>
+              </div>
+              <div class="injury-entry-edit-actions">
+                <button class="refresh-btn" onclick="cancelEditInjuryEpisode()">Cancel</button>
+                <button class="refresh-btn" style="background: var(--accent-color); color: #0d1117; border-color: var(--accent-color);" onclick="saveInjuryEpisodeEdit(${ep.id})">Save</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const duration = computeInjuryDurationDays(ep.start_date, ep.end_date);
+      return `
+        <div class="injury-entry injury-entry-closed">
+          ${removeBtn}
+          ${editBtn}
+          <div class="injury-entry-icon">${injuryEntryIconSvg()}</div>
+          <div class="injury-entry-body">
+            <div class="injury-summary-grid">
+              <div class="injury-summary-item"><span>Injury Date</span><strong>${formatPrettyDate(ep.start_date)}</strong></div>
+              <div class="injury-summary-item"><span>Injury Type</span><strong>${injuryTypeName(ep.injury_type_id)}</strong></div>
+              <div class="injury-summary-item"><span>Return Date</span><strong>${formatPrettyDate(ep.end_date)}</strong></div>
+              <div class="injury-summary-item"><span>Injury Length</span><strong>${duration != null ? `${duration} day${duration === 1 ? '' : 's'}` : '—'}</strong></div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Full PlayStyle catalog (EA FC 26). No reliable Live Editor data
+    // source has been confirmed for these (see feedback_live_editor_data_
+    // safety memory — the underlying playerperks/archetypes tables were
+    // never safely probed), so the user records them by hand from the
+    // "+ Playstyle" picker on the profile instead. Each style can be
+    // added as a regular (silver) or PlayStyle+ (gold) version.
+    const PLAYSTYLE_CATALOG = {
+      Scoring: ['Acrobatic', 'Chip Shot', 'Dead Ball', 'Finesse Shot', 'Game Changer', 'Low Driven Shot', 'Power Shot', 'Precision Header'],
+      Passing: ['Incisive Pass', 'Inventive', 'Long Ball Pass', 'Pinged Pass', 'Tiki Taka', 'Whipped Pass'],
+      'Ball Control': ['First Touch', 'Press Proven', 'Rapid', 'Technical', 'Trickster'],
+      Defending: ['Aerial Fortress', 'Anticipate', 'Block', 'Intercept', 'Jockey', 'Slide Tackle'],
+      Physical: ['Bruiser', 'Enforcer', 'Long Throw', 'Quick Step', 'Relentless'],
+      Goalkeeping: ['Cross Claimer', 'Deflector', 'Far Reach', 'Far Throw', 'Footwork', 'Rush Out']
+    };
+    const PLAYSTYLE_CATEGORY_BY_NAME = Object.fromEntries(
+      Object.entries(PLAYSTYLE_CATALOG).flatMap(([category, names]) => names.map(name => [name, category]))
+    );
+
+    // No official icon source is safely embeddable (no confirmed free CDN,
+    // and EA's own icon assets are copyrighted) — these are small
+    // hand-drawn stand-ins, one per category, distinguished from each
+    // other by shape and colored silver/gold to mirror the game's regular
+    // vs PlayStyle+ look.
+    const PLAYSTYLE_CATEGORY_ICON_PATHS = {
+      Scoring: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2.75" fill="currentColor" stroke="none"/>',
+      Passing: '<path d="M4 12h14M13 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>',
+      'Ball Control': '<circle cx="12" cy="12" r="8"/><path d="M12 8l3 2-1.2 3.6H10.2L9 10z" fill="currentColor" stroke="none"/>',
+      Defending: '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" stroke-linejoin="round"/>',
+      Physical: '<path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="currentColor" stroke="none"/>',
+      Goalkeeping: '<path d="M8 13V6a1.5 1.5 0 013 0v5M11 11V4.5a1.5 1.5 0 013 0V11M14 11.5V6a1.5 1.5 0 013 0v7M17 11v2a5 5 0 01-5 5h-1a5 5 0 01-4.6-3L5 11.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    };
+    function playstyleCategoryIconSvg(category) {
+      const path = PLAYSTYLE_CATEGORY_ICON_PATHS[category] || PLAYSTYLE_CATEGORY_ICON_PATHS.Scoring;
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${path}</svg>`;
+    }
+
+    function buildPlaystyleBadge(name, plus) {
+      const category = PLAYSTYLE_CATEGORY_BY_NAME[name] || 'Scoring';
+      return `
+        <span class="playstyle-badge${plus ? ' playstyle-plus' : ''}" title="${plus ? 'PlayStyle+' : 'PlayStyle'}: ${name}">
+          <span class="playstyle-badge-icon"><span class="playstyle-badge-icon-inner">${playstyleCategoryIconSvg(category)}</span></span>
+          <span>${name}${plus ? ' <sup>+</sup>' : ''}</span>
+        </span>
+      `;
+    }
+
+    // In-memory draft of the picker dialog's selection while it's open —
+    // keyed by style name, value is {plus: boolean}. Only committed to the
+    // DB (via window.api.setManualPlayStyles) when Apply is clicked.
+    let playstylePickerDraft = new Map();
+    let playstylePickerPlayerId = null;
+
+    function openPlaystylePicker(playerId) {
+      playstylePickerPlayerId = playerId;
+      const existing = (currentProfileManualPlayStyles || []);
+      playstylePickerDraft = new Map(existing.map(ps => [ps.name, { plus: !!ps.plus }]));
+      renderPlaystylePickerBody();
+      const dialog = document.getElementById('playstyle-picker-dialog');
+      if (dialog) dialog.showModal();
+    }
+
+    function closePlaystylePicker() {
+      const dialog = document.getElementById('playstyle-picker-dialog');
+      if (dialog) dialog.close();
+    }
+
+    function togglePlaystyleSelection(name) {
+      if (playstylePickerDraft.has(name)) {
+        playstylePickerDraft.delete(name);
+      } else {
+        playstylePickerDraft.set(name, { plus: false });
+      }
+      renderPlaystylePickerBody();
+    }
+
+    function togglePlaystylePlus(name) {
+      const entry = playstylePickerDraft.get(name);
+      if (entry) entry.plus = !entry.plus;
+      renderPlaystylePickerBody();
+    }
+
+    function renderPlaystylePickerBody() {
+      const body = document.getElementById('playstyle-picker-body');
+      if (!body) return;
+      body.innerHTML = Object.entries(PLAYSTYLE_CATALOG).map(([category, names]) => `
+        <div class="playstyle-picker-category">
+          <h4>${category}</h4>
+          <div class="playstyle-picker-list">
+            ${names.map(name => {
+              const entry = playstylePickerDraft.get(name);
+              const selected = !!entry;
+              const plus = selected && entry.plus;
+              return `
+                <label class="playstyle-picker-row${selected ? ' selected' : ''}${plus ? ' plus' : ''}">
+                  <input type="checkbox" ${selected ? 'checked' : ''} onchange="togglePlaystyleSelection('${name}')">
+                  <span class="playstyle-picker-name">${name}</span>
+                  <span class="playstyle-picker-plus-toggle${!selected ? ' disabled' : ''}" onclick="event.preventDefault(); ${selected ? `togglePlaystylePlus('${name}')` : ''}">${plus ? '★ PlayStyle+' : 'PlayStyle+'}</span>
+                </label>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function applyPlaystyleSelection() {
+      if (!playstylePickerPlayerId || !window.api || !window.api.setManualPlayStyles) {
+        closePlaystylePicker();
+        return;
+      }
+      const styles = Array.from(playstylePickerDraft.entries()).map(([name, { plus }]) => ({ name, plus: !!plus }));
+      try {
+        await window.api.setManualPlayStyles(playstylePickerPlayerId, styles);
+      } catch (e) {
+        console.error('Failed to save manual PlayStyles:', e);
+      }
+      closePlaystylePicker();
+      openPlayerProfile(playstylePickerPlayerId);
     }
 
     async function openPlayerProfile(identifier) {
@@ -2183,6 +2800,19 @@
           console.error('Failed to load player injury history:', e);
         }
       }
+      currentProfileInjuryHistory = playerInjuryHistory;
+
+      // Manually-recorded PlayStyles (see the "+ Playstyle" picker) — not
+      // save-scoped, see player_manual_playstyles in schema.sql.
+      let manualPlayStyles = [];
+      if (player.player_id && window.api && window.api.getManualPlayStyles) {
+        try {
+          manualPlayStyles = (await window.api.getManualPlayStyles(player.player_id)) || [];
+        } catch (e) {
+          console.error('Failed to load manual PlayStyles:', e);
+        }
+      }
+      currentProfileManualPlayStyles = manualPlayStyles;
 
       // "Contract Renewal" in the Contract & Financials card below — null
       // (shown as N/A) means contract_expiry hasn't changed since this
@@ -2244,43 +2874,8 @@
       const posVal = attrs.gk_positioning ?? baseOvr;
       const refVal = attrs.reflexes ?? baseOvr;
 
-      // "World's Game" is a generic/unlicensed exhibition bucket, not a
-      // real competition — excluded at export time going forward, but
-      // seasons synced before that fix still have it baked into both the
-      // stored totals and the competitions breakdown. Strip it and, when
-      // found, recompute the season's stats from the filtered breakdown
-      // instead of trusting the (possibly contaminated) raw columns.
-      function cleanSeasonStats(raw) {
-        const rawCompetitions = raw.competitions || [];
-        const worldsGameFiltered = rawCompetitions.filter(c => c.comp_name !== "World's Game");
-        const contaminated = worldsGameFiltered.length !== rawCompetitions.length;
-        const competitions = bucketExhibitionCompetitions(worldsGameFiltered);
-        if (!contaminated) {
-          return {
-            appearances: raw.appearances || 0,
-            goals: raw.goals || 0,
-            assists: raw.assists || 0,
-            clean_sheets: raw.clean_sheets || 0,
-            avg_rating: raw.avg_rating || 0,
-            competitions
-          };
-        }
-        const sumField = field => competitions.reduce((s, c) => s + (c[field] || 0), 0);
-        let weightedSum = 0, totalApps = 0;
-        competitions.forEach(c => {
-          const r = Number(c.avg_rating || 0);
-          const apps = Number(c.appearances || 0);
-          if (r > 0 && apps > 0) { weightedSum += r * apps; totalApps += apps; }
-        });
-        return {
-          appearances: sumField('appearances'),
-          goals: sumField('goals'),
-          assists: sumField('assists'),
-          clean_sheets: sumField('clean_sheets'),
-          avg_rating: totalApps > 0 ? weightedSum / totalApps : 0,
-          competitions
-        };
-      }
+      // cleanSeasonStats is now top-level (see above buildAllTimeCompetitionsBreakdown) —
+      // shared with the Squad tab's All Time view and Former Players.
 
       // "League Two 25/26" rather than just "25/26" — same league-name +
       // shortened-year format as the League Stats tab's season dropdown,
@@ -2483,16 +3078,13 @@
         ? transferHistoryEntries.join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No transfer history recorded.</div>`;
 
-      // Just onset/recovery dates for now (see playerInjuryHistory fetch
-      // above) — no injury type/duration to show yet. Most recent episode
-      // first, matching Transfer History's ordering.
+      // Onset/recovery dates come from watching Live Editor's injury
+      // boolean flip (see playerInjuryHistory fetch above); the type is a
+      // manual classification (see buildInjuryHistoryEntryHtml/INJURY_TYPES)
+      // since no type field exists to read automatically. Most recent
+      // episode first, matching Transfer History's ordering.
       const injuryHistoryHtml = playerInjuryHistory.length > 0
-        ? playerInjuryHistory.map(ep => `
-            <div class="timeline-item">
-              <div class="timeline-title">Injured on ${formatPrettyDate(ep.start_date)}</div>
-              ${ep.end_date ? `<div style="font-size: 13px; color: var(--text-dim);">Recovered ${formatPrettyDate(ep.end_date)}</div>` : `<div style="font-size: 13px; color: #f85149;">Ongoing</div>`}
-            </div>
-          `).join('')
+        ? playerInjuryHistory.map(buildInjuryHistoryEntryHtml).join('')
         : `<div style="color: var(--text-dim); font-size: 13px;">No injuries recorded.</div>`;
 
       // Fail-safe for when the automatic Academy Graduate detection
@@ -2505,12 +3097,16 @@
         ? `<button class="refresh-btn" style="font-size: 12px; padding: 4px 10px;" onclick="markAcademyGraduate(${player.player_id})" title="Mark this player as an academy graduate — updates their transfer history and 'from' club to ${ourClub} Academy. Use this if the automatic detection missed their promotion.">🎓 Mark as ${ourClub} Academy Graduate</button>`
         : '';
 
-      const traitsHtml = (player.traits && player.traits.length > 0)
-        ? player.traits.map(t => `<span class="trait-badge">${t}</span>`).join('')
-        : `<span style="color: var(--text-dim); font-size: 13px;">No traits recorded.</span>`;
-
-      const playStylesHtml = (player.play_styles && player.play_styles.length > 0)
+      // Manually-recorded ones (icon + gold/silver, see buildPlaystyleBadge)
+      // come first, followed by whatever Live Editor's auto-detection
+      // managed to pick up (plain badges, no confirmed data source as of
+      // this writing — see PLAYSTYLE_CATALOG comment above).
+      const manualPlayStylesHtml = manualPlayStyles.map(ps => buildPlaystyleBadge(ps.name, ps.plus)).join('');
+      const autoPlayStylesHtml = (player.play_styles && player.play_styles.length > 0)
         ? player.play_styles.map(ps => `<span class="trait-badge" style="color: #58a6ff;">${ps}</span>`).join('')
+        : '';
+      const playStylesHtml = (manualPlayStylesHtml || autoPlayStylesHtml)
+        ? `${manualPlayStylesHtml}${autoPlayStylesHtml}`
         : `<span style="color: var(--text-dim); font-size: 13px;">No PlayStyles recorded.</span>`;
 
       const attributeGrowthHtml = buildAttributeGrowthHtml(chronoSeasons, isGoalkeeper);
@@ -2694,15 +3290,11 @@
             </div>
 
             <div class="profile-card">
-              <h3>Abilities & Traits</h3>
-              <div class="sub-attr-category">
-                <h4>Traits</h4>
-                <div>${traitsHtml}</div>
-              </div>
-              <div class="sub-attr-category" style="margin-top: 10px;">
-                <h4>PlayStyles</h4>
-                <div>${playStylesHtml}</div>
-              </div>
+              <h3>
+                <span>PlayStyles</span>
+                ${player.player_id ? `<button class="refresh-btn" style="font-size: 11px; padding: 3px 10px;" onclick="openPlaystylePicker(${player.player_id})">+ Playstyle</button>` : ''}
+              </h3>
+              <div>${playStylesHtml}</div>
             </div>
 
             <div class="profile-card">
@@ -2761,7 +3353,7 @@
 
             <div class="profile-card">
               <h3>Injury History</h3>
-              <div>
+              <div id="injury-history-list">
                 ${injuryHistoryHtml}
               </div>
             </div>
@@ -2900,6 +3492,8 @@
         const posInfo = getPositionInfo(p.position_id);
         const avgRatingVal = Number(p.avg_rating || 0) > 0 ? Number(p.avg_rating).toFixed(2) : '-';
         const jerseyDisplay = p.jersey_number ? `<span class="jersey-badge">#${p.jersey_number}</span>` : '';
+        const isCaptain = p.player_id != null && gameCaptainId != null && p.player_id == gameCaptainId;
+        const captainDisplay = isCaptain ? `<span class="captain-badge" title="Club Captain">Ⓒ</span>` : '';
 
         row.innerHTML = `
           <td>
@@ -2907,6 +3501,7 @@
               <span class="player-name">
                 <span class="expand-icon">▶</span>
                 ${p.name || 'Unknown'}
+                ${captainDisplay}
                 ${p.__clubStatus === 'loan' ? '<span class="loan-badge">ON LOAN</span>' : ''}
                 ${p.__clubStatus === 'transferred' ? '<span class="loan-badge">TRANSFERRED</span>' : ''}
                 ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
@@ -2928,45 +3523,60 @@
         `;
         tbody.appendChild(row);
 
-        if (p.competitions && p.competitions.length > 0) {
+        // The All Time view's own per-competition breakdown is fetched
+        // lazily and aggregated across every season the player was at the
+        // club (see fetchAllTimeCompetitionsForPlayer) — p.competitions
+        // here is only their LATEST season's data (see getAllTimeSquadStats
+        // in main.js), which under-reports anyone who departed before that
+        // season's real fixtures were played (can be just preseason
+        // friendlies). Current/past-season views are inherently
+        // season-scoped already, so p.competitions is correct as-is there
+        // and rendered synchronously, no fetch needed.
+        if (squadSeasonSelection === 'all_time' && p.player_id != null) {
           const detailRow = document.createElement('tr');
           detailRow.className = 'detail-row';
           detailRow.id = `detail-${idx}`;
-          
-          let subTableHTML = `
-            <div class="detail-wrapper">
-              <table class="sub-table">
-                <thead>
-                  <tr>
-                    <th>Competition</th>
-                    <th>Apps</th>
-                    <th>Goals</th>
-                    <th>Assists</th>
-                    <th>Clean Sheets</th>
-                    <th>Avg Rating</th>
-                  </tr>
-                </thead>
-                <tbody>
-          `;
+          detailRow.innerHTML = `<td colspan="12"><div class="detail-wrapper"></div></td>`;
 
-          p.competitions.forEach(c => {
-            subTableHTML += `
-              <tr>
-                <td>${c.comp_name || 'League/Cup'}</td>
-                <td>${c.appearances || 0}</td>
-                <td>${c.goals || 0}</td>
-                <td>${c.assists || 0}</td>
-                <td>${c.clean_sheets || 0}</td>
-                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
-              </tr>
-            `;
-          });
+          let loaded = false;
+          row.onclick = async (e) => {
+            if (!(e.target.closest('.player-name') || e.target.closest('.jersey-badge'))) {
+              openPlayerProfile(p.player_id || p.name);
+              return;
+            }
+            const isOpen = detailRow.classList.contains('open');
+            if (isOpen) {
+              detailRow.classList.remove('open');
+              row.classList.remove('expanded');
+              return;
+            }
+            detailRow.classList.add('open');
+            row.classList.add('expanded');
+            if (loaded) return;
 
-          subTableHTML += `</tbody></table></div>`;
-          detailRow.innerHTML = `<td colspan="12">${subTableHTML}</td>`;
-          
+            const wrapper = detailRow.querySelector('.detail-wrapper');
+            wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Loading...</div>`;
+            try {
+              const breakdown = await fetchAllTimeCompetitionsForPlayer(p.player_id);
+              loaded = true;
+              if (detailRow.classList.contains('open')) wrapper.innerHTML = renderCompetitionsTableHtml(breakdown);
+            } catch (err) {
+              console.error('Failed to load all-time competitions breakdown for player', p.player_id, err);
+              if (detailRow.classList.contains('open')) {
+                wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Couldn't load competitions data.</div>`;
+              }
+            }
+          };
+
+          tbody.appendChild(detailRow);
+        } else if (p.competitions && p.competitions.length > 0) {
+          const detailRow = document.createElement('tr');
+          detailRow.className = 'detail-row';
+          detailRow.id = `detail-${idx}`;
+          detailRow.innerHTML = `<td colspan="12"><div class="detail-wrapper">${renderCompetitionsTableHtml(p.competitions)}</div></td>`;
+
           row.onclick = (e) => {
-            if (e.target.classList.contains('clickable-name') || e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
+            if (e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
               detailRow.classList.toggle('open');
               row.classList.toggle('expanded');
             } else {
@@ -3444,19 +4054,10 @@
     let pastPlayersSortColumn = 'departed_season';
     let pastPlayersSortAscending = false;
 
-    // Lazy-fetched all-time per-competition breakdown for each former
-    // player's expandable row (see toggleFormerPlayerCompetitions) —
-    // fetched once per player_id via getPlayerHistory (works for a
-    // departed player same as a current one — see main.js), not
-    // preloaded for the whole table since most rows never get expanded.
-    // Cleared whenever the Former Players list itself is refreshed.
-    let formerPlayerCompetitionsCache = new Map();
-
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
       const pastPlayers = await window.api.getPastPlayers(currentSaveId);
       currentPastPlayers = pastPlayers || [];
-      formerPlayerCompetitionsCache.clear();
       filterAndRenderTransfers(); // Sold view reads currentPastPlayers directly
       renderPastPlayersRows();
     }
@@ -3539,7 +4140,7 @@
         return `
           <tr class="player-row" id="former-row-${p.player_id}">
             <td>
-              <span class="expand-icon" style="cursor: pointer; margin-right: 4px;" onclick="toggleFormerPlayerCompetitions(${p.player_id})" title="All-time competitions breakdown while at the club">▶</span>
+              <span class="expand-icon" style="cursor: pointer; margin-right: 4px;" onclick="toggleFormerPlayerCompetitions(${p.player_id})" title="Competitions breakdown for their whole time at the club">▶</span>
               <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong>
             </td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
@@ -3559,11 +4160,11 @@
       }).join('');
     }
 
-    // All-time per-competition breakdown for one former player's
-    // expandable row — lazy-fetched via getPlayerHistory (works for a
-    // departed player exactly like a current one, see main.js) and
-    // cached in formerPlayerCompetitionsCache since most rows never get
-    // expanded and the underlying history never changes mid-session.
+    // All-time (every season at the club, not just their last known one)
+    // per-competition breakdown for a former player's expandable row —
+    // lazy-fetched via fetchAllTimeCompetitionsForPlayer (works for a
+    // departed player exactly like a current one, see getPlayerHistory in
+    // main.js) and cached there since most rows never get expanded.
     async function toggleFormerPlayerCompetitions(playerId) {
       const mainRow = document.getElementById(`former-row-${playerId}`);
       const detailRow = document.getElementById(`former-detail-${playerId}`);
@@ -3580,58 +4181,21 @@
 
       const wrapper = detailRow.querySelector('.detail-wrapper');
       if (!wrapper) return;
-
-      if (formerPlayerCompetitionsCache.has(playerId)) {
-        renderFormerPlayerCompetitionsTable(wrapper, formerPlayerCompetitionsCache.get(playerId));
-        return;
-      }
-
       wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Loading...</div>`;
-      if (!window.api || !window.api.getPlayerHistory) return;
 
-      const rawHistory = await window.api.getPlayerHistory(parseInt(playerId, 10)) || [];
-      const cleanedSeasons = rawHistory.map(cleanSeasonStats);
-      const breakdown = buildAllTimeCompetitionsBreakdown(cleanedSeasons);
-      formerPlayerCompetitionsCache.set(playerId, breakdown);
-
-      // The row may have been collapsed again while the fetch was in
-      // flight — don't paint into a wrapper the user already closed.
-      if (detailRow.classList.contains('open')) {
-        renderFormerPlayerCompetitionsTable(wrapper, breakdown);
+      try {
+        const breakdown = await fetchAllTimeCompetitionsForPlayer(playerId);
+        // The row may have been collapsed again while the fetch was in
+        // flight — don't paint into a wrapper the user already closed.
+        if (detailRow.classList.contains('open')) {
+          wrapper.innerHTML = renderCompetitionsTableHtml(breakdown);
+        }
+      } catch (e) {
+        console.error('Failed to load competitions breakdown for former player', playerId, e);
+        if (detailRow.classList.contains('open')) {
+          wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">Couldn't load competitions data.</div>`;
+        }
       }
-    }
-
-    function renderFormerPlayerCompetitionsTable(wrapper, competitions) {
-      if (!competitions || competitions.length === 0) {
-        wrapper.innerHTML = `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded.</div>`;
-        return;
-      }
-      wrapper.innerHTML = `
-        <table class="sub-table">
-          <thead>
-            <tr>
-              <th>Competition</th>
-              <th>Apps</th>
-              <th>Goals</th>
-              <th>Assists</th>
-              <th>Clean Sheets</th>
-              <th>Avg Rating</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${competitions.map(c => `
-              <tr>
-                <td>${c.comp_name || 'League/Cup'}</td>
-                <td>${c.appearances || 0}</td>
-                <td>${c.goals || 0}</td>
-                <td>${c.assists || 0}</td>
-                <td>${c.clean_sheets || 0}</td>
-                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
     }
 
     // No longer feeds the Transfer Hub table (see getTransferHubRows) —
@@ -3764,6 +4328,12 @@
       if (!window.api || !window.api.selectSave) return;
       const bundle = await window.api.selectSave(parseInt(saveId, 10));
       if (!bundle) return;
+
+      // getPlayerHistory (behind fetchAllTimeCompetitionsForPlayer) reads
+      // whichever save main.js currently has active/selected server-side,
+      // so a cached breakdown from before the switch would silently be
+      // for the wrong save otherwise.
+      allTimeCompetitionsCache.clear();
 
       currentSaveId = bundle.save_id;
       currentYouthModeEnabled = !!bundle.youth_mode_enabled;
@@ -6441,6 +7011,7 @@
         clearTimeout(refreshTimeoutHandle);
         setRefreshButtonState(false);
         currentSaveIsSnapshot = false;
+        allTimeCompetitionsCache.clear(); // a fresh sync can add new season/competition data
         processIncomingPlayers(envelope.data);
         refreshInferredTransfers();
         populateSquadSeasonSelector();
