@@ -260,6 +260,10 @@
 
     .youth-mode-header-badge { background: #1a2e22; border-color: #3fb950; color: #3fb950; }
 
+    .connected-career-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); display: inline-block; flex-shrink: 0; }
+    .connected-career-dot.synced { background: #3fb950; box-shadow: 0 0 6px #3fb95088; }
+    .connected-career-dot.error { background: #f85149; box-shadow: 0 0 6px #f8514988; }
+
     .settings-wrap { position: relative; }
     .settings-gear-btn { font-size: 15px; padding: 6px 12px; }
     .settings-gear-btn.open { background: var(--hover-color); color: var(--accent-color); border-color: var(--accent-color); }
@@ -617,6 +621,33 @@
             <div class="settings-row" id="settings-youth-mode-row">
               <span id="settings-youth-mode-status" style="color: var(--text-dim);">Not enabled</span>
               <button class="refresh-btn" id="settings-youth-mode-btn" onclick="onYouthModeButtonClick()" title="Enable Youth Squad Career Mode for this save (permanent, cannot be turned off).">Enable</button>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h4>Connected Career</h4>
+            <div class="settings-row" id="connected-career-not-joined-row">
+              <span style="color: var(--text-dim);">Not connected</span>
+              <button class="refresh-btn" id="connected-career-join-btn" onclick="openConnectedCareerJoinDialog()" title="Keep player attributes and results in sync with another save via a shared code.">Join a Connected Career</button>
+            </div>
+            <div class="settings-row" id="connected-career-joined-row" style="display: none;">
+              <span style="display: inline-flex; align-items: center; gap: 6px;" id="connected-career-status-wrap">
+                <span class="connected-career-dot" id="connected-career-status-dot"></span>
+                <span id="connected-career-status-text">Not synced yet</span>
+              </span>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <button class="refresh-btn" id="connected-career-sync-btn" onclick="onConnectedCareerSyncNow()">Sync Now</button>
+                <button class="refresh-btn" id="connected-career-leave-btn" onclick="onConnectedCareerLeave()" title="Disconnect this save from the Connected Career (you can rejoin with a code any time).">Leave</button>
+              </div>
+            </div>
+            <div id="connected-career-mirror-row" style="display: none; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px;">
+              <span style="color: var(--text-dim); font-size: 12px;">Mirror squad (experimental -- each step is manual, see the tooltip on each button)</span>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="refresh-btn" onclick="onConnectedCareerExportSquad()" title="Step 1: writes a request file, then run export_player_full_row.lua in Live Editor's Lua Engine.">1. Export My Squad</button>
+                <button class="refresh-btn" onclick="onConnectedCareerPushFullRows()" title="Step 2: uploads what export_player_full_row.lua produced to Firebase. Run after step 1's Lua script.">2. Push Rows</button>
+                <button class="refresh-btn" onclick="onConnectedCareerPullMirrorCreates()" title="Step 3: pulls the other side's full rows and queues them, then run create_mirrored_players.lua in Live Editor's Lua Engine.">3. Pull &amp; Prepare Creates</button>
+                <button class="refresh-btn" onclick="onConnectedCareerConfirmMirrorResults()" title="Step 4: after running create_mirrored_players.lua, saves the real id mapping it resolved so future attribute syncs know where to write.">4. Confirm Results</button>
+              </div>
+              <div id="connected-career-mirror-status" style="font-size: 12px; color: var(--text-dim);"></div>
             </div>
           </div>
         </div>
@@ -1049,6 +1080,32 @@
     </div>
     <div id="season-review-body"></div>
     <button class="back-btn" style="margin-top: 16px; width: 100%; justify-content: center;" onclick="dismissSeasonReview()">Got it</button>
+  </dialog>
+
+  <!-- Connected Career: join-by-code flow, see connected_career/join_screen.js -->
+  <dialog id="connected-career-join-dialog" style="background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; max-width: 420px; width: 90%;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+      <h3 style="margin: 0;">Join a Connected Career</h3>
+      <button class="back-btn" style="margin: 0;" onclick="closeConnectedCareerJoinDialog()">✕</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim);">
+        League code
+        <input type="text" id="connected-career-code-input" placeholder="Enter the code you were given" style="padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--expand-bg); color: var(--text-color); font-size: 14px;" />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-dim);">
+        Which side are you?
+        <select id="connected-career-owner-select" style="padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--expand-bg); color: var(--text-color); font-size: 14px;">
+          <option value="me">Me</option>
+          <option value="gavin">Gavin</option>
+        </select>
+      </label>
+      <div id="connected-career-join-error" style="color: #f85149; font-size: 13px; display: none;"></div>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+      <button class="back-btn" style="margin: 0;" onclick="closeConnectedCareerJoinDialog()">Cancel</button>
+      <button class="back-btn" style="margin: 0; background: var(--accent-color); color: #0d1117; border-color: var(--accent-color);" onclick="submitConnectedCareerJoin()">Join</button>
+    </div>
   </dialog>
 
   <!-- Youth Squad Career Mode: occasional attention-grabbing popup for an
@@ -4655,6 +4712,165 @@
       const currencySelect = document.getElementById('settings-currency-select');
       if (currencySelect) currencySelect.value = currentCurrency;
     })();
+
+    // ------------------------------------------------------------------
+    // Connected Career — join-by-code sync toggle in the Settings panel.
+    // Everything real happens in the main process (connected_career/,
+    // reached only through window.api.connectedCareer*); this is purely
+    // the status display + join dialog wiring.
+    // ------------------------------------------------------------------
+    function formatConnectedCareerSyncTime(timestamp) {
+      if (!timestamp) return '';
+      try {
+        return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch (e) {
+        return '';
+      }
+    }
+
+    function renderConnectedCareerStatus(status) {
+      const notJoinedRow = document.getElementById('connected-career-not-joined-row');
+      const joinedRow = document.getElementById('connected-career-joined-row');
+      const mirrorRow = document.getElementById('connected-career-mirror-row');
+      if (!notJoinedRow || !joinedRow) return;
+
+      if (!status || !status.joined) {
+        notJoinedRow.style.display = '';
+        joinedRow.style.display = 'none';
+        if (mirrorRow) mirrorRow.style.display = 'none';
+        return;
+      }
+
+      notJoinedRow.style.display = 'none';
+      joinedRow.style.display = '';
+      if (mirrorRow) mirrorRow.style.display = 'flex';
+
+      const dot = document.getElementById('connected-career-status-dot');
+      const text = document.getElementById('connected-career-status-text');
+      const wrap = document.getElementById('connected-career-status-wrap');
+      if (wrap) wrap.title = `Code: ${status.leagueCode} · ${status.ownerId === 'gavin' ? 'Gavin' : 'Me'}`;
+
+      if (dot) dot.className = 'connected-career-dot' + (status.lastSyncOk === true ? ' synced' : status.lastSyncOk === false ? ' error' : '');
+      if (text) {
+        if (status.lastSyncOk === true) {
+          text.textContent = `Synced ${formatConnectedCareerSyncTime(status.lastSyncAt)}`;
+        } else if (status.lastSyncOk === false) {
+          text.textContent = `Sync failed: ${status.lastSyncError || 'unknown error'}`;
+        } else {
+          text.textContent = 'Not synced yet';
+        }
+      }
+    }
+
+    async function refreshConnectedCareerUI() {
+      if (!window.api || !window.api.connectedCareerStatus) return;
+      try {
+        const status = await window.api.connectedCareerStatus();
+        renderConnectedCareerStatus(status);
+      } catch (e) { /* main process not ready yet — leave the default "not connected" view */ }
+    }
+
+    function openConnectedCareerJoinDialog() {
+      const dialog = document.getElementById('connected-career-join-dialog');
+      const errorEl = document.getElementById('connected-career-join-error');
+      if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+      if (dialog && !dialog.open) dialog.showModal();
+    }
+
+    function closeConnectedCareerJoinDialog() {
+      const dialog = document.getElementById('connected-career-join-dialog');
+      if (dialog && dialog.open) dialog.close();
+    }
+
+    async function submitConnectedCareerJoin() {
+      const codeInput = document.getElementById('connected-career-code-input');
+      const ownerSelect = document.getElementById('connected-career-owner-select');
+      const errorEl = document.getElementById('connected-career-join-error');
+      const code = codeInput ? codeInput.value.trim() : '';
+      const owner = ownerSelect ? ownerSelect.value : 'me';
+
+      if (!code) {
+        if (errorEl) { errorEl.textContent = 'Enter a league code first.'; errorEl.style.display = ''; }
+        return;
+      }
+      if (!window.api || !window.api.connectedCareerJoin) return;
+
+      try {
+        await window.api.connectedCareerJoin(code, owner);
+        closeConnectedCareerJoinDialog();
+        await refreshConnectedCareerUI();
+      } catch (e) {
+        if (errorEl) { errorEl.textContent = e.message || 'Failed to join.'; errorEl.style.display = ''; }
+      }
+    }
+
+    async function onConnectedCareerSyncNow() {
+      const btn = document.getElementById('connected-career-sync-btn');
+      if (!window.api || !window.api.connectedCareerSyncNow) return;
+      if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+      try {
+        const result = await window.api.connectedCareerSyncNow();
+        renderConnectedCareerStatus(result.status);
+      } catch (e) {
+        await refreshConnectedCareerUI();
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Sync Now'; }
+      }
+    }
+
+    async function onConnectedCareerLeave() {
+      if (!window.api || !window.api.connectedCareerLeave) return;
+      const confirmed = confirm('Leave this Connected Career? You can rejoin with the same code any time.');
+      if (!confirmed) return;
+      await window.api.connectedCareerLeave();
+      await refreshConnectedCareerUI();
+    }
+
+    async function onConnectedCareerExportSquad() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerExportSquadForMirroring) return;
+      try {
+        const result = await window.api.connectedCareerExportSquadForMirroring();
+        if (statusEl) statusEl.textContent = `Requested export for ${result.queuedCount} player(s) — now run export_player_full_row.lua in Live Editor's Lua Engine.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerPushFullRows() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerPushFullRows) return;
+      try {
+        const result = await window.api.connectedCareerPushFullRows();
+        if (statusEl) statusEl.textContent = `Pushed ${result.pushedCount} full row(s) to Firebase. If 0, make sure you ran export_player_full_row.lua first.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerPullMirrorCreates() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerPullMirrorCreates) return;
+      try {
+        const result = await window.api.connectedCareerPullMirrorCreates();
+        if (statusEl) statusEl.textContent = `Queued ${result.queuedCount} player(s) to mirror — now run create_mirrored_players.lua in Live Editor's Lua Engine.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerConfirmMirrorResults() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerConfirmMirrorResults) return;
+      try {
+        const result = await window.api.connectedCareerConfirmMirrorResults();
+        if (statusEl) statusEl.textContent = `Confirmed mapping for ${result.confirmedCount} player(s) — future attribute syncs will target their real local id.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    refreshConnectedCareerUI();
 
     function setRefreshButtonState(isRefreshing) {
       const btn = document.getElementById('refresh-btn');

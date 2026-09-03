@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('api', {
   getSeasonAlerts: (saveId) => ipcRenderer.invoke('get-season-alerts', saveId),
   dismissMayReminder: (saveId, seasonId) => ipcRenderer.invoke('dismiss-may-reminder', saveId, seasonId),
 
+  connectedCareerStatus: () => ipcRenderer.invoke('connected-career-status'),
+  connectedCareerJoin: (code, owner) => ipcRenderer.invoke('connected-career-join', code, owner),
+  connectedCareerSyncNow: () => ipcRenderer.invoke('connected-career-sync-now'),
+  connectedCareerLeave: () => ipcRenderer.invoke('connected-career-leave'),
+  connectedCareerExportSquadForMirroring: () => ipcRenderer.invoke('connected-career-export-squad-for-mirroring'),
+  connectedCareerPushFullRows: () => ipcRenderer.invoke('connected-career-push-full-rows'),
+  connectedCareerPullMirrorCreates: () => ipcRenderer.invoke('connected-career-pull-mirror-creates'),
+  connectedCareerConfirmMirrorResults: () => ipcRenderer.invoke('connected-career-confirm-mirror-results'),
+
   onSquadUpdated: (callback) => ipcRenderer.on('squad-updated', (_event, data) => callback(data)),
   onCareerStatsUpdated: (callback) => ipcRenderer.on('career-stats-updated', (_event, data) => callback(data)),
   onTransfersUpdated: (callback) => ipcRenderer.on('transfers-updated', (_event, data) => callback(data)),

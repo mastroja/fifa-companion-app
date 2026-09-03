@@ -3477,6 +3477,33 @@ ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayR
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
 
+// ------------------------------------------------------------------
+// Connected Career (optional sync module -- see connected_career/,
+// which owns all of this feature's own logic). This only registers
+// the functions it's allowed to reach into the app with, plus a few
+// IPC handlers the Settings panel's "Connected Career" section calls
+// through; it doesn't run anything on its own or affect normal app
+// use otherwise.
+// ------------------------------------------------------------------
+try {
+  const connectedCareer = require('./connected_career');
+  connectedCareer.init({
+    getSquadFromDB,
+    getCurrentSeasonId: () => currentSeasonId,
+    userDataPath: app.getPath('userData'),
+  });
+  ipcMain.handle('connected-career-status', () => connectedCareer.getStatus());
+  ipcMain.handle('connected-career-join', (_event, code, owner) => connectedCareer.join(code, owner));
+  ipcMain.handle('connected-career-sync-now', () => connectedCareer.syncNow());
+  ipcMain.handle('connected-career-leave', () => connectedCareer.leave());
+  ipcMain.handle('connected-career-export-squad-for-mirroring', () => connectedCareer.exportSquadForMirroring());
+  ipcMain.handle('connected-career-push-full-rows', () => connectedCareer.pushFullRowsNow());
+  ipcMain.handle('connected-career-pull-mirror-creates', () => connectedCareer.pullMirrorCreatesNow());
+  ipcMain.handle('connected-career-confirm-mirror-results', () => connectedCareer.confirmMirrorResultsNow());
+} catch (err) {
+  console.error('[Connected Career] Failed to initialize -- Connected Career features unavailable this session.', err.message);
+}
+
 app.whenReady().then(async () => {
   await initDatabase();
   backfillSeasonLeagueNames();
