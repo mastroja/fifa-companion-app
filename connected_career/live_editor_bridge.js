@@ -42,6 +42,10 @@ const fs = require('fs');
 
 const PENDING_WRITES_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_pending_writes.json';
 const PENDING_RESULT_FIXES_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_pending_result_fixes.json';
+const EXPORT_REQUEST_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_export_request.json';
+const FULL_ROWS_EXPORT_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_full_rows_export.json';
+const PENDING_MIRROR_CREATES_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_pending_mirror_creates.json';
+const MIRROR_CREATE_RESULTS_PATH = 'C:\\Users\\Public\\ea_fc_connected_career_mirror_create_results.json';
 
 let impl = null;
 
@@ -102,10 +106,61 @@ function queueResultFix(record) {
   return true;
 }
 
+// Writes the request file export_player_full_row.lua reads -- the user
+// runs that script manually afterward, which produces
+// FULL_ROWS_EXPORT_PATH for readFullRowExport() below to pick up.
+function requestFullRowExport(playerIds) {
+  fs.writeFileSync(EXPORT_REQUEST_PATH, JSON.stringify({ player_ids: playerIds }, null, 2));
+  return true;
+}
+
+// Reads whatever export_player_full_row.lua last produced. Returns [] if
+// it hasn't been run yet (rather than throwing), since this is normally
+// polled/checked after asking the user to go run it.
+function readFullRowExport() {
+  if (!fs.existsSync(FULL_ROWS_EXPORT_PATH)) return [];
+  try {
+    const data = JSON.parse(fs.readFileSync(FULL_ROWS_EXPORT_PATH, 'utf8'));
+    return data.players || [];
+  } catch (err) {
+    return [];
+  }
+}
+
+// Queues full player rows (pulled from the OTHER owner via Firebase) for
+// create_mirrored_players.lua to create locally. Overwrites the whole
+// queue each time (unlike queuePlayerUpdate's merge) since this is meant
+// to be called with the complete "still need mirroring" set each time,
+// not accumulated incrementally.
+function queueMirrorCreates(records) {
+  fs.writeFileSync(PENDING_MIRROR_CREATES_PATH, JSON.stringify({ players: records }, null, 2));
+  return true;
+}
+
+// Reads the source_id -> local_id mapping create_mirrored_players.lua
+// resolved and wrote out (direct/already_present/offset -- see that
+// script's comments). Returns {} if it hasn't been run yet.
+function readMirrorCreateResults() {
+  if (!fs.existsSync(MIRROR_CREATE_RESULTS_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(MIRROR_CREATE_RESULTS_PATH, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+}
+
 module.exports = {
   configure,
   applyPlayerUpdate,
   applyForcedResult,
+  requestFullRowExport,
+  readFullRowExport,
+  queueMirrorCreates,
+  readMirrorCreateResults,
   PENDING_WRITES_PATH,
   PENDING_RESULT_FIXES_PATH,
+  EXPORT_REQUEST_PATH,
+  FULL_ROWS_EXPORT_PATH,
+  PENDING_MIRROR_CREATES_PATH,
+  MIRROR_CREATE_RESULTS_PATH,
 };

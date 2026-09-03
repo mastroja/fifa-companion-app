@@ -88,4 +88,51 @@ async function syncNow() {
   }
 }
 
-module.exports = { configure, join, leave, getStatus, syncNow };
+// ------------------------------------------------------------------
+// Mirroring -- three manual steps a "Mirror Squad" UI drives one at a
+// time, see sync_engine.js for the full explanation. requireJoined()
+// is shared by all three since none of them make sense unconfigured.
+// ------------------------------------------------------------------
+function requireJoined() {
+  const cfg = loadConfig();
+  if (!cfg) throw new Error('Not joined to a Connected Career yet.');
+  return cfg;
+}
+
+function exportSquadForMirroring() {
+  requireJoined();
+  const playerIds = squadAccessors.getSquadFromDB(squadAccessors.getCurrentSeasonId())
+    .map(p => p.player_id);
+  syncEngine.requestFullRowExport(playerIds);
+  return { queuedCount: playerIds.length };
+}
+
+async function pushFullRowsNow() {
+  requireJoined();
+  const rows = await syncEngine.pushFullRows();
+  return { pushedCount: rows.length };
+}
+
+async function pullMirrorCreatesNow() {
+  requireJoined();
+  const toCreate = await syncEngine.pullAndPrepareMirrorCreates();
+  return { queuedCount: toCreate.length };
+}
+
+async function confirmMirrorResultsNow() {
+  requireJoined();
+  const results = await syncEngine.confirmMirrorResults();
+  return { confirmedCount: Object.keys(results).length };
+}
+
+module.exports = {
+  configure,
+  join,
+  leave,
+  getStatus,
+  syncNow,
+  exportSquadForMirroring,
+  pushFullRowsNow,
+  pullMirrorCreatesNow,
+  confirmMirrorResultsNow,
+};

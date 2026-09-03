@@ -639,6 +639,16 @@
                 <button class="refresh-btn" id="connected-career-leave-btn" onclick="onConnectedCareerLeave()" title="Disconnect this save from the Connected Career (you can rejoin with a code any time).">Leave</button>
               </div>
             </div>
+            <div id="connected-career-mirror-row" style="display: none; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 8px;">
+              <span style="color: var(--text-dim); font-size: 12px;">Mirror squad (experimental -- each step is manual, see the tooltip on each button)</span>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button class="refresh-btn" onclick="onConnectedCareerExportSquad()" title="Step 1: writes a request file, then run export_player_full_row.lua in Live Editor's Lua Engine.">1. Export My Squad</button>
+                <button class="refresh-btn" onclick="onConnectedCareerPushFullRows()" title="Step 2: uploads what export_player_full_row.lua produced to Firebase. Run after step 1's Lua script.">2. Push Rows</button>
+                <button class="refresh-btn" onclick="onConnectedCareerPullMirrorCreates()" title="Step 3: pulls the other side's full rows and queues them, then run create_mirrored_players.lua in Live Editor's Lua Engine.">3. Pull &amp; Prepare Creates</button>
+                <button class="refresh-btn" onclick="onConnectedCareerConfirmMirrorResults()" title="Step 4: after running create_mirrored_players.lua, saves the real id mapping it resolved so future attribute syncs know where to write.">4. Confirm Results</button>
+              </div>
+              <div id="connected-career-mirror-status" style="font-size: 12px; color: var(--text-dim);"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -4721,16 +4731,19 @@
     function renderConnectedCareerStatus(status) {
       const notJoinedRow = document.getElementById('connected-career-not-joined-row');
       const joinedRow = document.getElementById('connected-career-joined-row');
+      const mirrorRow = document.getElementById('connected-career-mirror-row');
       if (!notJoinedRow || !joinedRow) return;
 
       if (!status || !status.joined) {
         notJoinedRow.style.display = '';
         joinedRow.style.display = 'none';
+        if (mirrorRow) mirrorRow.style.display = 'none';
         return;
       }
 
       notJoinedRow.style.display = 'none';
       joinedRow.style.display = '';
+      if (mirrorRow) mirrorRow.style.display = 'flex';
 
       const dot = document.getElementById('connected-career-status-dot');
       const text = document.getElementById('connected-career-status-text');
@@ -4811,6 +4824,50 @@
       if (!confirmed) return;
       await window.api.connectedCareerLeave();
       await refreshConnectedCareerUI();
+    }
+
+    async function onConnectedCareerExportSquad() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerExportSquadForMirroring) return;
+      try {
+        const result = await window.api.connectedCareerExportSquadForMirroring();
+        if (statusEl) statusEl.textContent = `Requested export for ${result.queuedCount} player(s) — now run export_player_full_row.lua in Live Editor's Lua Engine.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerPushFullRows() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerPushFullRows) return;
+      try {
+        const result = await window.api.connectedCareerPushFullRows();
+        if (statusEl) statusEl.textContent = `Pushed ${result.pushedCount} full row(s) to Firebase. If 0, make sure you ran export_player_full_row.lua first.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerPullMirrorCreates() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerPullMirrorCreates) return;
+      try {
+        const result = await window.api.connectedCareerPullMirrorCreates();
+        if (statusEl) statusEl.textContent = `Queued ${result.queuedCount} player(s) to mirror — now run create_mirrored_players.lua in Live Editor's Lua Engine.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
+    }
+
+    async function onConnectedCareerConfirmMirrorResults() {
+      const statusEl = document.getElementById('connected-career-mirror-status');
+      if (!window.api || !window.api.connectedCareerConfirmMirrorResults) return;
+      try {
+        const result = await window.api.connectedCareerConfirmMirrorResults();
+        if (statusEl) statusEl.textContent = `Confirmed mapping for ${result.confirmedCount} player(s) — future attribute syncs will target their real local id.`;
+      } catch (e) {
+        if (statusEl) statusEl.textContent = `Failed: ${e.message}`;
+      }
     }
 
     refreshConnectedCareerUI();

@@ -3496,6 +3496,10 @@ try {
   ipcMain.handle('connected-career-join', (_event, code, owner) => connectedCareer.join(code, owner));
   ipcMain.handle('connected-career-sync-now', () => connectedCareer.syncNow());
   ipcMain.handle('connected-career-leave', () => connectedCareer.leave());
+  ipcMain.handle('connected-career-export-squad-for-mirroring', () => connectedCareer.exportSquadForMirroring());
+  ipcMain.handle('connected-career-push-full-rows', () => connectedCareer.pushFullRowsNow());
+  ipcMain.handle('connected-career-pull-mirror-creates', () => connectedCareer.pullMirrorCreatesNow());
+  ipcMain.handle('connected-career-confirm-mirror-results', () => connectedCareer.confirmMirrorResultsNow());
 } catch (err) {
   console.error('[Connected Career] Failed to initialize -- Connected Career features unavailable this session.', err.message);
 }

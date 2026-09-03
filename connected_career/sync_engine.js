@@ -78,16 +78,29 @@ async function pushLocalSquad(playerIds) {
   return records;
 }
 
+// Only ever writes to a player_id that's been through the mirroring
+// process and has a confirmed local mapping (see the "Mirroring" section
+// below) -- a remote record for a player we haven't mirrored in yet is
+// skipped, not written to its raw source id, since that id might not
+// exist here at all or might belong to someone else entirely (the
+// Sebastian Nixon problem this whole mapping system exists to prevent).
 async function pullAndQueueRemoteUpdates() {
   if (!leagueCode || !ownerId) throw new Error('sync_engine not configured -- call configure({ code, owner }) first.');
   const remoteRecords = await firebaseClient.readPlayers(leagueCode, otherOwnerId);
   const toQueue = diffRemoteRecords(remoteRecords, lastAppliedAt);
+  const mirrorMap = await firebaseClient.readMirrorMappings(leagueCode, ownerId);
 
+  const applied = [];
   for (const record of toQueue) {
-    liveEditorBridge.applyPlayerUpdate(record);
+    const localId = mirrorMap.get(record.playerId);
+    if (localId === undefined) {
+      continue; // not mirrored in here yet -- nothing safe to write to
+    }
+    liveEditorBridge.applyPlayerUpdate({ ...record, playerId: localId });
     lastAppliedAt[record.playerId] = record.updatedAt;
+    applied.push(record);
   }
-  return toQueue;
+  return applied;
 }
 
 async function runSyncCycle(playerIds) {
@@ -95,11 +108,78 @@ async function runSyncCycle(playerIds) {
   return pullAndQueueRemoteUpdates();
 }
 
+// ------------------------------------------------------------------
+// Mirroring -- creating each side's generated players in the other's
+// save via CreatePlayer, so player_id becomes a stable, intentionally-
+// established cross-save key instead of a coincidence (see the
+// project's connected-career-architecture memory on why this exists:
+// the Sebastian Nixon incident, and CreatePlayer being confirmed safe
+// as long as it's given a real, captured headassetid). Three manual
+// steps, same pattern as the rest of this project -- nothing here is
+// automatic yet:
+//   1. requestFullRowExport(playerIds) -> user runs
+//      export_player_full_row.lua -> readFullRowExport() has data
+//   2. pushFullRows() -> uploads that to Firebase
+//   3. pullAndPrepareMirrorCreates() -> reads the OTHER owner's full
+//      rows, skips anything already mirrored in per Firebase's
+//      "mirrored" tracking, queues the rest -> user runs
+//      create_mirrored_players.lua
+//   4. confirmMirrorResults() -> reads the REAL source_id -> local_id
+//      mapping create_mirrored_players.lua resolved (direct/offset/
+//      already_present -- only Lua can determine this, via live
+//      PlayerExists/GetPlayerName checks) and persists it to Firebase.
+//      Only ids that have been through this step are ever written to
+//      by pullAndQueueRemoteUpdates above.
+// ------------------------------------------------------------------
+
+function requestFullRowExport(playerIds) {
+  return liveEditorBridge.requestFullRowExport(playerIds);
+}
+
+async function pushFullRows() {
+  if (!leagueCode || !ownerId) throw new Error('sync_engine not configured -- call configure({ code, owner }) first.');
+  const rows = liveEditorBridge.readFullRowExport();
+  if (rows.length === 0) return [];
+  await firebaseClient.writeFullRows(leagueCode, ownerId, rows);
+  return rows;
+}
+
+async function pullAndPrepareMirrorCreates() {
+  if (!leagueCode || !ownerId) throw new Error('sync_engine not configured -- call configure({ code, owner }) first.');
+  const remoteFullRows = await firebaseClient.readFullRows(leagueCode, otherOwnerId);
+  const alreadyMirrored = await firebaseClient.readMirrorMappings(leagueCode, ownerId);
+  const toCreate = remoteFullRows.filter(r => !alreadyMirrored.has(r.player_id));
+
+  if (toCreate.length > 0) {
+    liveEditorBridge.queueMirrorCreates(toCreate);
+  }
+  return toCreate;
+}
+
+// Reads the REAL mapping create_mirrored_players.lua resolved (only Lua
+// can determine this -- see that script) and persists it to Firebase.
+// Call this after the user has actually run that script, not before --
+// unlike pushLocalSquad/pullAndQueueRemoteUpdates, there's nothing to
+// mark optimistically here since the whole point of this mapping is
+// that Node can't know it in advance.
+async function confirmMirrorResults() {
+  if (!leagueCode || !ownerId) throw new Error('sync_engine not configured -- call configure({ code, owner }) first.');
+  const results = liveEditorBridge.readMirrorCreateResults();
+  const entries = Object.entries(results);
+  if (entries.length === 0) return {};
+  await firebaseClient.writeMirrorMappings(leagueCode, ownerId, results);
+  return results;
+}
+
 module.exports = {
   configure,
   pushLocalSquad,
   pullAndQueueRemoteUpdates,
   runSyncCycle,
+  requestFullRowExport,
+  pushFullRows,
+  pullAndPrepareMirrorCreates,
+  confirmMirrorResults,
   // exported for standalone/unit testing only
   diffRemoteRecords,
   toSyncRecords,

@@ -31,4 +31,8 @@ module.exports = {
   leave: () => joinScreen.leave(),
   getStatus: () => joinScreen.getStatus(),
   syncNow: () => joinScreen.syncNow(),
+  exportSquadForMirroring: () => joinScreen.exportSquadForMirroring(),
+  pushFullRowsNow: () => joinScreen.pushFullRowsNow(),
+  pullMirrorCreatesNow: () => joinScreen.pullMirrorCreatesNow(),
+  confirmMirrorResultsNow: () => joinScreen.confirmMirrorResultsNow(),
 };
