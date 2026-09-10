@@ -66,6 +66,7 @@
     .loan-badge { font-size: 11px; padding: 2px 6px; background: #388bfd22; border: 1px solid #388bfd55; border-radius: 4px; color: #58a6ff; margin-left: 6px; }
     .injury-badge { font-size: 11px; padding: 2px 6px; background: #da363322; border: 1px solid #da363355; border-radius: 4px; color: #f85149; margin-left: 6px; }
     .captain-badge { font-size: 14px; padding: 1px 6px; background: #e3b34122; border: 1px solid #e3b34155; border-radius: 4px; color: #e3b341; margin-left: 6px; font-weight: 700; }
+    .vice-captain-badge { font-size: 14px; padding: 1px 6px; background: #8b949e22; border: 1px solid #8b949e55; border-radius: 4px; color: #8b949e; margin-left: 6px; font-weight: 700; }
 
     .rating-badge { padding: 2px 8px; border-radius: 4px; font-weight: 700; background-color: #238636; color: #fff; }
     .pos-badge { padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; text-transform: uppercase; background-color: #21262d; border: 1px solid var(--border-color); }
@@ -203,19 +204,22 @@
     .home-grid-top { grid-template-columns: 1fr 1fr; }
     .home-grid-top .profile-card:has(#home-league-table-body) { display: flex; flex-direction: column; }
     #home-league-table-body { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-    /* .home-grid-mid pairs Team Record against .home-widget-stack (Captain
-       + Manager, TWO full cards stacked) — stretch makes Team Record's
-       card match that combined height, but its own content (a compact
-       stats grid + short competitions list + one button) is much shorter,
-       leaving a big dead gap at the bottom. Unlike League Table's fix
-       (centering a short, simple table), this card has three stacked
-       content blocks that should stay grouped together right under the
-       header, with only the trailing "View League History" button
-       pushed down to actually use the leftover space — margin-top: auto
-       on that button (inside a flex column) does exactly that. */
+    /* .home-grid-mid pairs Team Record against .home-widget-stack — a
+       Captain/Manager row on top, Trophies (full width of the column)
+       below — stretch makes Team Record's card match that combined
+       height, but its own content (a compact stats grid + short
+       competitions list + one button) is much shorter, leaving a big dead
+       gap at the bottom. Unlike League Table's fix (centering a short,
+       simple table), this card has three stacked content blocks that
+       should stay grouped together right under the header, with only the
+       trailing "View League History" button pushed down to actually use
+       the leftover space — margin-top: auto on that button (inside a flex
+       column) does exactly that. */
     .home-grid-mid { grid-template-columns: 1fr 1fr; }
     .home-grid-mid .profile-card:has(#home-team-record-competitions) { display: flex; flex-direction: column; }
     .home-grid-mid .profile-card:has(#home-team-record-competitions) > .home-toggle-btn { margin-top: auto; }
+    .home-captain-manager-row { display: flex; gap: 20px; }
+    .home-captain-manager-row .profile-card { flex: 1; min-width: 0; }
     /* Bottom-anchoring the button (above) wasn't enough on its own — the
        content itself still reads as sparse against the taller neighbor.
        Scoped to THIS card's specific stat grid/competitions list (not the
@@ -326,6 +330,61 @@
     .season-review-players li { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border-color); font-size: 14px; }
     .season-review-players li:last-child { border-bottom: none; }
     .season-review-players .ovr { font-weight: 700; color: #f0c674; }
+
+    .injury-report-list { list-style: none; margin: 0; padding: 0; max-height: 160px; overflow-y: auto; }
+    .injury-report-list li { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; border-left: 3px solid transparent; border-bottom: 1px solid var(--border-color); font-size: 13px; }
+    .injury-report-list li:last-child { border-bottom: none; }
+    .injury-report-list .injury-report-meta { font-size: 11px; }
+    /* Still out (red) vs. recovered by the end of the episode (green) —
+       "Currently Injured" rows are always ongoing, so always red;
+       "This Season" mixes both. */
+    .injury-report-list li.injury-ongoing { border-left-color: #f85149; }
+    .injury-report-list li.injury-ongoing .injury-report-meta { color: #f85149; }
+    .injury-report-list li.injury-recovered { border-left-color: #3fb950; }
+    .injury-report-list li.injury-recovered .injury-report-meta { color: #3fb950; }
+
+    .danger-zone-note { margin: 0 0 10px; font-size: 13px; color: var(--text-dim); }
+    .danger-zone-players { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+    .danger-zone-players li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border-color); font-size: 14px; }
+    .danger-zone-players li:last-child { border-bottom: none; }
+    /* Where a player's OVR sits between the league average and the cap —
+       green (average/average+1), yellow (above that, up to the cap), red
+       (over the cap) — same palette as the header count badge below,
+       colored on the OVR figure itself rather than the whole row. */
+    .danger-zone-players .ovr { font-weight: 700; }
+    .danger-zone-players .ovr.ovr-green { color: #3fb950; }
+    .danger-zone-players .ovr.ovr-yellow { color: #d29922; }
+    .danger-zone-players .ovr.ovr-red { color: #f85149; }
+    .danger-zone-name { display: flex; align-items: center; gap: 6px; }
+    .danger-zone-stats { display: flex; align-items: center; gap: 8px; }
+    .danger-zone-untouchable-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; line-height: 1; opacity: 0.3; flex-shrink: 0; }
+    .danger-zone-untouchable-btn:hover { opacity: 0.7; }
+    .danger-zone-untouchable-btn.active { opacity: 1; }
+    .danger-zone-sell-tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px; background: #f8514922; border: 1px solid #f8514955; color: #f85149; text-transform: uppercase; letter-spacing: 0.3px; }
+
+    .danger-zone-count-badge { font-size: 12px; padding: 2px 10px; border-radius: 12px; font-weight: 700; border: 1px solid; }
+    .danger-zone-count-badge.count-green { background: #3fb95022; border-color: #3fb95055; color: #3fb950; }
+    .danger-zone-count-badge.count-yellow { background: #d2992222; border-color: #d2992255; color: #d29922; }
+    .danger-zone-count-badge.count-red { background: #f8514922; border-color: #f8514955; color: #f85149; }
+
+    #youth-rules-dialog[open] { display: flex; flex-direction: column; }
+    .youth-rules-body-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 14px; margin-right: -14px; }
+    .youth-rules-section { margin-bottom: 18px; }
+    .youth-rules-section:last-child { margin-bottom: 0; }
+    .youth-rules-section h4 { margin: 0 0 8px; font-size: 13px; color: var(--accent-color); }
+    .youth-rules-note { margin: 8px 0 0; font-size: 12px; color: var(--text-dim); }
+    .youth-rules-cap-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .youth-rules-cap-table th, .youth-rules-cap-table td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border-color); }
+    .youth-rules-cap-table th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.4px; }
+    .youth-rules-cap-table td.num { text-align: center; }
+    .youth-rules-league { margin-bottom: 14px; }
+    .youth-rules-league:last-child { margin-bottom: 0; }
+    .youth-rules-league .league-name { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+    .youth-rules-league ul { list-style: none; margin: 0; padding: 0; }
+    .youth-rules-league li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; font-size: 12.5px; border-bottom: 1px dashed var(--border-color); }
+    .youth-rules-league li:last-child { border-bottom: none; }
+    .youth-rules-league li .outcome { color: var(--text-dim); }
+    .youth-rules-league li .rule { text-align: right; font-weight: 600; }
 
     .league-history-dialog {
       background: var(--card-bg);
@@ -440,6 +499,9 @@
     .injury-entry-edit { right: 34px; }
     .injury-entry-remove:hover { color: #f85149; background: #f8514922; }
     .injury-entry-edit:hover { color: var(--accent-color); background: #58a6ff22; }
+
+    .inline-edit-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 2px 5px; border-radius: 4px; line-height: 1; flex-shrink: 0; opacity: 0.45; }
+    .inline-edit-btn:hover { color: var(--accent-color); background: #58a6ff22; opacity: 1; }
     .injury-entry-body { flex: 1; min-width: 0; }
     .injury-entry-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
     .injury-entry-date { font-weight: 600; font-size: 14px; }
@@ -584,6 +646,7 @@
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <span class="badge youth-mode-header-badge" id="youth-mode-header-badge" style="display: none;" title="Youth Squad Career Mode is permanently enabled for this save.">🎓 Youth Mode Active</span>
+      <button class="refresh-btn" id="youth-mode-header-rules-btn" onclick="openYouthRulesDialog()" style="display: none; padding: 4px 10px;" title="View the Youth Squad Career Mode rules (rating cap, signing types, transfer rules).">📋 Rules</button>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
       <div class="settings-wrap" id="settings-wrap">
         <button class="refresh-btn settings-gear-btn" id="settings-gear-btn" onclick="toggleSettingsPanel()" title="Settings">⚙️</button>
@@ -620,7 +683,10 @@
             <h4>Youth Squad Career Mode</h4>
             <div class="settings-row" id="settings-youth-mode-row">
               <span id="settings-youth-mode-status" style="color: var(--text-dim);">Not enabled</span>
-              <button class="refresh-btn" id="settings-youth-mode-btn" onclick="onYouthModeButtonClick()" title="Enable Youth Squad Career Mode for this save (permanent, cannot be turned off).">Enable</button>
+              <div style="display: flex; gap: 6px;">
+                <button class="refresh-btn" id="settings-youth-mode-rules-btn" onclick="openYouthRulesDialog()" style="display: none;" title="Review the Youth Squad Career Mode rules.">📋 Rules</button>
+                <button class="refresh-btn" id="settings-youth-mode-btn" onclick="onYouthModeButtonClick()" title="Enable Youth Squad Career Mode for this save (permanent, cannot be turned off).">Enable</button>
+              </div>
             </div>
           </div>
           <div class="settings-section">
@@ -698,15 +764,24 @@
 
     <div class="home-dashboard-grid home-grid-mid">
       <div class="home-widget-stack">
-        <div class="profile-card home-widget">
-          <h3><span>Captain</span></h3>
-          <div id="home-captain-body"></div>
+        <div class="home-captain-manager-row">
+          <div class="profile-card home-widget">
+            <h3>
+              <span>Captain</span>
+              <span id="captaincy-header-controls"></span>
+            </h3>
+            <div id="home-captain-body"></div>
+          </div>
+          <div class="profile-card home-widget">
+            <h3><span>Manager</span></h3>
+            <div id="home-manager-body"></div>
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 6px;">Points Per Game</div>
+            <div id="home-ppg-body"></div>
+          </div>
         </div>
         <div class="profile-card home-widget">
-          <h3><span>Manager</span></h3>
-          <div id="home-manager-body"></div>
-          <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 6px;">Points Per Game</div>
-          <div id="home-ppg-body"></div>
+          <h3><span>Trophies</span></h3>
+          <div id="home-trophies-body"></div>
         </div>
       </div>
       <div class="profile-card home-widget">
@@ -721,11 +796,6 @@
         <div id="home-team-record-competitions" style="margin-top: 8px; margin-bottom: 10px;"></div>
         <button class="home-toggle-btn" onclick="openLeagueHierarchyModal()">View League History</button>
       </div>
-    </div>
-
-    <div class="profile-card home-widget">
-      <h3><span>Trophies</span></h3>
-      <div id="home-trophies-body"></div>
     </div>
 
     <div class="home-dashboard-grid home-grid-stats">
@@ -761,24 +831,55 @@
       </div>
     </div>
 
-    <div class="profile-card home-widget">
-      <h3><span>Expiring Contracts</span></h3>
-      <div id="home-expiring-body"></div>
+    <div class="home-dashboard-grid home-grid-top">
+      <div class="profile-card home-widget">
+        <h3><span>Future Stars</span></h3>
+        <div id="home-youth-body"></div>
+      </div>
+      <div class="profile-card home-widget">
+        <h3><span>Youth Academy</span></h3>
+        <div id="home-youth-academy-body"></div>
+      </div>
     </div>
 
-    <div class="profile-card home-widget">
-      <h3><span>Promising Youth</span></h3>
-      <div id="home-youth-body"></div>
+    <div class="home-dashboard-grid home-grid-top">
+      <div class="profile-card home-widget">
+        <h3><span>Expiring Contracts</span></h3>
+        <div id="home-expiring-body"></div>
+      </div>
+      <div class="profile-card home-widget">
+        <h3><span>Team Needs / Future Transfers</span></h3>
+        <div id="home-needs-watchlist-body"></div>
+      </div>
     </div>
 
-    <div class="profile-card home-widget">
-      <h3><span>Youth Academy</span></h3>
-      <div id="home-youth-academy-body"></div>
-    </div>
+    <div class="home-dashboard-grid home-grid-stats">
+      <!-- Youth Squad Career Mode: forward-looking companion to the
+           warning banner near the top of the page — that banner only
+           fires once the squad is ALREADY over the cap; this flags
+           still-growing players in the range below it, before it becomes
+           a season-end violation. See
+           computeYouthModeDangerZonePlayers/renderYouthModeDangerZone. -->
+      <div class="profile-card home-widget" id="youth-mode-danger-zone-card" style="display: none;">
+        <h3>
+          <span>⚠️ Overall Cap Watch</span>
+          <span class="danger-zone-count-badge" id="youth-mode-danger-zone-count"></span>
+        </h3>
+        <div id="home-danger-zone-body"></div>
+      </div>
 
-    <div class="profile-card home-widget">
-      <h3><span>Team Needs / Future Transfers</span></h3>
-      <div id="home-needs-watchlist-body"></div>
+      <div class="profile-card home-widget">
+        <h3><span>Squad Age Profile</span></h3>
+        <div id="home-age-profile-body"></div>
+      </div>
+
+      <div class="profile-card home-widget">
+        <h3><span><span style="color: #f85149;">✚</span> Injury Report</span></h3>
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Currently Injured</div>
+        <div id="home-injury-current-body"></div>
+        <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: 14px 0 6px;">This Season</div>
+        <div id="home-injury-history-body"></div>
+      </div>
     </div>
   </div>
 
@@ -1108,6 +1209,20 @@
     </div>
   </dialog>
 
+  <!-- Youth Squad Career Mode: reference dialog for the mode's rules — the
+       automated squad rating cap plus the self-imposed transfer rules (see
+       renderYouthRulesBody). Shown automatically right after first enabling
+       (see onYouthModeButtonClick), reopenable any time via the "Rules"
+       button in Settings. -->
+  <dialog id="youth-rules-dialog" style="background: var(--card-bg); color: var(--text-color); border: 1px solid var(--accent-color); border-radius: 8px; padding: 20px; max-width: 640px; width: 90%; max-height: 80vh; overflow: hidden;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-shrink: 0;">
+      <h3 style="margin: 0;">🎓 Youth Squad Career Mode — Rules</h3>
+      <button class="back-btn" style="margin: 0;" onclick="closeYouthRulesDialog()">✕</button>
+    </div>
+    <div id="youth-rules-body" class="youth-rules-body-scroll"></div>
+    <button class="back-btn" style="margin-top: 16px; width: 100%; justify-content: center; flex-shrink: 0;" onclick="closeYouthRulesDialog()">Got it</button>
+  </dialog>
+
   <!-- Youth Squad Career Mode: occasional attention-grabbing popup for an
        ongoing (in-season) overrated-squad violation. Separate from the
        always-available inline banner on Home — see renderYouthModeWarning. -->
@@ -1143,7 +1258,6 @@
       currentCalendar = Array.isArray(data) ? data : (data?.calendar || []);
       const activeDate = data?.current_date || 'N/A';
       currentIngameDate = data?.current_date || null;
-      gameCaptainId = (data && data.captain_id) || null;
       currentTeamColors = (data && data.team_colors) || null;
       currentTrophies = (data && data.trophies) || null;
       currentManager = (data && data.manager) || null;
@@ -1366,7 +1480,11 @@
     let currentProfileStatsData = null;
     let profileStatsViewMode = 'season';
     let currentSortColumn = 'pos_label';
-    let sortAscending = false;
+    // Ascending on Position means GK (POSITION_SORT_ORDER's lowest value)
+    // sorts first — matches sortTable's own "first click on a column
+    // defaults to ascending for name/pos_label" rule, so the very first
+    // render before any header click needs no special-casing.
+    let sortAscending = true;
 
     // Club name -> badge image URL (or null if the lookup failed/found
     // nothing), so we don't refetch the same club every time a profile
@@ -3010,8 +3128,10 @@
       const isGoalkeeper = player.position_id === 0 || posInfo.label === "GK";
       const baseOvr = Number(player.overall || 75);
       const jerseyDisplay = player.jersey_number ? `<span class="jersey-badge">#${player.jersey_number}</span>` : '';
-      const isCaptain = player.player_id != null && gameCaptainId != null && player.player_id == gameCaptainId;
+      const isCaptain = player.player_id != null && currentCaptainId != null && player.player_id == currentCaptainId;
       const captainDisplay = isCaptain ? `<span class="captain-badge" title="Club Captain">Ⓒ</span>` : '';
+      const isViceCaptain = player.player_id != null && currentViceCaptainId != null && player.player_id == currentViceCaptainId;
+      const viceCaptainDisplay = isViceCaptain ? `<span class="vice-captain-badge" title="Vice Captain">Ⓥ</span>` : '';
 
       const attrs = player.attributes || {};
       const attrDeltas = player.attribute_deltas || {};
@@ -3296,6 +3416,25 @@
         ? `<div style="position: absolute; top: -15%; right: -4%; width: 62%; height: 130%; background-image: url('${flagImageUrl}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.16; -webkit-mask-image: linear-gradient(to left, black 25%, transparent 95%); mask-image: linear-gradient(to left, black 25%, transparent 95%); pointer-events: none; z-index: 0;"></div>`
         : '';
 
+      // Only whichever role(s) this player currently holds get an editable
+      // tenure line here — same field as the Home dashboard's Captain
+      // widget (see captaincy_history in schema.sql), just a second entry
+      // point to edit it. profileCaptaincyState is reset for BOTH roles
+      // first so a stale edit-in-progress from a previously viewed
+      // captain/vice-captain's profile doesn't leak into this one.
+      profileCaptaincyState.captain = { playerId: null, editing: false };
+      profileCaptaincyState.vice_captain = { playerId: null, editing: false };
+      let profileCaptaincyLinesHtml = '';
+      for (const [role, isHolder] of [['captain', isCaptain], ['vice_captain', isViceCaptain]]) {
+        if (!isHolder || !currentSaveId || !window.api || !window.api.getCurrentCaptaincy) continue;
+        profileCaptaincyState[role] = { playerId: player.player_id, editing: false };
+        try {
+          const captaincy = await window.api.getCurrentCaptaincy(currentSaveId, role);
+          const sinceYear = captaincy ? captaincy.start_year : null;
+          profileCaptaincyLinesHtml += `<div id="profile-captaincy-line-${role}">${buildCaptaincySinceLineHtml(role, player.player_id, sinceYear, false, [], 'toggleProfileCaptaincyEdit', 'onProfileCaptaincyStartYearChange')}</div>`;
+        } catch (e) { console.error(`Failed to load ${role} tenure for profile:`, e); }
+      }
+
       const container = document.getElementById('profile-content-container');
       container.innerHTML = `
         <div class="profile-header" style="display: flex; align-items: center; gap: 20px;">
@@ -3308,7 +3447,9 @@
                 <span>${player.name || 'Unknown Player'}</span>
                 ${jerseyDisplay}
                 ${captainDisplay}
+                ${viceCaptainDisplay}
               </h2>
+              ${profileCaptaincyLinesHtml}
               <div class="profile-meta">
                 <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
                 <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
@@ -3653,8 +3794,10 @@
         const posInfo = getPositionInfo(p.position_id);
         const avgRatingVal = Number(p.avg_rating || 0) > 0 ? Number(p.avg_rating).toFixed(2) : '-';
         const jerseyDisplay = p.jersey_number ? `<span class="jersey-badge">#${p.jersey_number}</span>` : '';
-        const isCaptain = p.player_id != null && gameCaptainId != null && p.player_id == gameCaptainId;
+        const isCaptain = p.player_id != null && currentCaptainId != null && p.player_id == currentCaptainId;
         const captainDisplay = isCaptain ? `<span class="captain-badge" title="Club Captain">Ⓒ</span>` : '';
+        const isViceCaptain = p.player_id != null && currentViceCaptainId != null && p.player_id == currentViceCaptainId;
+        const viceCaptainDisplay = isViceCaptain ? `<span class="vice-captain-badge" title="Vice Captain">Ⓥ</span>` : '';
 
         row.innerHTML = `
           <td>
@@ -3663,6 +3806,7 @@
                 <span class="expand-icon">▶</span>
                 ${p.name || 'Unknown'}
                 ${captainDisplay}
+                ${viceCaptainDisplay}
                 ${p.__clubStatus === 'loan' ? '<span class="loan-badge">ON LOAN</span>' : ''}
                 ${p.__clubStatus === 'transferred' ? '<span class="loan-badge">TRANSFERRED</span>' : ''}
                 ${p.injury ? '<span class="injury-badge">INJURED</span>' : ''}
@@ -3750,14 +3894,17 @@
       });
     }
 
-    function sortTable(column) {
-      if (currentSortColumn === column) {
-        sortAscending = !sortAscending;
-      } else {
-        currentSortColumn = column;
-        sortAscending = column === 'name' || column === 'pos_label';
-      }
-
+    // Sorts squadTableRows in place by currentSortColumn/sortAscending
+    // without touching either — the actual comparator, shared by sortTable
+    // (user clicks a header, which DOES toggle direction first) and every
+    // data-refresh call site (a new sync/season switch just needs the
+    // CURRENT sort re-applied to the new rows, not flipped). Calling
+    // sortTable(currentSortColumn) for that used to toggle sortAscending
+    // on every single refresh, since currentSortColumn always equals the
+    // column you just passed it — Position flipped between GK-first and
+    // GK-last on alternating syncs instead of staying put.
+    function applySquadSort() {
+      const column = currentSortColumn;
       squadTableRows.sort((a, b) => {
         let valA = a[column];
         let valB = b[column];
@@ -3789,6 +3936,17 @@
 
         return sortAscending ? valA - valB : valB - valA;
       });
+    }
+
+    function sortTable(column) {
+      if (currentSortColumn === column) {
+        sortAscending = !sortAscending;
+      } else {
+        currentSortColumn = column;
+        sortAscending = column === 'name' || column === 'pos_label';
+      }
+
+      applySquadSort();
 
       renderTableRows();
     }
@@ -4099,7 +4257,8 @@
 
       if (squadSeasonSelection === 'current') {
         squadTableRows = currentPlayers;
-        sortTable(currentSortColumn);
+        applySquadSort();
+        renderTableRows();
       }
 
       careerTotalsCache = null;
@@ -4134,7 +4293,8 @@
 
       if (value === 'current') {
         squadTableRows = currentPlayers;
-        sortTable(currentSortColumn);
+        applySquadSort();
+        renderTableRows();
         return;
       }
 
@@ -4146,7 +4306,8 @@
         raw = await window.api.getSquadData(parseInt(value, 10));
       }
       squadTableRows = transformPlayersForTable(raw);
-      sortTable(currentSortColumn);
+      applySquadSort();
+      renderTableRows();
     }
 
     async function populateSquadSeasonSelector() {
@@ -4473,6 +4634,7 @@
         currentYouthModeEnabled = !!selected.youth_mode_enabled;
         updateYouthModeButton();
         renderYouthModeWarning();
+        renderYouthModeDangerZone();
         // Sequenced, not parallel — avoids popping the season overview
         // splash on top of the youth-mode season review dialog if both
         // happen to be pending at the same season boundary.
@@ -4907,7 +5069,17 @@
     let managerPpgCache = null;
     let teamRecordSeasonsCache = null;
     let selectedTeamRecordSeason = 'current';
-    let gameCaptainId = null; // from the "teams" table's captainid field, via the calendar export
+    // Both Captain and Vice Captain are pure app-side assignments now (see
+    // captaincy_history in schema.sql) — the "teams" table's captainid
+    // field this used to auto-detect Captain from wasn't reliable enough
+    // to drive gameplay-facing display, so there's no in-game source for
+    // either any more. Refreshed whenever the Captain widget re-renders;
+    // cached here so the Squad table and player profile can show the same
+    // badges without each re-fetching them.
+    let currentCaptainId = null;
+    let currentCaptainSinceYear = null;
+    let currentViceCaptainId = null;
+    let currentViceCaptainSinceYear = null;
     let currentTeamColors = null; // { primary, secondary, tertiary: {r,g,b} }, also from "teams"
     let currentTrophies = null; // { league_titles, domestic_cups, uefa_cl_wins, uefa_el_wins, uefa_uecl_wins }
     let currentManager = null; // { name, join_date }, from the "manager" table
@@ -5450,31 +5622,286 @@
       `;
     }
 
-    function renderCaptainWidget() {
-      const container = document.getElementById('home-captain-body');
-      if (!container) return;
+    // Captain and Vice Captain are both pure app-side assignments now (see
+    // captaincy_history in schema.sql) — no in-game source for either, so
+    // both are picked from the squad. One edit button in the card header
+    // (not one per role) opens BOTH roles' pickers together as a single
+    // staged form — selecting a value only updates the pending* variables
+    // below, nothing is saved until Apply commits both at once.
+    const CAPTAINCY_ROLE_LABELS = { captain: 'Captain', vice_captain: 'Vice Captain' };
 
-      const captain = currentPlayers.find(p => p.player_id === gameCaptainId);
-      const avatarHtml = buildInitialsAvatar(captain ? captain.name : '?', 56, '50%');
-      const nameHtml = captain ? captain.name : 'Not available yet';
+    let captaincyEditingAll = false;
+    let pendingCaptainId = null;
+    let pendingCaptainSinceYear = null;
+    let pendingViceCaptainId = null;
+    let pendingViceSinceYear = null;
 
-      const detailsHtml = captain ? `
+    function currentInGameYear() {
+      return currentIngameDate ? new Date(currentIngameDate).getFullYear() : new Date().getFullYear();
+    }
+
+    async function startCaptaincyEdit() {
+      captaincyEditingAll = true;
+      pendingCaptainId = currentCaptainId;
+      pendingCaptainSinceYear = currentCaptainSinceYear;
+      pendingViceCaptainId = currentViceCaptainId;
+      pendingViceSinceYear = currentViceCaptainSinceYear;
+      await renderCaptaincyEditForm();
+    }
+
+    function cancelCaptaincyEdit() {
+      captaincyEditingAll = false;
+      renderCaptainWidget();
+    }
+
+    function onPendingCaptainAssignChange(value) { pendingCaptainId = value ? parseInt(value, 10) : null; }
+    function onPendingCaptainSinceChange(value) { pendingCaptainSinceYear = value ? parseInt(value, 10) : null; }
+    function onPendingViceAssignChange(value) { pendingViceCaptainId = value ? parseInt(value, 10) : null; }
+    function onPendingViceSinceChange(value) { pendingViceSinceYear = value ? parseInt(value, 10) : null; }
+
+    // Commits both roles at once. Reassigning a role closes the previous
+    // holder's stint and opens a new one for the incoming player, both
+    // stamped with the in-game year at the moment of the change
+    // (setCaptaincy in main.js) — see captaincy_history in schema.sql for
+    // why this is stint-based. The since-year correction only applies when
+    // the SAME holder is kept — if a role was reassigned, whatever the
+    // since-year field showed belonged to the OLD holder and would
+    // otherwise incorrectly overwrite the new holder's auto-stamped year.
+    async function applyCaptaincyChanges() {
+      if (!currentSaveId || !window.api) return;
+      const year = currentInGameYear();
+
+      if (pendingCaptainId !== currentCaptainId) {
+        if (window.api.setCaptaincy) await window.api.setCaptaincy(currentSaveId, 'captain', pendingCaptainId, year);
+      } else if (pendingCaptainId && pendingCaptainSinceYear !== currentCaptainSinceYear) {
+        if (window.api.setCaptaincyStartYear) await window.api.setCaptaincyStartYear(currentSaveId, 'captain', pendingCaptainId, pendingCaptainSinceYear);
+      }
+
+      if (pendingViceCaptainId !== currentViceCaptainId) {
+        if (window.api.setCaptaincy) await window.api.setCaptaincy(currentSaveId, 'vice_captain', pendingViceCaptainId, year);
+      } else if (pendingViceCaptainId && pendingViceSinceYear !== currentViceCaptainSinceYear) {
+        if (window.api.setCaptaincyStartYear) await window.api.setCaptaincyStartYear(currentSaveId, 'vice_captain', pendingViceCaptainId, pendingViceSinceYear);
+      }
+
+      captaincyEditingAll = false;
+      renderCaptainWidget();
+    }
+
+    function buildPlayerStatsRowHtml(player) {
+      return `
         <div style="display:flex; gap:14px; margin-top:4px; font-size:12px; color: var(--text-dim);">
-          <span>Age: <strong style="color: var(--text-color);">${computeAge(captain.dob) ?? '—'}</strong></span>
-          <span>OVR: <strong style="color: var(--accent-color);">${captain.overall ?? '—'}</strong></span>
-          <span>Pos: <strong style="color: var(--text-color);">${getPositionInfo(captain.position_id).label}</strong></span>
+          <span>Age: <strong style="color: var(--text-color);">${computeAge(player.dob) ?? '—'}</strong></span>
+          <span>OVR: <strong style="color: var(--accent-color);">${player.overall ?? '—'}</strong></span>
+          <span>Pos: <strong style="color: var(--text-color);">${getPositionInfo(player.position_id).label}</strong></span>
         </div>
-      ` : '';
+      `;
+    }
 
-      container.innerHTML = `
+    // Years this save has actually played, deduped/sorted — backs the
+    // start-year correction picker (Home widget and player profile alike)
+    // so it only ever offers real seasons instead of a free-typed year.
+    async function getCaptainSinceSeasonYearOptions() {
+      if (!window.api || !window.api.getSeasonsList) return [];
+      try {
+        const seasons = await window.api.getSeasonsList();
+        return Array.from(new Set(
+          (seasons || []).map(s => parseInt(String(s.year_label || '').slice(0, 4), 10)).filter(Number.isFinite)
+        )).sort((a, b) => a - b);
+      } catch (e) {
+        console.error('Failed to load seasons for captaincy since-year picker:', e);
+        return [];
+      }
+    }
+
+    // Shared between the Home dashboard's Captain widget and the player
+    // profile page so both surfaces edit the exact same field the exact
+    // same way. toggleFnName/changeFnName let each caller wire up its own
+    // re-render without this helper needing to know which one it's in.
+    function buildCaptaincySinceLineHtml(role, playerId, sinceYear, editing, seasonYearOptions, toggleFnName, changeFnName) {
+      const label = CAPTAINCY_ROLE_LABELS[role];
+      if (editing) {
+        return `
+          <div style="font-size:12px; color: var(--text-dim); margin-top:2px; display:flex; align-items:center; gap:6px;">
+            <span>${label} since</span>
+            <select onchange="${changeFnName}('${role}', ${playerId}, this.value)"
+              style="font-size:12px; padding:2px 6px; border-radius:4px; border:1px solid var(--border-color); background: var(--expand-bg); color: var(--text-color);">
+              <option value="">—</option>
+              ${seasonYearOptions.map(y => `<option value="${y}" ${y === sinceYear ? 'selected' : ''}>${y}</option>`).join('')}
+            </select>
+            <button class="inline-edit-btn" onclick="${toggleFnName}('${role}')" title="Cancel">✕</button>
+          </div>
+        `;
+      }
+      return `
+        <div style="font-size:12px; color: var(--text-dim); margin-top:2px; display:flex; align-items:center; gap:6px;">
+          <span>${sinceYear ? `${label} since ${sinceYear} – Present` : `${label} since year not set`}</span>
+          <button class="inline-edit-btn" onclick="${toggleFnName}('${role}')" title="Edit ${label.toLowerCase()} since year">✎</button>
+        </div>
+      `;
+    }
+
+    // Second entry point for the same captaincy_history field (see
+    // openPlayerProfile, which seeds profileCaptaincyState[role].playerId
+    // whenever the viewed player currently holds that role) — edits in
+    // place instead of re-running the whole profile fetch on every
+    // selection. Only the start-year correction lives here, not
+    // reassignment — reassigning a role is a Home-widget-only action.
+    const profileCaptaincyState = {
+      captain: { playerId: null, editing: false },
+      vice_captain: { playerId: null, editing: false }
+    };
+
+    function toggleProfileCaptaincyEdit(role) {
+      profileCaptaincyState[role].editing = !profileCaptaincyState[role].editing;
+      refreshProfileCaptaincyLine(role);
+    }
+
+    async function onProfileCaptaincyStartYearChange(role, playerId, rawValue) {
+      if (!currentSaveId || !playerId || !window.api || !window.api.setCaptaincyStartYear) return;
+      const year = rawValue ? parseInt(rawValue, 10) : null;
+      await window.api.setCaptaincyStartYear(currentSaveId, role, playerId, Number.isFinite(year) ? year : null);
+      profileCaptaincyState[role].editing = false;
+      refreshProfileCaptaincyLine(role);
+    }
+
+    async function refreshProfileCaptaincyLine(role) {
+      const el = document.getElementById(`profile-captaincy-line-${role}`);
+      const playerId = profileCaptaincyState[role].playerId;
+      if (!el || !playerId || !currentSaveId || !window.api || !window.api.getCurrentCaptaincy) return;
+      const captaincy = await window.api.getCurrentCaptaincy(currentSaveId, role);
+      const sinceYear = captaincy ? captaincy.start_year : null;
+      const editing = profileCaptaincyState[role].editing;
+      const seasonYearOptions = editing ? await getCaptainSinceSeasonYearOptions() : [];
+      el.innerHTML = buildCaptaincySinceLineHtml(role, playerId, sinceYear, editing, seasonYearOptions, 'toggleProfileCaptaincyEdit', 'onProfileCaptaincyStartYearChange');
+    }
+
+    // Plain display for one role (Captain or Vice Captain) — no editing
+    // controls at all here any more; the single header ✎ (see
+    // renderCaptainWidget) is the only way in, and it opens BOTH roles at
+    // once via renderCaptaincyEditForm below.
+    function buildCaptaincyRoleBodyHtml(role, captaincy) {
+      const label = CAPTAINCY_ROLE_LABELS[role];
+      const holderId = captaincy ? captaincy.player_id : null;
+      const holder = holderId ? currentPlayers.find(p => p.player_id === holderId) : null;
+
+      if (!holder) {
+        return `<div class="empty-state" style="padding: 10px 0; font-size: 13px;">No ${label.toLowerCase()} assigned.</div>`;
+      }
+
+      const sinceText = captaincy.start_year ? `${label} since ${captaincy.start_year} – Present` : `${label} since year not set`;
+      return `
         <div style="display:flex; align-items:center; gap:14px;">
-          ${avatarHtml}
-          <div>
-            <div style="font-weight:600; font-size:16px;">${nameHtml}</div>
-            ${detailsHtml}
+          ${buildInitialsAvatar(holder.name, 56, '50%')}
+          <div style="flex:1;">
+            <div style="font-weight:600; font-size:16px;">${holder.name}</div>
+            <div style="font-size:12px; color: var(--text-dim); margin-top:2px;">${sinceText}</div>
+            ${buildPlayerStatsRowHtml(holder)}
           </div>
         </div>
       `;
+    }
+
+    // One assign-select + since-year-select pair for a single role, used
+    // by both halves of the combined edit form. excludePlayerId is the
+    // OTHER role's holder at the moment editing opened (not live-updated
+    // if that other role's pending selection changes mid-edit — a rare
+    // edge case not worth a full re-render on every field change).
+    function buildCaptaincyEditFieldsHtml(role, pendingPlayerId, pendingSinceYear, excludePlayerId, seasonYearOptions, assignChangeFn, sinceChangeFn) {
+      const squadOptionsHtml = (currentPlayers || [])
+        .filter(p => p.player_id !== excludePlayerId)
+        .map(p => `<option value="${p.player_id}" ${p.player_id == pendingPlayerId ? 'selected' : ''}>${p.name}</option>`)
+        .join('');
+      const yearOptionsHtml = seasonYearOptions.map(y => `<option value="${y}" ${y === pendingSinceYear ? 'selected' : ''}>${y}</option>`).join('');
+      return `
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <select onchange="${assignChangeFn}(this.value)"
+            style="width:100%; font-size:13px; padding:5px 8px; border-radius:6px; border:1px solid var(--border-color); background: var(--expand-bg); color: var(--text-color);">
+            <option value="">— None —</option>
+            ${squadOptionsHtml}
+          </select>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:12px; color: var(--text-dim);">Since</span>
+            <select onchange="${sinceChangeFn}(this.value)"
+              style="font-size:12px; padding:2px 6px; border-radius:4px; border:1px solid var(--border-color); background: var(--expand-bg); color: var(--text-color);">
+              <option value="">—</option>
+              ${yearOptionsHtml}
+            </select>
+          </div>
+        </div>
+      `;
+    }
+
+    // The combined edit form for both roles at once — built and injected
+    // once when editing starts (startCaptaincyEdit). Every select's
+    // onchange only updates a pending* variable; nothing round-trips to
+    // main.js until Apply (applyCaptaincyChanges) commits both roles
+    // together.
+    async function renderCaptaincyEditForm() {
+      const container = document.getElementById('home-captain-body');
+      const headerControls = document.getElementById('captaincy-header-controls');
+      if (!container) return;
+
+      const seasonYearOptions = await getCaptainSinceSeasonYearOptions();
+
+      container.innerHTML = `
+        ${buildCaptaincyEditFieldsHtml('captain', pendingCaptainId, pendingCaptainSinceYear, pendingViceCaptainId, seasonYearOptions, 'onPendingCaptainAssignChange', 'onPendingCaptainSinceChange')}
+        <div style="margin-top:14px;">
+          <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom:6px;">Vice Captain</div>
+          ${buildCaptaincyEditFieldsHtml('vice_captain', pendingViceCaptainId, pendingViceSinceYear, pendingCaptainId, seasonYearOptions, 'onPendingViceAssignChange', 'onPendingViceSinceChange')}
+        </div>
+      `;
+
+      if (headerControls) {
+        headerControls.innerHTML = `
+          <button class="inline-edit-btn" onclick="applyCaptaincyChanges()" title="Apply changes">✓ Apply</button>
+          <button class="inline-edit-btn" onclick="cancelCaptaincyEdit()" title="Cancel">✕</button>
+        `;
+      }
+    }
+
+    async function renderCaptainWidget() {
+      const container = document.getElementById('home-captain-body');
+      const headerControls = document.getElementById('captaincy-header-controls');
+      if (!container) return;
+
+      // While the combined edit form is open, a background refresh (live
+      // sync, save switch) must not clobber the user's in-progress,
+      // unsaved selections — leave it exactly as-is until Apply/Cancel.
+      if (captaincyEditingAll) return;
+
+      let captainCaptaincy = null;
+      let viceCaptaincy = null;
+      if (currentSaveId && window.api && window.api.getCurrentCaptaincy) {
+        try {
+          [captainCaptaincy, viceCaptaincy] = await Promise.all([
+            window.api.getCurrentCaptaincy(currentSaveId, 'captain'),
+            window.api.getCurrentCaptaincy(currentSaveId, 'vice_captain')
+          ]);
+        } catch (e) { console.error('Failed to load captaincy:', e); }
+      }
+      currentCaptainId = captainCaptaincy ? captainCaptaincy.player_id : null;
+      currentCaptainSinceYear = captainCaptaincy ? captainCaptaincy.start_year : null;
+      currentViceCaptainId = viceCaptaincy ? viceCaptaincy.player_id : null;
+      currentViceCaptainSinceYear = viceCaptaincy ? viceCaptaincy.start_year : null;
+
+      container.innerHTML = `
+        ${buildCaptaincyRoleBodyHtml('captain', captainCaptaincy)}
+        <div style="margin-top:14px;">
+          <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom:6px;">Vice Captain</div>
+          ${buildCaptaincyRoleBodyHtml('vice_captain', viceCaptaincy)}
+        </div>
+      `;
+
+      if (headerControls) {
+        headerControls.innerHTML = `<button class="inline-edit-btn" onclick="startCaptaincyEdit()" title="Edit Captain and Vice Captain">✎</button>`;
+      }
+
+      // The Squad table's Ⓒ/Ⓥ badges read currentCaptainId/
+      // currentViceCaptainId directly (see renderTableRows) — without this,
+      // whichever tab loaded first would show blank badges until the next
+      // unrelated re-render (e.g. clicking a column header) happened to
+      // rebuild the rows.
+      if (squadTableRows.length) renderTableRows();
     }
 
     function setTeamRecordSeason(value) {
@@ -5931,14 +6358,19 @@
     }
 
     function renderTopStatsWidgets() {
-      renderTopStatWidget('goals', 'home-top-goals-body');
-      renderTopStatWidget('assists', 'home-top-assists-body');
+      renderTopStatWidget('goals', 'home-top-goals-body', true);
+      renderTopStatWidget('assists', 'home-top-assists-body', true);
       renderTopStatWidget('appearances', 'home-top-appearances-body', true);
     }
 
     function renderExpiringContractsTable() {
+      // __clubStatus === 'transferred' means the player has actually left
+      // the club — their old contract_expiry can still be sitting on the
+      // stale row (last known before the sale), which would otherwise
+      // list someone no longer even on the books. Loaned players stay
+      // eligible: the parent club still holds their contract.
       const ranked = currentPlayers
-        .filter(p => p.contract_expiry)
+        .filter(p => p.contract_expiry && p.__clubStatus !== 'transferred')
         .map(p => ({ ...p, __monthsLeft: computeMonthsUntilExpiry(p.contract_expiry) }))
         .filter(p => p.__monthsLeft !== null && p.__monthsLeft <= 18)
         .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, computeAge(p.dob || p.birthdate), p.wage) }))
@@ -6120,7 +6552,7 @@
     // sit more than the tier's margin above that baseline.
     const YOUTH_MODE_TIER_CONFIG = {
       2: { leagueAverage: 72, allowance: 3, margin: 3 }, // Championship
-      3: { leagueAverage: 67, allowance: 3, margin: 3 }, // League One
+      3: { leagueAverage: 67, allowance: 2, margin: 3 }, // League One
       4: { leagueAverage: 63, allowance: 2, margin: 3 }  // League Two
     };
 
@@ -6316,6 +6748,149 @@
       }
       const btn = document.getElementById('settings-youth-mode-btn');
       if (btn) btn.style.display = currentYouthModeEnabled ? 'none' : '';
+
+      const rulesBtn = document.getElementById('settings-youth-mode-rules-btn');
+      if (rulesBtn) rulesBtn.style.display = currentYouthModeEnabled ? '' : 'none';
+
+      const headerRulesBtn = document.getElementById('youth-mode-header-rules-btn');
+      if (headerRulesBtn) headerRulesBtn.style.display = currentYouthModeEnabled ? 'inline-block' : 'none';
+    }
+
+    // Builds the "Squad Rating Cap" table straight from
+    // YOUTH_MODE_TIER_CONFIG / YOUTH_MODE_PREMIER_LEAGUE_BANDS above so the
+    // numbers shown here can never drift out of sync with what's actually
+    // enforced at season end (see generateSeasonEndReviewIfNeeded in
+    // main.js). Max OVR is the average plus its margin — the point past
+    // which a player counts as "overrated" for that row.
+    // maxNum stays a real number (or null for the uncapped top-5 band) so
+    // buildYouthSigningTypeRows can derive its bands from the exact same
+    // numbers instead of re-deriving them from the raw config a second time.
+    function buildYouthRulesCapRows() {
+      const rows = [];
+      YOUTH_MODE_PREMIER_LEAGUE_BANDS.forEach((band, i) => {
+        const prevMax = i === 0 ? 1 : YOUTH_MODE_PREMIER_LEAGUE_BANDS[i - 1].maxPos + 1;
+        const label = band.maxPos === Infinity ? `Premier League (${prevMax}th+)`
+          : i === 0 ? `Premier League (Top ${band.maxPos})`
+          : `Premier League (${prevMax}${prevMax === band.maxPos ? '' : '–' + band.maxPos})`;
+        const maxNum = band.allowance === Infinity ? null : band.leagueAverage + band.margin;
+        rows.push({
+          label,
+          avg: band.leagueAverage,
+          maxNum,
+          maxDisplay: maxNum === null ? 'No cap' : maxNum,
+          allowanceDisplay: band.allowance === Infinity ? '—' : band.allowance
+        });
+      });
+      const lowerTierNames = { 2: 'Championship', 3: 'League One', 4: 'League Two' };
+      Object.keys(YOUTH_MODE_TIER_CONFIG).forEach(tier => {
+        const cfg = YOUTH_MODE_TIER_CONFIG[tier];
+        const maxNum = cfg.leagueAverage + cfg.margin;
+        rows.push({ label: lowerTierNames[tier], avg: cfg.leagueAverage, maxNum, maxDisplay: maxNum, allowanceDisplay: cfg.allowance });
+      });
+      return rows;
+    }
+
+    // Self-imposed transfer rules per league/outcome — nothing here is
+    // tracked or enforced by the app (unlike the rating cap above); it's
+    // just a reference so the rules are the same every time they're
+    // reopened. Deliberately excludes loans/scouting/positional
+    // restrictions and any extra League Two relegation punishment — none
+    // of that is in play for this save.
+    const YOUTH_TRANSFER_RULES = [
+      { league: '🏆 Premier League', rules: [
+        ['Title', '1 marquee + 1 squad player'],
+        ['Champions League spot', '1 marquee OR 2 squad players (your choice)'],
+        ['Europa / mid-upper table', '1 squad player only'],
+        ['Mid-table (neutral)', '1 prospect signing only'],
+        ['Relegation battle survival', 'No signings, sell 1 fringe player'],
+        ['Relegated', 'Sell 2 top players, academy intake shrinks']
+      ]},
+      { league: '⚽ Championship', rules: [
+        ['Automatic promotion', '1 marquee + 1 squad player'],
+        ['Playoff promotion', '1 marquee only'],
+        ['Mid-table', '1 prospect signing only'],
+        ['Relegation battle survival', 'No signings, sell 1 fringe player'],
+        ['Relegated', 'Sell 2 top players, lose best academy graduate to another club']
+      ]},
+      { league: '🎯 League One', rules: [
+        ['Automatic promotion', '1 marquee + 1 squad player'],
+        ['Playoff promotion', '1 marquee only'],
+        ['Mid-table', '1 prospect signing only'],
+        ['Relegation battle survival', 'No signings, sell 1 fringe player'],
+        ['Relegated', 'Sell 2 top players + lose best academy prospect for a season']
+      ]},
+      { league: '🌱 League Two', rules: [
+        ['Automatic promotion', '1 squad player + 1 prospect'],
+        ['Playoff promotion', '1 squad player only'],
+        ['Mid-table', '1 prospect signing only'],
+        ['Relegation battle survival', 'No signings, sell 1 fringe player'],
+        ['Relegated (out of the Football League)', 'No additional punishment']
+      ]}
+    ];
+
+    // What a "marquee"/"squad player"/"prospect" signing means in OVR
+    // terms, per league band — derived from buildYouthRulesCapRows' own
+    // avg/maxNum so this table always lines up with the cap table above it
+    // instead of re-deriving the same numbers a second time. Each row is
+    // an explicit band (matching the cap table's rows 1:1), not a "your
+    // band" reference, since spelling out all four Premier League bands
+    // reads clearer than making the reader map their own position to one.
+    function buildYouthSigningTypeRows(capRows) {
+      return capRows.map(r => r.maxNum === null
+        ? { league: r.label, prospect: `Below ${r.avg}`, squad: `${r.avg}+`, marquee: 'No cap needed' }
+        : { league: r.label, prospect: `Below ${r.avg}`, squad: `${r.avg}–${r.maxNum}`, marquee: `${r.maxNum + 1}+` });
+    }
+
+    function renderYouthRulesBody() {
+      const body = document.getElementById('youth-rules-body');
+      if (!body) return;
+
+      const capRows = buildYouthRulesCapRows();
+      const signingRows = buildYouthSigningTypeRows(capRows);
+      body.innerHTML = `
+        <div class="youth-rules-section">
+          <h4>📊 Squad Rating Cap (enforced automatically)</h4>
+          <table class="youth-rules-cap-table">
+            <thead><tr><th>League</th><th class="num">Avg OVR</th><th class="num">Max OVR</th><th class="num">Allowed Over</th></tr></thead>
+            <tbody>
+              ${capRows.map(r => `<tr><td>${r.label}</td><td class="num">${r.avg}</td><td class="num">${r.maxDisplay}</td><td class="num">${r.allowanceDisplay}</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="youth-rules-note">Checked at the end of each season — go over the allowance and you'll get a warning naming who to sell.</p>
+        </div>
+        <div class="youth-rules-section">
+          <h4>🧾 Signing Types by OVR</h4>
+          <table class="youth-rules-cap-table">
+            <thead><tr><th>League</th><th class="num">Prospect</th><th class="num">Squad Player</th><th class="num">Marquee</th></tr></thead>
+            <tbody>
+              ${signingRows.map(r => `<tr><td>${r.league}</td><td class="num">${r.prospect}</td><td class="num">${r.squad}</td><td class="num">${r.marquee}</td></tr>`).join('')}
+            </tbody>
+          </table>
+          <p class="youth-rules-note">Prospects should also be young (roughly U21) — a low-rated veteran isn't a development signing, just a bad one.</p>
+        </div>
+        <div class="youth-rules-section">
+          <h4>📝 Transfer Rules (self-imposed — not tracked by the app)</h4>
+          ${YOUTH_TRANSFER_RULES.map(section => `
+            <div class="youth-rules-league">
+              <div class="league-name">${section.league}</div>
+              <ul>
+                ${section.rules.map(([outcome, rule]) => `<li><span class="outcome">${outcome}</span><span class="rule">${rule}</span></li>`).join('')}
+              </ul>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    function openYouthRulesDialog() {
+      renderYouthRulesBody();
+      const dialog = document.getElementById('youth-rules-dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+    }
+
+    function closeYouthRulesDialog() {
+      const dialog = document.getElementById('youth-rules-dialog');
+      if (dialog && dialog.open) dialog.close();
     }
 
     async function onYouthModeButtonClick() {
@@ -6333,13 +6908,20 @@
         currentYouthModeEnabled = true;
         updateYouthModeButton();
         renderYouthModeWarning();
+        renderYouthModeDangerZone();
+        openYouthRulesDialog();
       }
     }
 
-    // Returns null if there's nothing to enforce (mode off, unrecognized
-    // league, or Premier League/no restriction) — otherwise the tier info
-    // plus every currently-owned squad player over the cap, worst first.
-    function computeOverratedSquadPlayers() {
+    // Resolves the currently-applicable Youth Mode rule from LIVE state —
+    // the current table position for the Premier League, a flat config
+    // for every other tier. Returns null if there's nothing to enforce
+    // (mode off, unrecognized league, Premier League top-5/no
+    // restriction, or no live table position yet to band a PL side by).
+    // Shared by computeOverratedSquadPlayers (players ALREADY over the
+    // cap) and computeYouthModeDangerZonePlayers (players approaching it)
+    // so both read the exact same cutoff/allowance.
+    function resolveYouthModeLiveRule() {
       if (!currentYouthModeEnabled) return null;
       const tier = findPyramidTier(getPrimaryLeagueName());
       if (!tier) return null;
@@ -6357,14 +6939,154 @@
       if (!rule || rule.allowance === Infinity) return null;
 
       const { leagueAverage, allowance, margin } = rule;
-      const cutoff = leagueAverage + margin;
+      return { tier: tier.tier, tierName, leagueAverage, cutoff: leagueAverage + margin, allowance, margin };
+    }
+
+    // Returns null if there's nothing to enforce — otherwise the tier
+    // info plus every currently-owned squad player over the cap, worst
+    // first.
+    function computeOverratedSquadPlayers() {
+      const rule = resolveYouthModeLiveRule();
+      if (!rule) return null;
 
       const overrated = currentPlayers
-        .filter(p => p.__clubStatus === 'normal' && Number(p.overall) > cutoff)
+        .filter(p => p.__clubStatus === 'normal' && Number(p.overall) > rule.cutoff)
         .slice()
         .sort((a, b) => b.overall - a.overall);
 
-      return { tier: tier.tier, tierName, leagueAverage, cutoff, allowance, margin, overrated };
+      return { ...rule, overrated };
+    }
+
+    // The warning banner above only fires once the squad has ALREADY gone
+    // over the cap and stayed there through a season-end check. This is a
+    // live, always-on view of the same threat: everyone at the league
+    // average or above, PROVIDED they're still developing toward a
+    // potential above the cutoff — a player who's already maxed out below
+    // the average will never push the squad over just by existing, so
+    // they're not a genuine risk the way a still-growing one is. No upper
+    // bound: this list includes players who are already over the cutoff,
+    // not just ones approaching it, colored red in the render to make
+    // that distinction obvious.
+    function computeYouthModeDangerZonePlayers() {
+      const rule = resolveYouthModeLiveRule();
+      if (!rule) return null;
+
+      const danger = currentPlayers
+        .filter(p => p.__clubStatus === 'normal'
+          && Number(p.overall) >= rule.leagueAverage
+          && Number(p.potential) > rule.cutoff)
+        .slice()
+        .sort((a, b) => b.overall - a.overall);
+
+      return { ...rule, danger };
+    }
+
+    // Cached from the last render so onToggleUntouchable can flip a
+    // player's status without needing a round trip just to know their
+    // current state first.
+    let dangerZoneUntouchableIds = new Set();
+
+    // The explanation is three sentences — collapsed to just the rule
+    // itself (average/allowance/cutoff) by default, with the "why"/"what
+    // to do about it" part behind a toggle so the card doesn't open with
+    // a wall of text ahead of the actual player list.
+    let dangerZoneNoteExpanded = false;
+
+    function toggleDangerZoneNote() {
+      dangerZoneNoteExpanded = !dangerZoneNoteExpanded;
+      renderYouthModeDangerZone();
+    }
+
+    async function onToggleUntouchable(playerId) {
+      if (!currentSaveId || !window.api || !window.api.setPlayerUntouchable) return;
+      const nowUntouchable = !dangerZoneUntouchableIds.has(playerId);
+      await window.api.setPlayerUntouchable(currentSaveId, playerId, nowUntouchable);
+      renderYouthModeDangerZone();
+    }
+
+    async function renderYouthModeDangerZone() {
+      const card = document.getElementById('youth-mode-danger-zone-card');
+      const body = document.getElementById('home-danger-zone-body');
+      const countEl = document.getElementById('youth-mode-danger-zone-count');
+      if (!card || !body) return;
+
+      const result = computeYouthModeDangerZonePlayers();
+      if (!result) {
+        card.style.display = 'none';
+        body.innerHTML = '';
+        if (countEl) countEl.textContent = '';
+        return;
+      }
+      card.style.display = '';
+
+      // The header count tracks actual violations (strictly over the
+      // cutoff) against the allowance — same number the season-end
+      // warning banner is watching, just live. The rows below include
+      // players who haven't crossed the line yet too, so this is
+      // deliberately NOT the same as the row count.
+      const overCapPlayers = result.danger.filter(p => p.overall > result.cutoff);
+
+      if (countEl) {
+        const over = overCapPlayers.length - result.allowance;
+        const colorClass = over <= 0 ? 'count-green' : over === 1 ? 'count-yellow' : 'count-red';
+        countEl.className = `danger-zone-count-badge ${colorClass}`;
+        countEl.textContent = `Allotted Players (${overCapPlayers.length}/${result.allowance})`;
+      }
+
+      const noteHtml = `
+        <p class="danger-zone-note">
+          ${result.tierName} averages <strong>${result.leagueAverage} OVR</strong> and allows up to
+          <strong>${result.allowance}</strong> player${result.allowance === 1 ? '' : 's'} above <strong>${result.cutoff} OVR</strong>.
+          ${dangerZoneNoteExpanded ? `
+            Anyone still developing toward a potential above that line counts as a future risk. Go over the allowance and
+            whoever's tagged <strong>Sell</strong> below are the ones to move on — tap 🛡️ to mark a player Untouchable so
+            they're never suggested.
+          ` : ''}
+          <button class="home-toggle-btn" style="margin-left: 4px;" onclick="toggleDangerZoneNote()">${dangerZoneNoteExpanded ? 'Show Less' : 'Show More'}</button>
+        </p>
+      `;
+
+      if (result.danger.length === 0) {
+        body.innerHTML = `${noteHtml}<div class="empty-state" style="padding: 8px 0;">No players currently threaten the cap.</div>`;
+        dangerZoneUntouchableIds = new Set();
+        return;
+      }
+
+      let untouchableIds = [];
+      if (currentSaveId && window.api && window.api.getUntouchablePlayerIds) {
+        try { untouchableIds = await window.api.getUntouchablePlayerIds(currentSaveId); } catch (e) { console.error('Failed to load untouchable players:', e); }
+      }
+      dangerZoneUntouchableIds = new Set(untouchableIds);
+
+      // Sell candidates are drawn ONLY from players already over the cap
+      // (not the below-cap watch list) — the excess beyond the allowance
+      // among those NOT marked Untouchable, highest-OVR (worst offender)
+      // first, since overCapPlayers inherits result.danger's sort order.
+      const eligibleForSale = overCapPlayers.filter(p => !dangerZoneUntouchableIds.has(p.player_id));
+      const sellCandidateIds = new Set(eligibleForSale.slice(0, Math.max(0, eligibleForSale.length - result.allowance)).map(p => p.player_id));
+
+      body.innerHTML = `
+        ${noteHtml}
+        <ul class="danger-zone-players">
+          ${result.danger.map(p => {
+            const ovrColorClass = p.overall > result.cutoff ? 'ovr-red' : p.overall > result.leagueAverage + 1 ? 'ovr-yellow' : 'ovr-green';
+            const isUntouchable = dangerZoneUntouchableIds.has(p.player_id);
+            const sellTagHtml = sellCandidateIds.has(p.player_id) ? '<span class="danger-zone-sell-tag">Sell</span>' : '';
+            return `
+              <li>
+                <span class="danger-zone-name">
+                  <button class="danger-zone-untouchable-btn ${isUntouchable ? 'active' : ''}" onclick="onToggleUntouchable(${p.player_id})" title="${isUntouchable ? 'Untouchable — click to unmark' : 'Mark Untouchable (never suggested for sale)'}">🛡️</button>
+                  <span>${p.name}</span>
+                </span>
+                <span class="danger-zone-stats">
+                  ${sellTagHtml}
+                  <span class="ovr ${ovrColorClass}">${p.overall} OVR</span>
+                </span>
+              </li>
+            `;
+          }).join('')}
+        </ul>
+      `;
     }
 
     // Dismissing the warning only clears it for the current violation —
@@ -6460,6 +7182,80 @@
     function dismissYouthWarningPopup() {
       const dialog = document.getElementById('youth-warning-popup-dialog');
       if (dialog && dialog.open) dialog.close();
+    }
+
+    // Not Youth-Mode-gated — a squad's age curve is useful context in any
+    // save, not just a rebuild. Bands are the standard football-analysis
+    // breakpoints (young prospect / prime years / established / veteran).
+    const SQUAD_AGE_BANDS = [
+      ['U21', a => a <= 21],
+      ['22-25', a => a >= 22 && a <= 25],
+      ['26-29', a => a >= 26 && a <= 29],
+      ['30+', a => a >= 30]
+    ];
+
+    function renderSquadAgeProfile() {
+      const container = document.getElementById('home-age-profile-body');
+      if (!container) return;
+
+      const ages = (currentPlayers || [])
+        .filter(p => p.__clubStatus === 'normal')
+        .map(p => computeAge(p.dob))
+        .filter(age => age !== null);
+
+      if (ages.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No squad data loaded yet.</div>`;
+        return;
+      }
+
+      const avgAge = ages.reduce((sum, a) => sum + a, 0) / ages.length;
+
+      container.innerHTML = `
+        <div style="text-align:center; margin-bottom: 12px;">
+          <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Average Age</div>
+          <div style="font-size: 28px; font-weight: 700; color: var(--accent-color);">${avgAge.toFixed(1)}</div>
+        </div>
+        <div class="stats-summary-grid" style="grid-template-columns: repeat(${SQUAD_AGE_BANDS.length}, 1fr);">
+          ${SQUAD_AGE_BANDS.map(([label, matches]) => `<div class="stat-box-item"><span>${label}</span><strong>${ages.filter(matches).length}</strong></div>`).join('')}
+        </div>
+      `;
+    }
+
+    // Splits into "currently injured" (open episodes) and "this season"
+    // (everything that started in the current season, open or since
+    // closed) — see getInjuryReport in main.js for why the season split
+    // is derived from start_date rather than a stored season_id.
+    async function renderInjuryReport() {
+      const currentContainer = document.getElementById('home-injury-current-body');
+      const historyContainer = document.getElementById('home-injury-history-body');
+      if (!currentContainer || !historyContainer) return;
+
+      let report = { current: [], seasonHistory: [] };
+      if (currentSaveId && window.api && window.api.getInjuryReport) {
+        try { report = await window.api.getInjuryReport(currentSaveId); } catch (e) { console.error('Failed to load injury report:', e); }
+      }
+
+      renderExpandableList('home-injury-current-body', report.current, (visible) => `
+        <ul class="injury-report-list">
+          ${visible.map(e => `
+            <li class="clickable-name injury-ongoing" onclick="openPlayerProfile(${e.player_id})">
+              <span>${e.name}</span>
+              <span class="injury-report-meta">${injuryTypeName(e.injury_type_id)} · since ${formatDateMMDDYYYY(e.start_date)}</span>
+            </li>
+          `).join('')}
+        </ul>
+      `, 'No players currently injured.');
+
+      renderExpandableList('home-injury-history-body', report.seasonHistory, (visible) => `
+        <ul class="injury-report-list">
+          ${visible.map(e => `
+            <li class="clickable-name ${e.end_date ? 'injury-recovered' : 'injury-ongoing'}" onclick="openPlayerProfile(${e.player_id})">
+              <span>${e.name}</span>
+              <span class="injury-report-meta">${injuryTypeName(e.injury_type_id)} · ${formatDateMMDDYYYY(e.start_date)} – ${e.end_date ? formatDateMMDDYYYY(e.end_date) : 'ongoing'}</span>
+            </li>
+          `).join('')}
+        </ul>
+      `, 'No injuries recorded this season.');
     }
 
     function renderYouthModeWarning() {
@@ -7181,22 +7977,40 @@
     // potential_low/potential_high range from the game (potentialvariance).
     // This table only ever gets one exact potential number since these
     // are already-promoted players, not academy prospects.
+    // The threshold alone (getPromisingYouthThreshold) tends to qualify
+    // most of a well-developed academy, especially in the lower leagues
+    // where it's set low — "Promising Youth" used to mean "here's
+    // everyone," which defeats the point of a highlights widget. Hard-
+    // capped to the top few by potential instead, with no "Show All"
+    // (see renderExpandableList — a list that never exceeds 5 items never
+    // grows that button), so this stays a highlights reel, not a second
+    // squad list.
+    const FUTURE_STARS_LIMIT = 5;
+
     async function renderPromisingYouthTable() {
       const potentialThreshold = getPromisingYouthThreshold();
 
       // Filtering/sorting always uses the real potential value — only the
       // displayed number is fuzzed under Youth Mode (see
       // formatPotentialDisplay). The threshold logic must stay accurate
-      // or the widget would flag/omit the wrong players.
-      const prospects = currentPlayers
+      // or the widget would flag/omit the wrong players. __clubStatus !==
+      // 'transferred' excludes anyone who's actually left the club — a
+      // sold player's last-known row otherwise still qualifies forever.
+      const qualifying = currentPlayers
+        .filter(p => p.__clubStatus !== 'transferred')
         .map(p => ({ ...p, __age: computeAge(p.dob || p.birthdate) }))
         .filter(p => p.__age !== null && p.__age < 22 && Number(p.potential || 0) >= potentialThreshold)
-        .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }))
         .sort((a, b) => Number(b.potential || 0) - Number(a.potential || 0));
+
+      const prospects = qualifying
+        .slice(0, FUTURE_STARS_LIMIT)
+        .map(p => ({ ...p, __value: estimateMarketValue(p.overall, p.potential, p.__age, p.wage) }));
 
       const careerStatsMap = currentYouthModeEnabled ? await getCareerStatsMap() : null;
 
-      const prefix = `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">Threshold: under 22, ${potentialThreshold}+ potential (${getPrimaryLeagueName() || 'league'})</div>`;
+      const prefix = `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px;">
+        Top ${prospects.length} of ${qualifying.length} qualifying — under 22, ${potentialThreshold}+ potential (${getPrimaryLeagueName() || 'league'})
+      </div>`;
 
       renderExpandableList('home-youth-body', prospects, (visible) => `
         <table class="sub-table">
@@ -7301,6 +8115,9 @@
     function renderHomeDashboard() {
       renderHomeHeader();
       renderYouthModeWarning();
+      renderYouthModeDangerZone();
+      renderSquadAgeProfile();
+      renderInjuryReport();
       renderUpcomingMatchWidget();
       renderLeagueTableWidget();
       renderCaptainWidget();
