@@ -378,6 +378,50 @@ CREATE TABLE IF NOT EXISTS player_manual_playstyles (
     FOREIGN KEY(player_id) REFERENCES players(player_id)
 );
 
+-- Manually-tagged "Untouchable" players for Youth Squad Career Mode's
+-- Overall Cap Watch box (see renderYouthModeDangerZone in index.html) —
+-- excludes a player from ever being auto-suggested as a "Sell" candidate
+-- when the squad goes over its allowance, since nothing in the game data
+-- can tell us "this is a fan favorite/club legend, don't sell them."
+-- Save-scoped (not global like player_manual_playstyles): who's
+-- untouchable is a fact about THIS save's story, not the real player.
+CREATE TABLE IF NOT EXISTS untouchable_players (
+    player_id INTEGER NOT NULL,
+    save_id INTEGER NOT NULL,
+    marked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (player_id, save_id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(save_id) REFERENCES saves(id)
+);
+
+-- Full manual captaincy tracking for both Captain and Vice Captain on the
+-- Home dashboard's Captain widget (see renderCaptainWidget in index.html).
+-- Neither role is read from Live Editor's export any more — the "teams"
+-- table's captainid field this used to auto-detect Captain from wasn't
+-- reliable enough to drive gameplay-facing display, and Vice Captain has
+-- no in-game source at all — so both are pure user assignments.
+--
+-- One row per STINT, not one row per player: the currently active holder
+-- of a role is whichever row has end_year IS NULL. When the user assigns
+-- someone new to a role (setCaptaincy in main.js), the previous holder's
+-- open row is closed with end_year set to the in-game year at that
+-- moment, and a new row opens for the incoming player at that same year —
+-- so re-assigning a role always leaves a clean, non-overlapping history of
+-- who held it when, instead of one value that just gets overwritten.
+-- start_year defaults to that same in-game year but can be corrected
+-- afterward (setCaptaincyStartYear) for e.g. a captaincy that in the
+-- story actually began earlier than when the user first recorded it here.
+CREATE TABLE IF NOT EXISTS captaincy_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    role TEXT NOT NULL,       -- 'captain' or 'vice_captain'
+    start_year INTEGER,
+    end_year INTEGER,         -- NULL = the current/ongoing holder
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id)
+);
+
 -- Real transfer/loan fees, read directly from the Career Mode Transfer
 -- Manager's negotiation-storage memory (see export_all.lua's TRANSFERS
 -- EXPORT block) rather than the "transfers"/"transferhistory" DB tables,

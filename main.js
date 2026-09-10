@@ -1225,11 +1225,20 @@ function getSeasonOverviewPreview(saveId = activeSaveId) {
 // potential_low/potential_high are a deliberate range, not the exact
 // potential (see export_all.lua's YOUTH ACADEMY EXPORT block for why).
 // youth_academy_snapshot rows are never deleted once seen (see
-// importYouthAcademy), so a player promoted to the senior squad since
-// their last youth export would otherwise still show up here — excluded
-// via NOT IN player_season_stats for this season, which is what the
-// senior squad view (getSquadFromDB) is built from, so a duplicate
-// never appears in both tables at once.
+// importYouthAcademy), so two separate things can leave a stale row
+// still showing up here:
+//   1. Promoted to the senior squad since their last youth export —
+//      excluded via NOT IN player_season_stats for this season, which is
+//      what the senior squad view (getSquadFromDB) is built from, so a
+//      duplicate never appears in both tables at once.
+//   2. Released from the academy for any OTHER reason (aged out, let go,
+//      etc.) without being promoted — nothing marks that explicitly, but
+//      every player still genuinely in the academy gets their row's
+//      updated_at refreshed on every re-export (see importYouthAcademy's
+//      ON CONFLICT clause), so anyone whose updated_at is older than the
+//      freshest one seen this season fell out of a more recent export and
+//      is excluded here too. Same "freshest updated_at wins" approach
+//      already used for the live squad in generateSeasonEndReviewIfNeeded.
 function getYouthAcademy(saveId = activeSaveId) {
   if (!db || !saveId) return [];
   const seasonId = getCurrentSeasonForSave(saveId);
@@ -1237,7 +1246,7 @@ function getYouthAcademy(saveId = activeSaveId) {
 
   const res = db.exec(`
     SELECT p.player_id, p.name, p.position_id, p.dob,
-           y.overall, y.potential_low, y.potential_high, y.tier, y.months_in_squad
+           y.overall, y.potential_low, y.potential_high, y.tier, y.months_in_squad, y.updated_at
     FROM youth_academy_snapshot y
     JOIN players p ON p.player_id = y.player_id
     WHERE y.season_id = ${seasonId}
@@ -1247,11 +1256,18 @@ function getYouthAcademy(saveId = activeSaveId) {
     ORDER BY y.potential_high DESC;
   `);
   if (res.length === 0) return [];
-  return res[0].values.map(row => ({
-    player_id: row[0], name: row[1], position_id: row[2], dob: row[3],
-    overall: row[4], potential_low: row[5], potential_high: row[6],
-    tier: row[7], months_in_squad: row[8]
-  }));
+
+  const rows = res[0].values;
+  let maxUpdatedAt = null;
+  rows.forEach(r => { if (r[9] && (!maxUpdatedAt || r[9] > maxUpdatedAt)) maxUpdatedAt = r[9]; });
+
+  return rows
+    .filter(r => !maxUpdatedAt || r[9] >= maxUpdatedAt)
+    .map(row => ({
+      player_id: row[0], name: row[1], position_id: row[2], dob: row[3],
+      overall: row[4], potential_low: row[5], potential_high: row[6],
+      tier: row[7], months_in_squad: row[8]
+    }));
 }
 
 // Trophies actually won during this save — a competition result of
@@ -1349,6 +1365,86 @@ function setManualPlayStyles(playerId, styles) {
     VALUES (?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(player_id) DO UPDATE SET playstyles_json = excluded.playstyles_json, updated_at = CURRENT_TIMESTAMP;
   `, [playerId, json]);
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// "Untouchable" tag for Youth Squad Career Mode's Overall Cap Watch box —
+// see untouchable_players in schema.sql for why this exists and is
+// save-scoped.
+function getUntouchablePlayerIds(saveId) {
+  if (!db || !saveId) return [];
+  const res = db.exec(`SELECT player_id FROM untouchable_players WHERE save_id = ${saveId};`);
+  return res.length > 0 ? res[0].values.map(([id]) => id) : [];
+}
+
+function setPlayerUntouchable(saveId, playerId, untouchable) {
+  if (!db || !saveId || !playerId) return { success: false };
+  if (untouchable) {
+    db.run('INSERT OR IGNORE INTO untouchable_players (player_id, save_id) VALUES (?, ?);', [playerId, saveId]);
+  } else {
+    db.run('DELETE FROM untouchable_players WHERE player_id = ? AND save_id = ?;', [playerId, saveId]);
+  }
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// Captain and Vice Captain on the Home dashboard's Captain widget — see
+// captaincy_history in schema.sql for why this is a full manual, stint-
+// based history rather than a single overwritable value for each role.
+const CAPTAINCY_ROLES = ['captain', 'vice_captain'];
+
+// The currently active holder of a role (the one open stint, end_year IS
+// NULL), or null if nobody currently holds it.
+function getCurrentCaptaincy(saveId, role) {
+  if (!db || !saveId || !CAPTAINCY_ROLES.includes(role)) return null;
+  const res = db.exec(`SELECT player_id, start_year FROM captaincy_history WHERE save_id = ${saveId} AND role = '${role}' AND end_year IS NULL LIMIT 1;`);
+  if (res.length === 0 || res[0].values.length === 0) return null;
+  return { player_id: res[0].values[0][0], start_year: res[0].values[0][1] };
+}
+
+// Every stint a specific player has held a role in a save, oldest first —
+// the open one (if it's theirs) plus any past ones. Backs a possible
+// tenure history view on the player profile.
+function getCaptaincyHistoryForPlayer(saveId, playerId, role) {
+  if (!db || !saveId || !playerId || !CAPTAINCY_ROLES.includes(role)) return [];
+  const res = db.exec(`SELECT start_year, end_year FROM captaincy_history WHERE save_id = ${saveId} AND player_id = ${playerId} AND role = '${role}' ORDER BY id ASC;`);
+  if (res.length === 0) return [];
+  return res[0].values.map(([start_year, end_year]) => ({ start_year, end_year }));
+}
+
+// Reassigns a role to a new player (or clears it if playerId is falsy),
+// closing the previous holder's open stint at inGameYear before opening a
+// fresh one for the incoming player at that same year. No-ops if the
+// incoming player already holds the role — nothing actually changed, so
+// nothing should be closed/reopened.
+function setCaptaincy(saveId, role, playerId, inGameYear) {
+  if (!db || !saveId || !CAPTAINCY_ROLES.includes(role)) return { success: false };
+
+  const current = getCurrentCaptaincy(saveId, role);
+  if (current && playerId && current.player_id === playerId) return { success: true };
+
+  if (current) {
+    db.run(`UPDATE captaincy_history SET end_year = ? WHERE save_id = ? AND role = ? AND player_id = ? AND end_year IS NULL;`,
+      [inGameYear, saveId, role, current.player_id]);
+  }
+  if (playerId) {
+    db.run(`INSERT INTO captaincy_history (save_id, player_id, role, start_year, end_year) VALUES (?, ?, ?, ?, NULL);`,
+      [saveId, playerId, role, inGameYear]);
+  }
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
+// Manual correction for the CURRENT holder's start_year only — the
+// automatic value setCaptaincy stamps isn't always right (e.g. this
+// feature was added mid-save, so the real start predates the user's first
+// assignment in the app). Past, already-closed stints are historical
+// record and not editable here.
+function setCaptaincyStartYear(saveId, role, playerId, startYear) {
+  if (!db || !saveId || !playerId || !CAPTAINCY_ROLES.includes(role)) return { success: false };
+  db.run(`UPDATE captaincy_history SET start_year = ? WHERE save_id = ? AND role = ? AND player_id = ? AND end_year IS NULL;`,
+    [startYear, saveId, role, playerId]);
   saveDatabaseToDisk();
   return { success: true };
 }
@@ -1607,6 +1703,44 @@ function getPlayerInjuryHistory(playerId, saveId = activeSaveId) {
   return res[0].values.map(([id, start_date, end_date, injury_type_id]) => ({ id, start_date, end_date, injury_type_id }));
 }
 
+// Whole-squad injury view for the Home dashboard's Injury Report widget —
+// split into currently-open episodes and everything that started this
+// season. player_injury_history has no season_id column (it's scoped only
+// by save_id/player_id — see the table's own comment for why), so "this
+// season" is derived the same way the rest of the app already turns a
+// date into a season label (computeSeasonLabel) rather than needing a
+// migration to add one.
+function getInjuryReport(saveId = activeSaveId) {
+  if (!db || !saveId) return { current: [], seasonHistory: [] };
+
+  // getCurrentSeasonForSave (not a bare is_current = 1 lookup) since
+  // is_current can lag right after a season rollover or when browsing a
+  // save that isn't the live one — same fallback every other season-
+  // scoped read in this file already relies on.
+  const seasonId = getCurrentSeasonForSave(saveId);
+  const seasonRes = seasonId ? db.exec(`SELECT year_label FROM seasons WHERE id = ${seasonId};`) : [];
+  const currentSeasonLabel = seasonRes.length > 0 && seasonRes[0].values.length > 0 ? seasonRes[0].values[0][0] : null;
+
+  const res = db.exec(`
+    SELECT h.id, h.player_id, p.name, h.start_date, h.end_date, h.injury_type_id
+    FROM player_injury_history h
+    JOIN players p ON p.player_id = h.player_id
+    WHERE h.save_id = ${saveId}
+    ORDER BY h.start_date DESC;
+  `);
+  if (res.length === 0) return { current: [], seasonHistory: [] };
+
+  const episodes = res[0].values.map(([id, player_id, name, start_date, end_date, injury_type_id]) =>
+    ({ id, player_id, name, start_date, end_date, injury_type_id }));
+
+  const current = episodes.filter(e => e.end_date === null);
+  const seasonHistory = currentSeasonLabel
+    ? episodes.filter(e => computeSeasonLabel(e.start_date) === currentSeasonLabel)
+    : [];
+
+  return { current, seasonHistory };
+}
+
 // Manual injury-type classification for one episode — see
 // player_injury_history in schema.sql and the INJURY_TYPES catalog in
 // index.html. Pass null to clear back to "not yet classified".
@@ -1737,7 +1871,7 @@ const YOUTH_MODE_PYRAMID_TIERS = [
 // Lower tiers: flat baseline overall/allowance/margin per tier.
 const YOUTH_MODE_TIER_CONFIG = {
   2: { leagueAverage: 72, allowance: 3, margin: 3 }, // Championship
-  3: { leagueAverage: 67, allowance: 3, margin: 3 }, // League One
+  3: { leagueAverage: 67, allowance: 2, margin: 3 }, // League One
   4: { leagueAverage: 63, allowance: 2, margin: 3 }  // League Two
 };
 
@@ -3447,6 +3581,7 @@ ipcMain.handle('get-inferred-transfers', (_event, saveId) => getInferredTransfer
 ipcMain.handle('get-transfer-fees', (_event, saveId) => getTransferFees(saveId));
 ipcMain.handle('get-player-transfer-history', (_event, playerId, saveId) => getPlayerTransferHistory(playerId, saveId));
 ipcMain.handle('get-player-injury-history', (_event, playerId, saveId) => getPlayerInjuryHistory(playerId, saveId));
+ipcMain.handle('get-injury-report', (_event, saveId) => getInjuryReport(saveId));
 ipcMain.handle('set-injury-episode-type', (_event, episodeId, injuryTypeId) => setInjuryEpisodeType(episodeId, injuryTypeId));
 ipcMain.handle('return-player-to-full-fitness', (_event, episodeId, endDate) => returnPlayerToFullFitness(episodeId, endDate));
 ipcMain.handle('mark-player-currently-injured', (_event, playerId, startDate, injuryTypeId, saveId) => markPlayerCurrentlyInjured(playerId, startDate, injuryTypeId, saveId));
@@ -3467,15 +3602,48 @@ ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHono
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-signed-players', (_event, saveId) => getSignedPlayers(saveId));
+ipcMain.handle('get-current-captaincy', (_event, saveId, role) => getCurrentCaptaincy(saveId, role));
+ipcMain.handle('get-captaincy-history-for-player', (_event, saveId, playerId, role) => getCaptaincyHistoryForPlayer(saveId, playerId, role));
+ipcMain.handle('set-captaincy', (_event, saveId, role, playerId, inGameYear) => setCaptaincy(saveId, role, playerId, inGameYear));
+ipcMain.handle('set-captaincy-start-year', (_event, saveId, role, playerId, startYear) => setCaptaincyStartYear(saveId, role, playerId, startYear));
 ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
 ipcMain.handle('get-manual-play-styles', (_event, playerId) => getManualPlayStyles(playerId));
 ipcMain.handle('set-manual-play-styles', (_event, playerId, styles) => setManualPlayStyles(playerId, styles));
+ipcMain.handle('get-untouchable-player-ids', (_event, saveId) => getUntouchablePlayerIds(saveId));
+ipcMain.handle('set-player-untouchable', (_event, saveId, playerId, untouchable) => setPlayerUntouchable(saveId, playerId, untouchable));
 ipcMain.handle('get-pending-season-overview', (_event, saveId) => getPendingSeasonOverview(saveId));
 ipcMain.handle('acknowledge-season-overview', (_event, saveId, seasonId) => acknowledgeSeasonOverview(saveId, seasonId));
 ipcMain.handle('get-season-alerts', (_event, saveId) => getSeasonAlerts(saveId));
 ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayReminder(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
+
+// ------------------------------------------------------------------
+// Connected Career (optional sync module -- see connected_career/,
+// which owns all of this feature's own logic). This only registers
+// the functions it's allowed to reach into the app with, plus a few
+// IPC handlers the Settings panel's "Connected Career" section calls
+// through; it doesn't run anything on its own or affect normal app
+// use otherwise.
+// ------------------------------------------------------------------
+try {
+  const connectedCareer = require('./connected_career');
+  connectedCareer.init({
+    getSquadFromDB,
+    getCurrentSeasonId: () => currentSeasonId,
+    userDataPath: app.getPath('userData'),
+  });
+  ipcMain.handle('connected-career-status', () => connectedCareer.getStatus());
+  ipcMain.handle('connected-career-join', (_event, code, owner) => connectedCareer.join(code, owner));
+  ipcMain.handle('connected-career-sync-now', () => connectedCareer.syncNow());
+  ipcMain.handle('connected-career-leave', () => connectedCareer.leave());
+  ipcMain.handle('connected-career-export-squad-for-mirroring', () => connectedCareer.exportSquadForMirroring());
+  ipcMain.handle('connected-career-push-full-rows', () => connectedCareer.pushFullRowsNow());
+  ipcMain.handle('connected-career-pull-mirror-creates', () => connectedCareer.pullMirrorCreatesNow());
+  ipcMain.handle('connected-career-confirm-mirror-results', () => connectedCareer.confirmMirrorResultsNow());
+} catch (err) {
+  console.error('[Connected Career] Failed to initialize -- Connected Career features unavailable this session.', err.message);
+}
 
 app.whenReady().then(async () => {
   await initDatabase();
