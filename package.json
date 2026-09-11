@@ -12,14 +12,17 @@
     "appId": "com.fifa.companion",
     "productName": "EA FC Companion App",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/app-icon/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "EA FC Companion App"
+      "shortcutName": "EA FC Companion App",
+      "installerIcon": "assets/app-icon/icon.ico",
+      "uninstallerIcon": "assets/app-icon/icon.ico"
     },
     "files": [
       "main.js",

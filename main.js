@@ -3558,6 +3558,12 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'EA FC Companion App',
+    // The packaged Windows build gets its icon from build.win.icon in
+    // package.json instead (electron-builder bakes that into the .exe
+    // itself) — this only covers the window/taskbar icon while running
+    // unpackaged via `npm start`, which would otherwise show Electron's
+    // default icon.
+    icon: path.join(__dirname, 'assets', 'app-icon', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
