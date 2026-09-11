@@ -98,7 +98,18 @@ CREATE TABLE IF NOT EXISTS players (
     -- later promoted/relegated. NULL until Youth Mode is on and this
     -- player has synced at least once. See YOUTH_REVEAL_SCHEDULE_BY_TIER
     -- in index.html for what this actually controls.
-    youth_reveal_tier INTEGER
+    youth_reveal_tier INTEGER,
+    -- Real field from the game's own "players" table (see
+    -- export_squad.lua/export_all.lua) — a 1-10 skin tone lightness
+    -- value (1 = palest, 10 = darkest; confirmed empirically against real
+    -- players via assets/inspect_skintone.lua, not documented anywhere by
+    -- Live Editor). Used only to bucket which local headshot photo to
+    -- show for a player with no real in-game photo source (see
+    -- resolveHeadshotPath in main.js and reference-player-photo-capture
+    -- memory) — nationality decides the bucket outright for most
+    -- players, this is only the tiebreaker for nations whose population
+    -- spans multiple buckets (e.g. England, France, USA).
+    skintone_code INTEGER
 );
 
 -- Seasonal player snapshots — the actual history table
@@ -378,6 +389,24 @@ CREATE TABLE IF NOT EXISTS player_manual_playstyles (
     FOREIGN KEY(player_id) REFERENCES players(player_id)
 );
 
+-- User-picked override for a player's local headshot photo (see the
+-- "Change Photo" picker on the player profile), for whenever the
+-- automatic age/nationality/skin-tone bucketing (resolveHeadshotPath in
+-- main.js) picks a photo that doesn't look right. Keyed on player_id
+-- alone like player_manual_playstyles above — a player's face is a
+-- property of the real person, not of any one save. headshot_path is the
+-- same "assets/headshots/<age>/<ethnicity>/<file>" relative path
+-- resolveHeadshotPath itself returns, so both sources are interchangeable
+-- wherever a player row's headshot_path is read; getSquadFromDB checks
+-- this table first and only falls back to the automatic bucket pick when
+-- no row exists here.
+CREATE TABLE IF NOT EXISTS player_manual_headshots (
+    player_id INTEGER PRIMARY KEY,
+    headshot_path TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(player_id)
+);
+
 -- Manually-tagged "Untouchable" players for Youth Squad Career Mode's
 -- Overall Cap Watch box (see renderYouthModeDangerZone in index.html) —
 -- excludes a player from ever being auto-suggested as a "Sell" candidate
@@ -512,4 +541,51 @@ CREATE TABLE IF NOT EXISTS player_contract_state (
     PRIMARY KEY (player_id, save_id),
     FOREIGN KEY(player_id) REFERENCES players(player_id),
     FOREIGN KEY(save_id) REFERENCES saves(id)
+);
+
+-- "Around the World" tab: real-world end-of-season awards for the top
+-- leagues globally. IMPORTANT — this is NOT generic reference data
+-- shared by every save: it's a one-time, hand-compiled backfill of the
+-- 2025/2026 season for ONE specific save (the "Milton Keynes Dons" save
+-- active when this feature was built), needed only because that save had
+-- already played through that season before Live Editor-based capture
+-- for these other leagues existed. Every other save — and any season
+-- this save reaches going forward — is meant to have this data retrieved
+-- live from the game instead (not yet built; these 14 leagues' standings/
+-- stats live outside the save's own fixtures, so reading them needs new,
+-- carefully-verified Live Editor memory/DB access — see
+-- feedback_live_editor_data_safety memory before attempting that). Scoped
+-- by save_id so switching to a different save never shows this save's
+-- backfilled numbers as if they belonged to it.
+--
+-- EFL League Two is deliberately NOT stored here even though it's shown
+-- alongside these leagues in the UI — it's whichever tier the user's own
+-- save is actually playing, so its champion/Golden Boot/Assist/Glove are
+-- computed live from the save's own season_standings/season_league_stats
+-- instead (see getWorldLeagueAwardsForSeason in main.js).
+--
+-- golden_boot_value/top_assist_value/golden_glove_value are the
+-- real-world stat that accompanied the name (e.g. goals scored), kept
+-- alongside the name so the UI can show "Erling Haaland (27)" without a
+-- second lookup. Text fields, not player_id, since these are real-world
+-- players with no representation in the players table. A co-leader tie
+-- (e.g. two Golden Boot winners) is stored as one "Name A / Name B" string
+-- rather than a second row — matches how the user compiled the source
+-- list. NULL in a *_player field means the real-world competition doesn't
+-- officially track that award (e.g. Primeira Liga's assist leader).
+CREATE TABLE IF NOT EXISTS world_league_awards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    league_name TEXT NOT NULL,
+    season_label TEXT NOT NULL,   -- e.g. "2025/2026", same format as seasons.year_label
+    champion TEXT,
+    golden_boot_player TEXT,
+    golden_boot_value INTEGER,
+    top_assist_player TEXT,
+    top_assist_value INTEGER,
+    golden_glove_player TEXT,
+    golden_glove_value INTEGER,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    UNIQUE(save_id, league_name, season_label)
 );

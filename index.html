@@ -50,9 +50,9 @@
     .table-container { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; overflow-x: auto; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
     table { width: 100%; border-collapse: collapse; text-align: left; }
     thead { background-color: #1f242d; border-bottom: 1px solid var(--border-color); }
-    th { padding: 14px 16px; font-size: 12px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
+    th { padding: 14px 16px; font-size: 13px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; cursor: pointer; user-select: none; white-space: nowrap; }
     th:hover { color: var(--accent-color); background-color: var(--hover-color); }
-    td { padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; white-space: nowrap; }
+    td { padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 16px; white-space: nowrap; }
     
     .player-row:hover, .transfer-row:hover { background-color: var(--hover-color); }
     .player-row, .clickable-name { cursor: pointer; }
@@ -81,9 +81,22 @@
     .detail-row.open { display: table-row; }
     .detail-wrapper { padding: 16px 24px; }
     .sub-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; }
-    .sub-table th { background: #161b22; font-size: 11px; padding: 10px 14px; color: var(--text-dim); border-bottom: 1px solid var(--border-color); }
-    .sub-table td { padding: 10px 14px; font-size: 13px; border-bottom: 1px solid var(--border-color); }
+    .sub-table th { background: #161b22; font-size: 12px; padding: 10px 14px; color: var(--text-dim); border-bottom: 1px solid var(--border-color); }
+    .sub-table td { padding: 10px 14px; font-size: 15px; border-bottom: 1px solid var(--border-color); }
     .sub-table tr:last-child td { border-bottom: none; }
+    /* League Stats' award-category tables (Top Scorers/Assists/Clean
+       Sheets) live in a narrow 3-column row where auto table layout's
+       content-based column sizing overflows the card — table-layout:
+       fixed makes the table strictly respect its 100% width regardless of
+       content, with the Player/Team columns (the only ones long enough to
+       matter) truncating with an ellipsis instead of forcing extra width. */
+    .compact-leaderboard { table-layout: fixed; }
+    .compact-leaderboard th:nth-child(1), .compact-leaderboard td:nth-child(1) { width: 10%; padding-left: 10px; padding-right: 4px; }
+    .compact-leaderboard th:nth-child(2), .compact-leaderboard td:nth-child(2) { width: 36%; }
+    .compact-leaderboard th:nth-child(3), .compact-leaderboard td:nth-child(3) { width: 32%; }
+    .compact-leaderboard th:nth-child(4), .compact-leaderboard td:nth-child(4) { width: 11%; }
+    .compact-leaderboard th:nth-child(5), .compact-leaderboard td:nth-child(5) { width: 11%; padding-right: 10px; }
+    .compact-leaderboard td:nth-child(2), .compact-leaderboard td:nth-child(3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Filter Controls */
     .filter-container { margin-bottom: 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -135,10 +148,10 @@
       justify-content: space-between;
       align-items: center;
       background: var(--expand-bg);
-      padding: 8px 12px;
+      padding: 10px 14px;
       border-radius: 6px;
       border: 1px solid var(--border-color);
-      font-size: 13px;
+      font-size: 16px;
     }
     .comp-name { font-weight: 600; display: inline-flex; align-items: center; gap: 8px; }
     .comp-standing { font-weight: 700; color: var(--accent-color); background: #00ff8715; padding: 2px 8px; border-radius: 4px; border: 1px solid #00ff8733; }
@@ -159,6 +172,10 @@
       transition: background 0.3s ease, border-color 0.3s ease;
     }
     .home-header-strip h2 { font-size: 22px; font-weight: 800; letter-spacing: 0.3px; margin: 0; transition: color 0.3s ease; }
+    /* League Stats' title doubles as the competition name (with its logo
+       next to it) rather than a plain section heading, so it gets its own
+       larger size instead of the shared 22px every other tab header uses. */
+    #league-stats-league-name { font-size: 30px; }
     /* Solid dark pill (not tinted to match the banner) so this stays
        readable no matter what team-color gradient the banner behind it
        ends up being. */
@@ -232,6 +249,13 @@
     #home-team-record-body .stat-box-item span { font-size: 12px; }
     #home-team-record-body .stat-box-item strong { font-size: 26px; }
     .home-widget-stack { display: flex; flex-direction: column; gap: 20px; }
+    /* Grid items default to a min-width based on their own content's
+       min-content size, which can force a grid track (and the whole page)
+       wider than the viewport when a child has something wide inside it
+       (e.g. the League Stats award-winner spotlight cards) — this lets
+       cards shrink below that and wrap/scroll internally instead, so
+       these grids never cause page-level horizontal scrolling. */
+    .home-dashboard-grid > .profile-card { min-width: 0; }
     .home-grid-stats { grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 1100px) {
       .home-grid-stats { grid-template-columns: 1fr; }
@@ -731,9 +755,10 @@
     <button class="tab-btn active" onclick="switchTab('home')" id="btn-home">Home</button>
     <button class="tab-btn" onclick="switchTab('squad')" id="btn-squad">Squad</button>
     <button class="tab-btn" onclick="switchTab('league-stats')" id="btn-league-stats">League Stats</button>
-    <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
     <button class="tab-btn" onclick="switchTab('transfers')" id="btn-transfers">Transfers Hub</button>
     <button class="tab-btn" onclick="switchTab('past-players')" id="btn-past-players">Former Players</button>
+    <button class="tab-btn" onclick="switchTab('calendar')" id="btn-calendar">Calendar & Fixtures</button>
+    <!-- <button class="tab-btn" onclick="switchTab('around-world')" id="btn-around-world">Around the World</button> -->
   </div>
 
   <!-- Home Tab -->
@@ -1084,7 +1109,10 @@
   <!-- League Stats Tab -->
   <div id="league-stats-tab" class="tab-content">
     <div class="home-header-strip">
-      <h2 id="league-stats-league-name">League Stats</h2>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img id="league-stats-league-logo" style="width: 56px; height: 56px; object-fit: contain; display: none;" onerror="this.style.display='none'" />
+        <h2 id="league-stats-league-name">League Stats</h2>
+      </div>
       <div style="display: flex; align-items: center; gap: 10px;">
         <label for="league-stats-season-select" style="font-weight: bold; font-size: 14px;">Season:</label>
         <select id="league-stats-season-select" onchange="onLeagueStatsSeasonChange(this.value)">
@@ -1092,22 +1120,31 @@
         </select>
       </div>
     </div>
-    <div class="home-dashboard-grid home-grid-top">
+    <div class="profile-card home-widget">
+      <h3><span>League Table</span></h3>
+      <div id="league-stats-full-table-body"></div>
+    </div>
+    <!-- The three trophy categories share this row — all now use the
+         award-winner spotlight card (see buildAwardWinnerSpotlight), so
+         they're grouped together at equal width; Yellow/Red Cards below
+         are plain tables with no spotlight, so they get the more
+         comfortable 2-column row instead of crowding in here. -->
+    <div class="home-dashboard-grid home-grid-stats">
       <div class="profile-card home-widget">
-        <h3><span>Top 10 Scorers</span></h3>
+        <h3><span>Top 5 Scorers</span></h3>
         <div id="league-stats-top-scorers-body"></div>
       </div>
       <div class="profile-card home-widget">
-        <h3><span>Top 10 Assists</span></h3>
+        <h3><span>Top 5 Assists</span></h3>
         <div id="league-stats-top-assists-body"></div>
       </div>
-    </div>
-
-    <div class="home-dashboard-grid home-grid-stats">
       <div class="profile-card home-widget">
         <h3><span>Top 5 Clean Sheets</span></h3>
         <div id="league-stats-clean-sheets-body"></div>
       </div>
+    </div>
+
+    <div class="home-dashboard-grid home-grid-top">
       <div class="profile-card home-widget">
         <h3><span>Top 5 Yellow Cards</span></h3>
         <div id="league-stats-yellow-cards-body"></div>
@@ -1117,28 +1154,18 @@
         <div id="league-stats-red-cards-body"></div>
       </div>
     </div>
+  </div>
 
-    <div class="home-dashboard-grid home-grid-top">
-      <div class="profile-card home-widget">
-        <h3>
-          <span id="league-stats-attack-title">Best Attack</span>
-          <span class="home-toggle">
-            <button class="home-toggle-btn active" onclick="setLeagueStatsExtremeMode('attack','best', this)">Best</button>
-            <button class="home-toggle-btn" onclick="setLeagueStatsExtremeMode('attack','worst', this)">Worst</button>
-          </span>
-        </h3>
-        <div id="league-stats-top-scoring-teams-body"></div>
+  <div id="around-world-tab" class="tab-content">
+    <div class="home-header-strip">
+      <h2>Around the World</h2>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <label for="around-world-season-select" style="font-weight: bold; font-size: 14px;">Season:</label>
+        <select id="around-world-season-select" onchange="onAroundWorldSeasonChange(this.value)"></select>
       </div>
-      <div class="profile-card home-widget">
-        <h3>
-          <span id="league-stats-defense-title">Best Defense</span>
-          <span class="home-toggle">
-            <button class="home-toggle-btn active" onclick="setLeagueStatsExtremeMode('defense','best', this)">Best</button>
-            <button class="home-toggle-btn" onclick="setLeagueStatsExtremeMode('defense','worst', this)">Worst</button>
-          </span>
-        </h3>
-        <div id="league-stats-best-defense-body"></div>
-      </div>
+    </div>
+    <div class="profile-card home-widget">
+      <div id="around-world-table-body"></div>
     </div>
   </div>
 
@@ -1170,6 +1197,25 @@
     <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
       <button class="back-btn" style="margin: 0;" onclick="closePlaystylePicker()">Cancel</button>
       <button class="back-btn" style="margin: 0; background: var(--accent-color); color: #0d1117; border-color: var(--accent-color);" onclick="applyPlaystyleSelection()">Apply</button>
+    </div>
+  </dialog>
+
+  <!-- Manual headshot photo picker (see openHeadshotPicker) — lets the
+       user override the automatic age/nationality/skin-tone photo match
+       for a specific player, browsing any bucket, not just their own. -->
+  <dialog id="headshot-picker-dialog" class="league-history-dialog" style="max-width: 640px;">
+    <div class="league-history-header">
+      <h3>Change Photo</h3>
+      <button class="back-btn" style="margin: 0;" onclick="closeHeadshotPicker()">✕</button>
+    </div>
+    <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+      <select id="headshot-picker-age-select" onchange="onHeadshotPickerBucketChange()" style="flex: 1;"></select>
+      <select id="headshot-picker-ethnicity-select" onchange="onHeadshotPickerBucketChange()" style="flex: 1;"></select>
+    </div>
+    <div id="headshot-picker-grid" style="max-height: 50vh; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px;"></div>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px;">
+      <button class="back-btn" style="margin: 0;" onclick="resetHeadshotToAutomatic()">Reset to Automatic</button>
+      <button class="back-btn" style="margin: 0;" onclick="closeHeadshotPicker()">Cancel</button>
     </div>
   </dialog>
 
@@ -1348,8 +1394,12 @@
       comps.forEach(comp => {
         const row = document.createElement('div');
         row.className = 'competition-status-row';
+        const logoUrl = getCompetitionLogoUrl(comp.name);
+        const iconHtml = logoUrl
+          ? `<img src="${logoUrl}" alt="" style="width: 32px; height: 32px; object-fit: contain; vertical-align: middle; margin-right: 8px;" onerror="this.outerHTML='${comp.icon || '⚽'} '" />`
+          : `${comp.icon || '⚽'} `;
         row.innerHTML = `
-          <span class="comp-name">${comp.icon || '⚽'} ${comp.name}</span>
+          <span class="comp-name">${iconHtml}${comp.name}</span>
           <span class="comp-standing">${comp.standing}</span>
         `;
         container.appendChild(row);
@@ -1534,6 +1584,56 @@
       return `<div style="width: ${sizePx}px; height: ${sizePx}px; background: #21262d; border: 1px solid var(--border-color); border-radius: ${borderRadius}; display: flex; align-items: center; justify-content: center; color: #4d5561; flex-shrink: 0;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.9-2.2 4.9-4.9S14.7 2.2 12 2.2 7.1 4.4 7.1 7.1 9.3 12 12 12zm0 2.4c-3.5 0-10.4 1.8-10.4 5.4v2.1h20.8v-2.1c0-3.6-6.9-5.4-10.4-5.4z"/></svg></div>`;
     }
 
+    // Shared "does this player have a real/local photo, or does it fall
+    // back to the silhouette" avatar renderer — used anywhere a player's
+    // face shows up outside the profile page itself (Captain/Vice
+    // Captain widget, League Stats award spotlight, etc.), so all of them
+    // agree on the same fallback chain the profile page uses: a real
+    // photo source if one's ever wired in, else the local bucketed
+    // headshot (headshot_path — see resolveHeadshotPath in main.js and
+    // player_manual_headshots for the per-player override), else the
+    // silhouette placeholder.
+    function buildPlayerAvatarHtml(player, sizePx, borderRadius) {
+      const src = (player && (player.headasset || player.headasset_url || player.photo || player.headshot_path)) || '';
+      if (!src) return buildSilhouetteAvatar(sizePx, borderRadius);
+      return `<img src="${src}" alt="${(player && player.name) || ''}" style="width: ${sizePx}px; height: ${sizePx}px; border-radius: ${borderRadius}; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" onerror="this.style.visibility='hidden'" />`;
+    }
+
+    // Manager photos are a flat, name-matched folder (assets/headshots/
+    // managers/<slug>.png) rather than the age/nationality/skin-tone
+    // bucket system players use — there's only ever one manager to show
+    // at a time, so bucketing would be pointless; the user just drops in
+    // a file named after whichever manager it's for. Existence is
+    // checked by just trying to load it and falling back on error
+    // (handleAvatarImgError) rather than an IPC round-trip, since a
+    // missing file is the common case (most managers won't have one yet).
+    function slugifyManagerName(name) {
+      return String(name || '')
+        .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip accents (e.g. Benitez)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    }
+
+    // Shared onerror handler for any avatar <img> that has a known
+    // fallback — swaps the broken image out for the fallback markup in
+    // place. Kept as a real function (not inline HTML in the onerror
+    // attribute) so the fallback's own HTML never has to survive being
+    // escaped through an HTML attribute.
+    function handleAvatarImgError(imgEl, fallbackHtml) {
+      imgEl.outerHTML = fallbackHtml;
+    }
+
+    function buildManagerAvatarHtml(name, sizePx, borderRadius) {
+      const fallback = buildInitialsAvatar(name, sizePx, borderRadius);
+      const slug = slugifyManagerName(name);
+      if (!slug) return fallback;
+      window.__avatarFallbacks = window.__avatarFallbacks || {};
+      const fallbackKey = `mgr_${slug}_${sizePx}`;
+      window.__avatarFallbacks[fallbackKey] = fallback;
+      return `<img src="assets/headshots/managers/${slug}.png" alt="${name || ''}" style="width: ${sizePx}px; height: ${sizePx}px; border-radius: ${borderRadius}; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" onerror="handleAvatarImgError(this, window.__avatarFallbacks['${fallbackKey}'])" />`;
+    }
+
     // See the Settings panel (Display section) — 'imperial' or 'metric',
     // persisted in localStorage and read by formatHeight/formatWeight
     // below. Purely a display preference, not save data.
@@ -1710,6 +1810,91 @@
       const id = Number(String(nationality).replace(/\D/g, ''));
       const code = NATIONALITY_FLAG_CODE_OVERRIDES[id] || (NATIONALITY_ISO_MAP[id] && NATIONALITY_ISO_MAP[id].toLowerCase());
       return code ? `https://flagcdn.com/w80/${code}.png` : null;
+    }
+
+    // Competition logos/trophy images the user bundled locally (assets/
+    // competition-icons, assets/trophies) — matched against a comp_name
+    // string (from Live Editor's raw export, e.g. "EFL League One",
+    // "Lg Two Play-Offs") by lowercase substring rather than exact
+    // equality, since the game's own competition names carry
+    // version-dependent sponsor prefixes/shorthand (same reasoning as the
+    // pyramid-tier matching elsewhere in this file). Order matters: more
+    // specific matches (playoff, individual UEFA competitions) are
+    // checked before broader ones so e.g. "Lg Two Play-Offs" doesn't fall
+    // through to a plain League Two match.
+    const COMPETITION_LOGO_MAP = [
+      { match: 'champions league', file: 'UEFA_Champions_League.png' },
+      { match: 'conference league', file: 'uefa-conference-league.png' },
+      { match: 'europa league', file: 'UEFA_Europa_League_logo.png' },
+      { match: 'carabao', file: 'carabao-cup-logo.png' },
+      { match: 'fa cup', file: 'emirates_fa_cup-logo.png' },
+      { match: 'vertu', file: 'vertu-trophy-logo.png' },
+      { match: 'championship', file: 'efl-championship-logo.png' },
+      { match: 'league one', file: 'efl-leagueone-logo.png' },
+      { match: 'league two', file: 'efl-leaguetwo-logo.png' },
+      { match: 'premier league', file: 'premierleague-logo.png' }
+    ];
+    // Trophy renders (a physical trophy, not a competition badge) — used
+    // next to something actually WON (Trophies widget), as opposed to the
+    // flat logo above used just to identify a competition. Play-off wins
+    // get their own trophy regardless of tier — a play-off promotion is a
+    // genuinely different competition entry from the league table itself
+    // (see "Lg Two Play-Offs" vs "EFL League Two" in
+    // season_competition_results), so this is checked first.
+    const COMPETITION_TROPHY_MAP = [
+      { match: 'play-off', file: 'efl-playoff-trophy.png' },
+      { match: 'playoff', file: 'efl-playoff-trophy.png' },
+      { match: 'champions league', file: 'champions-league-trophy.png' },
+      { match: 'conference league', file: 'europa-conference-league-trophy.png' },
+      { match: 'europa league', file: 'europa-league-trophy.png' },
+      { match: 'carabao', file: 'carabao-cup.png' },
+      { match: 'fa cup', file: 'fa-cup.png' },
+      { match: 'vertu', file: 'vertu-trophy.png' },
+      { match: 'championship', file: 'efl-championship-trophy.png' },
+      { match: 'league one', file: 'efl-leagueone-trophy.png' },
+      { match: 'league two', file: 'efl-two-trophy.png' },
+      { match: 'premier league', file: 'premier-league-trophy.png' }
+    ];
+
+    function getCompetitionLogoUrl(compName) {
+      if (!compName) return null;
+      const lower = String(compName).toLowerCase();
+      const entry = COMPETITION_LOGO_MAP.find(e => lower.includes(e.match));
+      return entry ? `assets/competition-icons/${entry.file}` : null;
+    }
+
+    // Small inline logo + name, for any plain competition-name list cell
+    // (player stats breakdown, season overview competition lists, etc.)
+    // — falls back to the bare name with no icon if this competition
+    // isn't in COMPETITION_LOGO_MAP.
+    function competitionNameWithLogo(compName, displayName, sizePx = 22) {
+      const logoUrl = getCompetitionLogoUrl(compName);
+      const logoHtml = logoUrl
+        ? `<img src="${logoUrl}" alt="" style="width: ${sizePx}px; height: ${sizePx}px; object-fit: contain; vertical-align: middle; margin-right: 6px;" onerror="this.style.display='none'" />`
+        : '';
+      return `${logoHtml}${displayName ?? compName ?? ''}`;
+    }
+
+    function getCompetitionTrophyUrl(compName) {
+      if (!compName) return null;
+      const lower = String(compName).toLowerCase();
+      const entry = COMPETITION_TROPHY_MAP.find(e => lower.includes(e.match));
+      return entry ? `assets/trophies/${entry.file}` : null;
+    }
+
+    // Faded background watermark for a competition logo — same "large,
+    // barely-there, sits behind the real content" technique the player
+    // profile used for nation flags before that was replaced with a
+    // small icon; here it's the right fit since there's no text label
+    // competing for space, just decoration behind the match/stat details.
+    function buildCompetitionLogoWatermark(compName) {
+      const url = getCompetitionLogoUrl(compName);
+      if (!url) return '';
+      // background-size: contain (not a flat percentage) guarantees the
+      // whole logo is always visible within the card regardless of the
+      // card's own aspect ratio — a flat percentage was scaling width
+      // and height independently, cropping tall/wide logos off-card.
+      return `<div style="position: absolute; inset: 0; background-image: url('${url}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.12; pointer-events: none; z-index: 0;"></div>`;
     }
 
     // Small +N/-N badge for the attribute/overall watcher — the CUMULATIVE
@@ -2389,7 +2574,7 @@
           <tbody>
             ${competitions.map(c => `
               <tr>
-                <td>${c.comp_name || 'League/Cup'}</td>
+                <td>${competitionNameWithLogo(c.comp_name, c.comp_name || 'League/Cup')}</td>
                 <td>${c.appearances || 0}</td>
                 <td>${c.goals || 0}</td>
                 <td>${c.assists || 0}</td>
@@ -2948,6 +3133,106 @@
       openPlayerProfile(playstylePickerPlayerId);
     }
 
+    // Manual headshot photo picker — see player_manual_headshots in
+    // schema.sql and resolveHeadshotPath/setManualHeadshot/
+    // clearManualHeadshot in main.js. Defaults to whichever bucket the
+    // automatic age/nationality/skin-tone matching picked for this
+    // player (see getPlayerHeadshotBucket), but lets the user browse any
+    // of the 21 buckets — useful when the auto-detection guessed wrong,
+    // not just when they simply prefer a different photo.
+    let headshotPickerPlayerId = null;
+
+    async function openHeadshotPicker(playerId) {
+      if (!window.api || !window.api.getHeadshotBucketOptions) return;
+      headshotPickerPlayerId = playerId;
+
+      const [{ ageDirs, ethnicityDirs }, autoBucket] = await Promise.all([
+        window.api.getHeadshotBucketOptions(),
+        window.api.getPlayerHeadshotBucket ? window.api.getPlayerHeadshotBucket(playerId) : null
+      ]);
+
+      const ageSelect = document.getElementById('headshot-picker-age-select');
+      const ethnicitySelect = document.getElementById('headshot-picker-ethnicity-select');
+      if (!ageSelect || !ethnicitySelect) return;
+
+      ageSelect.innerHTML = ageDirs.map(d => `<option value="${d}" ${autoBucket && autoBucket.ageDir === d ? 'selected' : ''}>${d}</option>`).join('');
+      ethnicitySelect.innerHTML = ethnicityDirs.map(d => `<option value="${d}" ${autoBucket && autoBucket.ethnicityDir === d ? 'selected' : ''}>${d}</option>`).join('');
+
+      await renderHeadshotPickerGrid();
+      const dialog = document.getElementById('headshot-picker-dialog');
+      if (dialog) dialog.showModal();
+    }
+
+    function closeHeadshotPicker() {
+      const dialog = document.getElementById('headshot-picker-dialog');
+      if (dialog) dialog.close();
+    }
+
+    async function onHeadshotPickerBucketChange() {
+      await renderHeadshotPickerGrid();
+    }
+
+    async function renderHeadshotPickerGrid() {
+      const grid = document.getElementById('headshot-picker-grid');
+      if (!grid || !window.api || !window.api.getHeadshotFilesForBucket) return;
+
+      const ageDir = document.getElementById('headshot-picker-age-select').value;
+      const ethnicityDir = document.getElementById('headshot-picker-ethnicity-select').value;
+      const files = await window.api.getHeadshotFilesForBucket(ageDir, ethnicityDir);
+
+      if (files.length === 0) {
+        grid.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1; padding: 20px;">No photos in this folder yet.</div>`;
+        return;
+      }
+
+      grid.innerHTML = files.map(path => `
+        <img src="${path}" loading="lazy" style="width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color); cursor: pointer;" onclick="selectHeadshotThumbnail('${path}')" onmouseover="this.style.borderColor='var(--accent-color)'" onmouseout="this.style.borderColor='var(--border-color)'" />
+      `).join('');
+    }
+
+    // Re-fetches the current-season squad (the only place headshot_path
+    // is computed — see getSquadFromDB in main.js) and re-runs it through
+    // the same processIncomingPlayers path a live sync uses, so
+    // currentPlayers picks up the new headshot_path before the profile
+    // re-renders. Squad-only, not a full changeSave()-style reload, since
+    // nothing else about the player actually changed.
+    async function refreshSquadAfterHeadshotChange() {
+      if (!window.api || !window.api.getSquadData) return;
+      try {
+        const rawList = await window.api.getSquadData();
+        processIncomingPlayers(rawList);
+      } catch (e) {
+        console.error('Failed to refresh squad after headshot change:', e);
+      }
+    }
+
+    async function selectHeadshotThumbnail(path) {
+      if (!headshotPickerPlayerId || !window.api || !window.api.setManualHeadshot) return;
+      try {
+        await window.api.setManualHeadshot(headshotPickerPlayerId, path);
+      } catch (e) {
+        console.error('Failed to save manual headshot:', e);
+      }
+      closeHeadshotPicker();
+      await refreshSquadAfterHeadshotChange();
+      openPlayerProfile(headshotPickerPlayerId);
+    }
+
+    async function resetHeadshotToAutomatic() {
+      if (!headshotPickerPlayerId || !window.api || !window.api.clearManualHeadshot) {
+        closeHeadshotPicker();
+        return;
+      }
+      try {
+        await window.api.clearManualHeadshot(headshotPickerPlayerId);
+      } catch (e) {
+        console.error('Failed to clear manual headshot:', e);
+      }
+      closeHeadshotPicker();
+      await refreshSquadAfterHeadshotChange();
+      openPlayerProfile(headshotPickerPlayerId);
+    }
+
     async function openPlayerProfile(identifier) {
       lastOpenedProfileIdentifier = identifier;
       let player = currentPlayers.find(p => p.player_id == identifier || (p.name && p.name.toLowerCase() === String(identifier).toLowerCase()));
@@ -3392,28 +3677,37 @@
 
       const attributeGrowthHtml = buildAttributeGrowthHtml(chronoSeasons, isGoalkeeper);
 
-      const headAssetSrc = player.headasset || player.headasset_url || player.photo || '';
+      // headshot_path is a locally-bundled stand-in photo picked
+      // server-side by age/nationality/skin tone (see resolveHeadshotPath
+      // in main.js) — not a real photo of this specific player, since no
+      // real in-game photo source exists (see reference-player-photo-
+      // capture memory). headasset/headasset_url/photo are kept as a
+      // higher-priority fallback chain in case a real source is ever
+      // wired in later. onerror just hides a broken image (same pattern
+      // as the trophy images elsewhere) rather than swapping in the
+      // silhouette — resolveHeadshotPath already returns null instead of
+      // a bad path when a bucket has no photos, so this only ever fires
+      // for a genuinely corrupt file, an edge case not worth the
+      // complexity of a live DOM swap for.
+      const headAssetSrc = player.headasset || player.headasset_url || player.photo || player.headshot_path || '';
       const headAssetDisplay = headAssetSrc
-        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 72px; height: 72px; border-radius: 10px; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" />`
-        : buildSilhouetteAvatar(72, '10px');
+        ? `<img src="${headAssetSrc}" alt="${player.name}" style="width: 170px; height: 170px; border-radius: 16px; object-fit: cover; border: 1px solid var(--border-color); background: #21262d; flex-shrink: 0;" onerror="this.style.visibility='hidden'" />`
+        : buildSilhouetteAvatar(170, '16px');
 
       const flagImageUrl = getFlagImageUrl(player.nationality);
       const nationalityName = getNationalityName(player.nationality);
       const altPositionsLabel = getAltPositionsLabel(player.alt_positions);
 
       const clubBadgeDisplay = clubBadgeUrl
-        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 40px; height: 40px; object-fit: contain; background: #21262d; border: 2px solid var(--border-color); border-radius: 50%; padding: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.45); flex-shrink: 0;" />`
-        : buildInitialsAvatar(displayClubName || 'N/A', 40, '50%');
+        ? `<img src="${clubBadgeUrl}" alt="${displayClubName || 'Club'}" title="${displayClubName || 'Club'}" style="width: 64px; height: 64px; object-fit: contain; background: #21262d; border: 2px solid var(--border-color); border-radius: 50%; padding: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.45); flex-shrink: 0; vertical-align: middle; margin-right: 6px;" />`
+        : buildInitialsAvatar(displayClubName || 'N/A', 64, '50%');
 
-      // Faint flag watermark faded into the card background, sitting behind
-      // the player's details rather than shown as its own icon. `contain`
-      // (not `cover`) so every flag is shown whole at its own real aspect
-      // ratio instead of being cropped by varying amounts depending on how
-      // far its shape is from this box's — flagcdn serves each flag at its
-      // native ratio (e.g. Switzerland is square, England is ~5:3), so
-      // `cover` was zooming some flags in far more than others.
-      const flagWatermark = flagImageUrl
-        ? `<div style="position: absolute; top: -15%; right: -4%; width: 62%; height: 130%; background-image: url('${flagImageUrl}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.16; -webkit-mask-image: linear-gradient(to left, black 25%, transparent 95%); mask-image: linear-gradient(to left, black 25%, transparent 95%); pointer-events: none; z-index: 0;"></div>`
+      // Small, clearly-visible flag badge next to the "Nationality" line
+      // — the flagWatermark below is decorative background flavor, too
+      // faint to actually read the country from at a glance, so this is
+      // the legible indicator.
+      const flagBadgeDisplay = flagImageUrl
+        ? `<img src="${flagImageUrl}" alt="${nationalityName}" title="${nationalityName}" style="width: 32px; height: 22px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border-color); box-shadow: 0 1px 4px rgba(0,0,0,0.4); vertical-align: middle; margin-right: 6px;" />`
         : '';
 
       // Only whichever role(s) this player currently holds get an editable
@@ -3438,11 +3732,13 @@
       const container = document.getElementById('profile-content-container');
       container.innerHTML = `
         <div class="profile-header" style="display: flex; align-items: center; gap: 20px;">
-          ${headAssetDisplay}
-          <div class="profile-main-info" style="position: relative; overflow: hidden; border-radius: 8px; flex: 1;">
-            ${flagWatermark}
-            <div style="position: relative; z-index: 1;">
-              <h2>
+          <div style="position: relative; flex-shrink: 0;">
+            ${headAssetDisplay}
+            <button title="Change Photo" onclick="openHeadshotPicker(${player.player_id})" style="position: absolute; bottom: -8px; right: -8px; width: 32px; height: 32px; border-radius: 50%; background: var(--accent-color); color: #0d1117; border: 2px solid var(--card-bg); cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 6px rgba(0,0,0,0.5);">✏️</button>
+          </div>
+          <div class="profile-main-info" style="flex: 1;">
+            <div>
+              <h2 style="font-size: 36px;">
                 ${clubBadgeDisplay}
                 <span>${player.name || 'Unknown Player'}</span>
                 ${jerseyDisplay}
@@ -3450,14 +3746,14 @@
                 ${viceCaptainDisplay}
               </h2>
               ${profileCaptaincyLinesHtml}
-              <div class="profile-meta">
+              <div class="profile-meta" style="font-size: 16px;">
                 <span>Full Name: <strong>${player.full_name || player.name || 'N/A'}</strong></span>
                 <span>D.O.B: <strong>${formattedDob}${ageDisplay}</strong></span>
                 <span>Position: <strong class="pos-${posInfo.group}">${posInfo.label}</strong></span>
                 ${altPositionsLabel ? `<span>Alternative Positions: <strong>${altPositionsLabel}</strong></span>` : ''}
               </div>
               <div class="profile-meta">
-                <span>Nationality: <strong>${nationalityName}</strong></span>
+                <span>Nationality: ${flagBadgeDisplay}<strong>${nationalityName}</strong></span>
                 <span>Current Club: <strong>${displayClubName || 'Free Agent'}</strong></span>
               </div>
               <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
@@ -3468,10 +3764,10 @@
               </div>
             </div>
           </div>
-          <div style="text-align: center; background: var(--expand-bg); padding: 16px 22px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
-            <span style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
-            <strong style="font-size: 36px; color: var(--accent-color); display: block; margin: 4px 0;">${baseOvr}${deltaBadge(player.overall_delta, 16)}</strong>
-            <span style="font-size: 12px; color: var(--text-dim);">Potential: <strong>${
+          <div style="text-align: center; background: var(--expand-bg); padding: 22px 30px; border-radius: 8px; border: 1px solid var(--border-color); flex-shrink: 0;">
+            <span style="font-size: 13px; color: var(--text-dim); text-transform: uppercase;">Overall Rating</span>
+            <strong style="font-size: 46px; color: var(--accent-color); display: block; margin: 6px 0;">${baseOvr}${deltaBadge(player.overall_delta, 18)}</strong>
+            <span style="font-size: 14px; color: var(--text-dim);">Potential: <strong>${
               typeof player.potential === 'string' && player.potential.includes('-')
                 ? player.potential
                 : formatPotentialDisplay({ potential: player.potential ?? (baseOvr + 4), appearances: player.appearances, position_id: player.position_id, youth_reveal_tier: player.youth_reveal_tier, overall: baseOvr }, careerStats)
@@ -3665,6 +3961,13 @@
 
       document.getElementById('main-nav-tabs').style.display = 'none';
       switchTab('profile');
+      // Opening a profile from partway down a long squad/list view (this
+      // is a single-page app — no real navigation, so the browser has no
+      // reason to reset scroll on its own) otherwise leaves the new
+      // profile view scrolled to wherever the previous view happened to
+      // be, which can land anywhere from the middle to the bottom of the
+      // page depending on what was clicked.
+      window.scrollTo(0, 0);
       renderProfileStatsTable(profileStatsViewMode);
       renderProfileAwards(player.player_id);
     }
@@ -3693,16 +3996,29 @@
 
       const trophyLine = trophies.map(t => {
         const isLeague = !!findPyramidTier(t.comp_name);
-        return `${normalizeCompetitionName(t.comp_name)} ${isLeague ? 'Champion' : 'Winner'} ${shortenSeasonLabel(t.year_label)}`;
+        const trophyUrl = getCompetitionTrophyUrl(t.comp_name);
+        const trophyIconHtml = trophyUrl
+          ? `<img src="${trophyUrl}" alt="" style="width: 22px; height: 22px; object-fit: contain; vertical-align: middle; margin-right: 4px;" onerror="this.style.display='none'" />`
+          : '';
+        return `<span style="display: inline-flex; align-items: center;">${trophyIconHtml}${normalizeCompetitionName(t.comp_name)} ${isLeague ? 'Champion' : 'Winner'} ${shortenSeasonLabel(t.year_label)}</span>`;
       }).join(', ');
 
-      const awardIcons = { golden_boot: '👟', playmaker: '🎯', golden_glove: '🧤' };
-      const awardsHtml = awards.map(a => `
+      // Real award-trophy images (same files the League Stats spotlight
+      // uses) in place of generic emoji, so a Golden Boot reads the same
+      // everywhere it shows up in the app.
+      const AWARD_TROPHY_FILES = { golden_boot: 'goldenboot-award.png', playmaker: 'playmaker-award.png', golden_glove: 'goldenglove-award.png' };
+      const awardsHtml = awards.map(a => {
+        const trophyFile = AWARD_TROPHY_FILES[a.award_type];
+        const iconHtml = trophyFile
+          ? `<img src="assets/trophies/${trophyFile}" alt="" style="width: 22px; height: 22px; object-fit: contain;" onerror="this.outerHTML='🏅'" />`
+          : '🏅';
+        return `
         <div class="trait-badge" style="display: inline-flex; align-items: center; gap: 6px; margin: 3px 4px 3px 0;">
-          <span>${awardIcons[a.award_type] || '🏅'}</span>
+          <span>${iconHtml}</span>
           <span>${a.label} — ${shortenSeasonLabel(a.year_label)} (${a.stat_value} ${a.stat_label})</span>
         </div>
-      `).join('');
+      `;
+      }).join('');
 
       container.innerHTML = `
         ${trophyLine ? `<div style="margin-bottom: 10px; font-size: 13px;"><strong>Team Honours:</strong> ${trophyLine}</div>` : ''}
@@ -3741,7 +4057,7 @@
             <tbody>
               ${data.competitions.map(c => `
                 <tr>
-                  <td>${c.comp_name || 'League/Cup'}</td>
+                  <td>${competitionNameWithLogo(c.comp_name, c.comp_name || 'League/Cup')}</td>
                   <td>${c.appearances || 0}</td>
                   <td>${c.goals || 0}</td>
                   <td>${c.assists || 0}</td>
@@ -4686,6 +5002,7 @@
 
       leagueStatsSelectedSeasonId = null; // a different save has different seasons
       populateLeagueStatsSeasonSelector();
+      populateAroundWorldSeasonSelector();
       refreshSeasonAlerts();
     }
 
@@ -5307,22 +5624,27 @@
       const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
 
       container.innerHTML = `
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
-        <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
-        <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
-          <div style="flex: 1;">
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
-          </div>
-          <div style="flex: 1;">
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
+        <div style="position: relative;">
+          ${buildCompetitionLogoWatermark(upcoming.competition)}
+          <div style="position: relative; z-index: 1;">
+            <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
+            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
+            <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
+            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
+            <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
+              <div style="flex: 1;">
+                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+                <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
+                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+                <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
+              </div>
+              <div style="flex: 1;">
+                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+                <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
+                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+                <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -5344,18 +5666,20 @@
     // a fixed Top 5 — more useful when mid-table or fighting relegation,
     // where the top of the table says nothing about our own situation.
     // Clamped at either edge of the table so it still shows 5 rows near
-    // 1st or last place.
-    function getLeagueTableWindowRows(teamName) {
-      const idx = leagueStandings.findIndex(t => t.team_name === teamName);
-      if (idx === -1) return leagueStandings.slice(0, 5);
+    // 1st or last place. Takes `rows` explicitly (rather than always
+    // reading the live `leagueStandings` global) so the League Stats tab
+    // can window over a past season's standings the same way.
+    function getLeagueTableWindowRows(rows, teamName) {
+      const idx = rows.findIndex(t => t.team_name === teamName);
+      if (idx === -1) return rows.slice(0, 5);
 
       let start = idx - 2;
       let end = idx + 2;
       if (start < 0) { end += (0 - start); start = 0; }
-      if (end > leagueStandings.length - 1) { start -= (end - (leagueStandings.length - 1)); end = leagueStandings.length - 1; }
+      if (end > rows.length - 1) { start -= (end - (rows.length - 1)); end = rows.length - 1; }
       start = Math.max(0, start);
 
-      return leagueStandings.slice(start, end + 1);
+      return rows.slice(start, end + 1);
     }
 
     // Shared by the Home widget's windowed view and the League Stats
@@ -5396,7 +5720,7 @@
       }
 
       const teamName = getMostCommonClubName() || '';
-      const rows = leagueTableExpanded ? leagueStandings : getLeagueTableWindowRows(teamName);
+      const rows = leagueTableExpanded ? leagueStandings : getLeagueTableWindowRows(leagueStandings, teamName);
 
       container.innerHTML = buildStandingsTableHtml(rows, teamName) + (leagueStandings.length > 5 ? `
         <button class="home-toggle-btn" style="margin-top: 8px;" onclick="event.stopPropagation(); toggleLeagueTableExpanded()">
@@ -5409,11 +5733,15 @@
     // League Stats tab
     // ------------------------------------------------------------------
     //
-    // Team-level sections (table, top scoring, worst defense) are derived
-    // from the same live, full-league `leagueStandings` already captured
-    // by GetValidStandings() for the Home dashboard's League Table widget
-    // — there's no persisted history for a past season's standings, so
-    // these stay live-only regardless of the season selector below.
+    // Team-level sections (full table, top scoring, worst defense) use
+    // the same live, full-league `leagueStandings` already captured by
+    // GetValidStandings() for the Home dashboard's League Table widget
+    // when viewing the current season; a past season's standings are
+    // fetched once via getSeasonStandings and held statically, same
+    // pattern as the player-level sections below — see
+    // getDisplayedLeagueStandings. Persisted every sync into
+    // season_standings (see persistSeasonStandings in main.js), so this
+    // history exists back to whenever that table started being written.
     //
     // Player-level sections (scorers/assists/clean sheets/cards) come from
     // export_all.lua's LEAGUE STATS EXPORT block, filtered to league
@@ -5438,9 +5766,14 @@
     let leagueStatsSelectedSeasonId = null;
     let leagueStatsHistoricalPlayers = [];
     let leagueStatsHistoricalLeagueName = null;
+    let leagueStatsHistoricalStandings = [];
 
     function getDisplayedLeagueStatsPlayers() {
       return leagueStatsSelectedSeasonId ? leagueStatsHistoricalPlayers : currentLeaguePlayerStats;
+    }
+
+    function getDisplayedLeagueStandings() {
+      return leagueStatsSelectedSeasonId ? leagueStatsHistoricalStandings : leagueStandings;
     }
 
     function getDisplayedLeagueStatsLeagueName() {
@@ -5454,7 +5787,19 @@
       // The live getPrimaryLeagueName() fallback only makes sense for the
       // current season — showing it for a past season with no captured
       // name would mislabel it with whatever league the save is in NOW.
-      el.textContent = name || (leagueStatsSelectedSeasonId ? 'Unknown League' : (getPrimaryLeagueName() || 'League Stats'));
+      const displayName = name || (leagueStatsSelectedSeasonId ? 'Unknown League' : (getPrimaryLeagueName() || 'League Stats'));
+      el.textContent = displayName;
+
+      const logoEl = document.getElementById('league-stats-league-logo');
+      if (logoEl) {
+        const logoUrl = getCompetitionLogoUrl(displayName);
+        if (logoUrl) {
+          logoEl.src = logoUrl;
+          logoEl.style.display = '';
+        } else {
+          logoEl.style.display = 'none';
+        }
+      }
     }
 
     async function onLeagueStatsSeasonChange(value) {
@@ -5470,6 +5815,7 @@
       const result = await window.api.getLeagueStatsForSeason(seasonId);
       leagueStatsHistoricalPlayers = (result && result.players) || [];
       leagueStatsHistoricalLeagueName = (result && result.league_name) || null;
+      leagueStatsHistoricalStandings = window.api.getSeasonStandings ? (await window.api.getSeasonStandings(seasonId)) || [] : [];
       renderLeagueStatsTab();
     }
 
@@ -5498,88 +5844,178 @@
       `;
     }
 
+    // Trophy files expected at assets/trophies/<file> — same golden_boot/
+    // playmaker/golden_glove naming as AWARD_LABELS's award_type values
+    // elsewhere in this app (player_awards, getPlayerHonours), so one
+    // mental model covers both.
+    // `label` is the base award name only ("Golden Boot", not "Golden
+    // Boot Winner") — buildAwardWinnerSpotlight appends "Leader" for the
+    // still-in-progress current season or "Winner" for a finished past
+    // season (see leagueStatsSelectedSeasonId — null means current),
+    // since nobody's actually won anything yet mid-season.
+    const LEAGUE_STATS_AWARD_CONFIG = {
+      goals: { label: 'Golden Boot', trophyFile: 'goldenboot-award.png', statLabel: 'Goals' },
+      assists: { label: 'Playmaker', trophyFile: 'playmaker-award.png', statLabel: 'Assists' },
+      clean_sheets: { label: 'Golden Glove', trophyFile: 'goldenglove-award.png', statLabel: 'Clean Sheets' }
+    };
+
     function renderLeagueStatsTab() {
       renderLeagueStatsTabHeader();
-      renderLeagueStatsTeamExtremes();
-      renderLeaguePlayerStatSection('goals', 'league-stats-top-scorers-body', 10, null);
-      renderLeaguePlayerStatSection('assists', 'league-stats-top-assists-body', 10, null);
-      renderLeaguePlayerStatSection('clean_sheets', 'league-stats-clean-sheets-body', 5, 'GK');
+      renderLeagueStatsFullTable();
+      renderLeaguePlayerStatSection('goals', 'league-stats-top-scorers-body', 5, null, LEAGUE_STATS_AWARD_CONFIG.goals);
+      renderLeaguePlayerStatSection('assists', 'league-stats-top-assists-body', 5, null, LEAGUE_STATS_AWARD_CONFIG.assists);
+      renderLeaguePlayerStatSection('clean_sheets', 'league-stats-clean-sheets-body', 5, 'GK', LEAGUE_STATS_AWARD_CONFIG.clean_sheets);
       renderLeaguePlayerStatSection('yellow_cards', 'league-stats-yellow-cards-body', 5, null);
       renderLeaguePlayerStatSection('red_cards', 'league-stats-red-cards-body', 5, null);
     }
 
-    // 'best'/'worst' per widget — Best Attack = most scored / Worst Attack
-    // = fewest scored; Best Defense = fewest conceded / Worst Defense =
-    // most conceded.
-    let leagueStatsExtremeMode = { attack: 'best', defense: 'best' };
+    // League Stats tab's own full-table state — deliberately separate
+    // from the Home dashboard's leagueTableExpanded so expanding one
+    // doesn't also expand the other. Collapsed by default (this table
+    // used to always render all 20+ teams, which dominated the page above
+    // the actual stat leaderboards — see the Best/Worst Attack/Defense
+    // widgets this replaced, now redundant with the sortable GF/GA/GD
+    // columns below instead of being separate widgets).
+    let leagueStatsTableExpanded = false;
+    // 'points' (the standard table order, already rank-sorted server-side)
+    // is the only key with a meaningful "windowed around our team" collapsed
+    // view (see getLeagueTableWindowRows) — sorting by any other column and
+    // collapsing just shows the top 5 in that order, the same behavior the
+    // old Best Attack/Defense widgets had, just reachable by clicking a
+    // column header instead of a separate toggle.
+    let leagueStatsTableSort = { key: 'points', dir: 'desc' };
 
-    function setLeagueStatsExtremeMode(kind, mode, btnEl) {
-      leagueStatsExtremeMode[kind] = mode;
-      const group = btnEl.parentElement;
-      group.querySelectorAll('.home-toggle-btn').forEach(b => b.classList.remove('active'));
-      btnEl.classList.add('active');
-      renderLeagueStatsTeamExtremes();
+    function toggleLeagueStatsTableExpanded() {
+      leagueStatsTableExpanded = !leagueStatsTableExpanded;
+      renderLeagueStatsFullTable();
     }
 
-    function renderLeagueStatsTeamExtremes() {
-      const scoringContainer = document.getElementById('league-stats-top-scoring-teams-body');
-      const defenseContainer = document.getElementById('league-stats-best-defense-body');
-      const attackTitle = document.getElementById('league-stats-attack-title');
-      const defenseTitle = document.getElementById('league-stats-defense-title');
-      if (!scoringContainer || !defenseContainer) return;
-
-      if (attackTitle) attackTitle.textContent = leagueStatsExtremeMode.attack === 'best' ? 'Best Attack' : 'Worst Attack';
-      if (defenseTitle) defenseTitle.textContent = leagueStatsExtremeMode.defense === 'best' ? 'Best Defense' : 'Worst Defense';
-
-      // Team standings have no persisted season history (see the comment
-      // above this tab's state) — showing live standings under a past
-      // season's header would mislabel them as that season's, so this
-      // stays an honest placeholder instead until browsing history.
-      if (leagueStatsSelectedSeasonId) {
-        const msg = `<div class="empty-state" style="padding: 12px;">Team standings aren't available for past seasons yet — only the player leaderboards are.</div>`;
-        scoringContainer.innerHTML = msg;
-        defenseContainer.innerHTML = msg;
-        return;
+    function setLeagueStatsTableSort(key) {
+      if (leagueStatsTableSort.key === key) {
+        leagueStatsTableSort.dir = leagueStatsTableSort.dir === 'desc' ? 'asc' : 'desc';
+      } else {
+        // Conceded goals default to ascending (fewest first = "best
+        // defense" leads) since that's the more useful starting order;
+        // every other column defaults to descending (most/best first).
+        leagueStatsTableSort = { key, dir: key === 'goals_against' ? 'asc' : 'desc' };
       }
+      renderLeagueStatsFullTable();
+    }
 
-      if (!leagueStandings || leagueStandings.length === 0) {
-        const msg = `<div class="empty-state" style="padding: 12px;">Standings not available yet.</div>`;
-        scoringContainer.innerHTML = msg;
-        defenseContainer.innerHTML = msg;
+    // The season selector's ranked table — collapsed by default to just
+    // the top 5 in whatever the current sort order is (deliberately NOT
+    // windowed around our own team like the Home dashboard widget does;
+    // this tab is meant to read as a real league table at a glance, not a
+    // "where do we stand" view), with clickable GF/GA/GD headers standing
+    // in for what used to be separate Best/Worst Attack/Defense widgets.
+    // Source is whichever season is selected (see getDisplayedLeagueStandings).
+    function renderLeagueStatsFullTable() {
+      const container = document.getElementById('league-stats-full-table-body');
+      if (!container) return;
+
+      const standings = getDisplayedLeagueStandings();
+      if (!standings || standings.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">Standings not available for this season.</div>`;
         return;
       }
 
       const teamName = getMostCommonClubName() || '';
-      const buildRows = (teams, statKey, label) => `
+      const { key, dir } = leagueStatsTableSort;
+      // goal_diff isn't a real field on the row, it's computed on the fly.
+      const sortValue = key === 'goal_diff' ? (t => t.goals_for - t.goals_against) : (t => t[key]);
+      const sorted = [...standings].sort((a, b) => (sortValue(b) - sortValue(a)) * (dir === 'desc' ? 1 : -1));
+
+      const windowed = leagueStatsTableExpanded ? sorted : sorted.slice(0, 5);
+
+      const arrow = (colKey) => key === colKey ? (dir === 'desc' ? ' ▼' : ' ▲') : '';
+      const th = (colKey, label) => `<th style="cursor: pointer; user-select: none;" onclick="setLeagueStatsTableSort('${colKey}')">${label}${arrow(colKey)}</th>`;
+
+      const rowsHtml = windowed.map((t, i) => {
+        const gd = t.goals_for - t.goals_against;
+        const gdStr = gd > 0 ? `+${gd}` : `${gd}`;
+        const isUs = t.team_name === teamName;
+        return `
+          <tr style="${isUs ? 'background: #00ff8715; font-weight: 700;' : ''}">
+            <td>${key === 'points' ? t.rank : i + 1}</td>
+            <td>${t.team_name}</td>
+            <td>${t.played}</td>
+            <td>${t.wins}-${t.draws}-${t.losses}</td>
+            <td>${t.goals_for}</td>
+            <td>${t.goals_against}</td>
+            <td>${gdStr}</td>
+            <td><strong>${t.points}</strong></td>
+          </tr>
+        `;
+      }).join('');
+
+      container.innerHTML = `
         <table class="sub-table">
-          <thead><tr><th>#</th><th>Team</th><th>GP</th><th>${label}</th></tr></thead>
-          <tbody>
-            ${teams.map((t, i) => `
-              <tr style="${t.team_name === teamName ? 'background: #00ff8715; font-weight: 700;' : ''}">
-                <td>${i + 1}</td>
-                <td>${t.team_name}</td>
-                <td>${t.played}</td>
-                <td><strong>${t[statKey]}</strong></td>
-              </tr>
-            `).join('')}
-          </tbody>
+          <thead><tr><th>#</th><th>Team</th><th>GP</th><th>W-D-L</th>${th('goals_for', 'GF')}${th('goals_against', 'GA')}${th('goal_diff', 'GD')}${th('points', 'PTS')}</tr></thead>
+          <tbody>${rowsHtml}</tbody>
         </table>
+        ${standings.length > 5 ? `
+          <button class="home-toggle-btn" style="margin-top: 8px;" onclick="toggleLeagueStatsTableExpanded()">
+            ${leagueStatsTableExpanded ? 'Show Less' : `Show Full Table (${standings.length} teams)`}
+          </button>
+        ` : ''}
       `;
+    }
 
-      const attackRows = leagueStatsExtremeMode.attack === 'best'
-        ? [...leagueStandings].sort((a, b) => b.goals_for - a.goals_for).slice(0, 5)
-        : [...leagueStandings].sort((a, b) => a.goals_for - b.goals_for).slice(0, 5);
-      const defenseRows = leagueStatsExtremeMode.defense === 'best'
-        ? [...leagueStandings].sort((a, b) => a.goals_against - b.goals_against).slice(0, 5)
-        : [...leagueStandings].sort((a, b) => b.goals_against - a.goals_against).slice(0, 5);
-
-      scoringContainer.innerHTML = buildRows(attackRows, 'goals_for', 'GF');
-      defenseContainer.innerHTML = buildRows(defenseRows, 'goals_against', 'GA');
+    // The league leader's own award, called out above the ranked table —
+    // trophy image, silhouette placeholder (see buildSilhouetteAvatar; no
+    // real player photo source exists, see reference-player-photo-capture
+    // memory), name/club/age/OVR, and the Apps/stat pair. Trophy image is
+    // expected at assets/trophies/<file> alongside index.html — the
+    // onerror handler just hides the <img> if that file isn't there yet
+    // rather than showing a broken-image icon.
+    function buildAwardWinnerSpotlight(winner, statKey, awardConfig) {
+      const age = computeAge(winner.dob);
+      // Current season (leagueStatsSelectedSeasonId === null) is still in
+      // progress — nobody's actually WON the Golden Boot yet, so this
+      // reads "Golden Boot Leader" instead, matching the same
+      // finished-vs-in-progress distinction the Around the World tab
+      // makes (see getAwardLabelSet there). A selected past season is
+      // already over, so it gets the real award name.
+      const fullLabel = `${awardConfig.label} ${leagueStatsSelectedSeasonId ? 'Winner' : 'Leader'}`;
+      // No forced single-line truncation any more — min-width: 0 still
+      // stops this from forcing the 3-column row wider than the page
+      // (the actual cause of the old horizontal-scroll bug), but now the
+      // name/club line wraps onto a second line instead of ellipsis-
+      // cutting when it's long, so everything stays fully readable at a
+      // bigger size instead of being chopped off.
+      return `
+        <div style="display: flex; align-items: center; gap: 14px; padding: 16px; margin-bottom: 12px; background: #161b22; border: 1px solid var(--border-color); border-radius: 10px; min-width: 0;">
+          <div style="position: relative; flex-shrink: 0;">
+            ${buildPlayerAvatarHtml(winner, 72, '50%')}
+            <img src="assets/trophies/${awardConfig.trophyFile}" alt="${fullLabel}" style="position: absolute; bottom: -12px; right: -14px; width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6));" onerror="this.style.display='none'" />
+          </div>
+          <div style="flex: 1; min-width: 0; text-align: center;">
+            <div style="color: #e3b341; font-weight: 700; font-style: italic; font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;">${fullLabel}</div>
+            <div style="font-size: 19px; font-weight: 800; line-height: 1.25;">${winner.name}</div>
+            <div style="font-style: italic; opacity: 0.7; font-size: 13px; line-height: 1.3;">${winner.team_name} &middot; ${age ?? '—'}yrs - ${winner.overall || 0} OVR</div>
+          </div>
+          <div style="display: flex; gap: 14px; text-align: center; flex-shrink: 0;">
+            <div>
+              <div style="font-size: 11px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.3px;">Apps</div>
+              <div style="font-size: 20px; font-weight: 800;">${winner.appearances || 0}</div>
+            </div>
+            <div>
+              <div style="font-size: 11px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.3px;">${awardConfig.statLabel}</div>
+              <div style="font-size: 20px; font-weight: 800; color: #e3b341;">${winner[statKey] || 0}</div>
+            </div>
+          </div>
+        </div>
+      `;
     }
 
     // positionFilter: 'GK' restricts to goalkeepers (clean sheets only
     // means anything with real minutes elsewhere), null means no filter.
-    function renderLeaguePlayerStatSection(statKey, containerId, limit, positionFilter) {
+    // awardConfig (optional — only goals/assists/clean_sheets get one, see
+    // the calls in renderLeagueStatsTab) spotlights the #1 leader above
+    // the table via buildAwardWinnerSpotlight, matching the trophy-graphic
+    // treatment the user asked for; the table below then starts at rank 2
+    // instead of repeating the spotlighted winner.
+    function renderLeaguePlayerStatSection(statKey, containerId, limit, positionFilter, awardConfig) {
       const container = document.getElementById(containerId);
       if (!container) return;
 
@@ -5601,22 +6037,120 @@
       }
 
       const ourClub = getMostCommonClubName();
+      const winner = awardConfig ? ranked[0] : null;
+      const tableRows = winner ? ranked.slice(1) : ranked;
+      const rankOffset = winner ? 2 : 1;
+
+      const statLabel = statKey === 'goals' ? 'G' : statKey === 'assists' ? 'A' : statKey === 'clean_sheets' ? 'CS' : statKey === 'yellow_cards' ? 'YC' : 'RC';
+      // The three award cards (goals/assists/clean_sheets) share a
+      // 3-column row — narrower than the 2-column Yellow/Red row — and
+      // the full 7-column table (#, Player, Team, OVR, Age, Apps, stat)
+      // doesn't fit that width without forcing the whole page to scroll
+      // horizontally. OVR/Age are already shown for the #1 winner in the
+      // spotlight card above, so dropping them from the rest of the list
+      // isn't a real information loss, just not repeated on every row.
+      const tableHeadCells = awardConfig
+        ? `<th>#</th><th>Player</th><th>Team</th><th>Apps</th><th>${statLabel}</th>`
+        : `<th>#</th><th>Player</th><th>Team</th><th>OVR</th><th>Age</th><th>Apps</th><th>${statLabel}</th>`;
+      const buildRowCells = (p, rank) => awardConfig
+        ? `<td>${rank}</td><td>${p.name}</td><td>${p.team_name}</td><td>${p.appearances || 0}</td><td><strong>${p[statKey] || 0}</strong></td>`
+        : `<td>${rank}</td><td>${p.name}</td><td>${p.team_name}</td><td>${p.overall || 0}</td><td>${computeAge(p.dob) ?? '—'}</td><td>${p.appearances || 0}</td><td><strong>${p[statKey] || 0}</strong></td>`;
+
+      container.innerHTML = `
+        ${winner ? buildAwardWinnerSpotlight(winner, statKey, awardConfig) : ''}
+        <table class="sub-table${awardConfig ? ' compact-leaderboard' : ''}">
+          <thead><tr>${tableHeadCells}</tr></thead>
+          <tbody>
+            ${tableRows.map((p, i) => `
+              <tr style="${p.team_name === ourClub ? 'background: #00ff8715; font-weight: 700;' : ''}">
+                ${buildRowCells(p, i + rankOffset)}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    // "Around the World" tab — real-world end-of-season awards for the
+    // top leagues globally. This data is save-scoped server-side: it was
+    // hand-backfilled (see WORLD_LEAGUE_SEED_DATA in main.js) for ONE
+    // specific save only, as a one-time fix for a season that save had
+    // already played before this feature existed. Every other save shows
+    // empty rows for those 14 leagues until live in-game retrieval for
+    // them is built. EFL League Two is the one column always computed
+    // live from the active save's own data (season_standings/
+    // season_league_stats) regardless of which save is active — see the
+    // `live` flag on each row, used here to add a small "(your save)" tag.
+    let aroundWorldSelectedSeason = null;
+    let aroundWorldRows = [];
+
+    // A row's `season_finished` flag (false only for the live League Two
+    // row while its season is still the save's current one) decides
+    // whether its cells claim a final result or an in-progress one —
+    // asserting "Champion"/"Golden Boot" for a season still being played
+    // would be wrong, so those labels only appear once it's actually over.
+    function getAwardLabelSet(finished) {
+      return finished
+        ? { champion: 'Champion', goals: 'Golden Boot', assists: 'Playmaker', gk: 'Golden Glove' }
+        : { champion: 'Currently 1st', goals: 'Leading Scorer', assists: 'Leading Assists', gk: 'Leading Clean Sheets' };
+    }
+
+    async function populateAroundWorldSeasonSelector() {
+      if (!window.api || !window.api.getWorldLeagueSeasons || !currentSaveId) return;
+      const { seasons, default_season } = await window.api.getWorldLeagueSeasons(currentSaveId);
+      const select = document.getElementById('around-world-season-select');
+      if (!select) return;
+
+      if (!aroundWorldSelectedSeason || !seasons.includes(aroundWorldSelectedSeason)) {
+        aroundWorldSelectedSeason = default_season || seasons[seasons.length - 1] || null;
+      }
+
+      select.innerHTML = seasons
+        .map(s => `<option value="${s}" ${s === aroundWorldSelectedSeason ? 'selected' : ''}>${s}</option>`)
+        .join('');
+
+      await onAroundWorldSeasonChange(aroundWorldSelectedSeason);
+    }
+
+    async function onAroundWorldSeasonChange(value) {
+      aroundWorldSelectedSeason = value || null;
+      if (!aroundWorldSelectedSeason || !window.api || !window.api.getWorldLeagueAwardsForSeason || !currentSaveId) {
+        aroundWorldRows = [];
+        renderAroundWorldTab();
+        return;
+      }
+      aroundWorldRows = await window.api.getWorldLeagueAwardsForSeason(aroundWorldSelectedSeason, currentSaveId);
+      renderAroundWorldTab();
+    }
+
+    function renderAroundWorldTab() {
+      const container = document.getElementById('around-world-table-body');
+      if (!container) return;
+
+      if (!aroundWorldRows || aroundWorldRows.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No seasons backfilled yet.</div>`;
+        return;
+      }
+
+      const labelDiv = (text) => `<div style="font-size: 11px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.4px;">${text}</div>`;
+      const awardCell = (label, name, value) => `${labelDiv(label)}${name ? `<div>${name}${value ? ` <strong>(${value})</strong>` : ''}</div>` : '<div style="opacity: 0.5;">—</div>'}`;
 
       container.innerHTML = `
         <table class="sub-table">
-          <thead><tr><th>#</th><th>Player</th><th>Team</th><th>OVR</th><th>Age</th><th>Apps</th><th>${statKey === 'goals' ? 'G' : statKey === 'assists' ? 'A' : statKey === 'clean_sheets' ? 'CS' : statKey === 'yellow_cards' ? 'YC' : 'RC'}</th></tr></thead>
+          <thead><tr><th>League</th><th>Result</th><th>Scoring</th><th>Creating</th><th>Goalkeeping</th></tr></thead>
           <tbody>
-            ${ranked.map((p, i) => `
-              <tr style="${p.team_name === ourClub ? 'background: #00ff8715; font-weight: 700;' : ''}">
-                <td>${i + 1}</td>
-                <td>${p.name}</td>
-                <td>${p.team_name}</td>
-                <td>${p.overall || 0}</td>
-                <td>${computeAge(p.dob) ?? '—'}</td>
-                <td>${p.appearances || 0}</td>
-                <td><strong>${p[statKey] || 0}</strong></td>
+            ${aroundWorldRows.map(r => {
+              const labels = getAwardLabelSet(r.season_finished !== false);
+              return `
+              <tr>
+                <td>${r.league_name}${r.live ? ' <span style="opacity: 0.6; font-size: 12px;">(your save)</span>' : ''}</td>
+                <td>${labelDiv(labels.champion)}${r.champion ? `<div>${r.champion}</div>` : '<div style="opacity: 0.5;">—</div>'}</td>
+                <td>${awardCell(labels.goals, r.golden_boot_player, r.golden_boot_value)}</td>
+                <td>${awardCell(labels.assists, r.top_assist_player, r.top_assist_value)}</td>
+                <td>${awardCell(labels.gk, r.golden_glove_player, r.golden_glove_value)}</td>
               </tr>
-            `).join('')}
+            `;
+            }).join('')}
           </tbody>
         </table>
       `;
@@ -5791,7 +6325,7 @@
       const sinceText = captaincy.start_year ? `${label} since ${captaincy.start_year} – Present` : `${label} since year not set`;
       return `
         <div style="display:flex; align-items:center; gap:14px;">
-          ${buildInitialsAvatar(holder.name, 56, '50%')}
+          ${buildPlayerAvatarHtml(holder, 56, '50%')}
           <div style="flex:1;">
             <div style="font-weight:600; font-size:16px;">${holder.name}</div>
             <div style="font-size:12px; color: var(--text-dim); margin-top:2px;">${sinceText}</div>
@@ -5978,12 +6512,16 @@
 
       container.innerHTML = `
         <div style="font-size: 12px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Competitions</div>
-        ${results.map(r => `
-          <div style="display: flex; justify-content: space-between; font-size: 15px; padding: 5px 0;">
-            <span>${normalizeCompetitionName(r.comp_name)}</span>
+        ${results.map(r => {
+          const logoUrl = getCompetitionLogoUrl(r.comp_name);
+          const logoHtml = logoUrl ? `<img src="${logoUrl}" alt="" style="width: 32px; height: 32px; object-fit: contain; vertical-align: middle; margin-right: 10px;" onerror="this.style.display='none'" />` : '';
+          return `
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 18px; padding: 6px 0;">
+            <span>${logoHtml}${normalizeCompetitionName(r.comp_name)}</span>
             <strong style="color: var(--accent-color);">${r.standing || '—'}</strong>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       `;
     }
 
@@ -6211,12 +6749,18 @@
         if (won && won.length > 0) {
           wonHtml = `
             <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin: ${items.length > 0 ? '12px' : '0'} 0 6px;">Won This Save</div>
-            ${won.map(w => `
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0;">
-                <span>🏆 ${normalizeCompetitionName(w.comp_name)}${w.count > 1 ? ` <span style="color: var(--text-dim); font-size: 11px;">×${w.count}</span>` : ''}</span>
-                <span style="font-size: 12px; color: var(--text-dim);">Last Won: <strong style="color: var(--accent-color);">${w.last_won}</strong></span>
+            ${won.map(w => {
+              const trophyUrl = getCompetitionTrophyUrl(w.comp_name);
+              const trophyIconHtml = trophyUrl
+                ? `<img src="${trophyUrl}" alt="" style="width: 38px; height: 38px; object-fit: contain; vertical-align: middle; margin-right: 8px;" onerror="this.outerHTML='🏆 '" />`
+                : '🏆 ';
+              return `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0;">
+                <span style="font-size: 17px;">${trophyIconHtml}${normalizeCompetitionName(w.comp_name)}${w.count > 1 ? ` <span style="color: var(--text-dim); font-size: 13px;">×${w.count}</span>` : ''}</span>
+                <span style="font-size: 13px; color: var(--text-dim);">Last Won: <strong style="color: var(--accent-color);">${w.last_won}</strong></span>
               </div>
-            `).join('')}
+            `;
+            }).join('')}
           `;
         }
       }
@@ -7663,7 +8207,7 @@
       const fullTable = (d.standings && d.standings.length > 0) ? buildStandingsTableHtml(d.standings, d.club_name) : '';
 
       return `
-        <div class="season-overview-title" style="font-size:20px;">${normalizeCompetitionName(l.comp_name)}</div>
+        <div class="season-overview-title" style="font-size:20px;">${competitionNameWithLogo(l.comp_name, normalizeCompetitionName(l.comp_name), 26)}</div>
         <div class="season-overview-center" style="height:auto; padding: 4px 0 12px;">
           <div style="font-size:40px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:12px;">
             <span>${l.position ? ordinal(l.position) : l.standing_text}</span>
@@ -7685,7 +8229,7 @@
         <div style="margin-top: 28px;">
           ${d.other_competitions.map(c => `
             <div class="season-overview-comp-row">
-              <span>${normalizeCompetitionName(c.comp_name)}</span>
+              <span>${competitionNameWithLogo(c.comp_name, normalizeCompetitionName(c.comp_name))}</span>
               <span class="${c.standing === 'Winner' ? 'won' : ''}">${c.standing === 'Winner' ? '🏆 Winner' : c.standing}</span>
             </div>
           `).join('')}
@@ -7875,7 +8419,7 @@
               ${headlineIcon}<span>${headlineText}</span>
             </div>
             ${seasonOverviewLeagueRecordLine(d.league_record)}
-            ${otherWins.length > 0 ? `<div style="color:var(--accent-color); font-weight:700; margin-top:4px;">${otherWins.map(c => normalizeCompetitionName(c.comp_name)).join(' · ')}</div>` : ''}
+            ${otherWins.length > 0 ? `<div style="color:var(--accent-color); font-weight:700; margin-top:4px;">${otherWins.map(c => competitionNameWithLogo(c.comp_name, normalizeCompetitionName(c.comp_name), 20)).join(' <span style="opacity:0.5;">·</span> ')}</div>` : ''}
           </div>
 
           <div class="season-overview-grid2">
@@ -7926,7 +8470,7 @@
           ${otherResults.length > 0 ? `
             <div style="margin-top:16px;">
               <h4 style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--accent-color); margin-bottom:8px;">Other Competitions</h4>
-              ${otherResults.map(c => `<div class="season-overview-stat-row"><span>${normalizeCompetitionName(c.comp_name)}</span><span>${c.standing}</span></div>`).join('')}
+              ${otherResults.map(c => `<div class="season-overview-stat-row"><span>${competitionNameWithLogo(c.comp_name, normalizeCompetitionName(c.comp_name), 20)}</span><span>${c.standing}</span></div>`).join('')}
             </div>
           ` : ''}
         </div>
@@ -8099,7 +8643,7 @@
         tenureHtml = `<div style="font-size:13px; color: var(--text-dim); margin-top:4px;">${formatDuration(Math.max(months, 0))} at the club</div>`;
       }
 
-      const avatarHtml = buildInitialsAvatar(currentManager.name, 56, '50%');
+      const avatarHtml = buildManagerAvatarHtml(currentManager.name, 56, '50%');
 
       container.innerHTML = `
         <div style="display:flex; align-items:center; gap:14px;">
@@ -8214,6 +8758,7 @@
 
     renderHomeDashboard();
     renderLeagueStatsTab();
+    populateAroundWorldSeasonSelector();
   </script>
 </body>
 </html>
