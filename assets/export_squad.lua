@@ -179,7 +179,15 @@ function get_squad_data()
                 local overall = players_table:GetRecordFieldValue(current_record, "overallrating") or 0
                 local potential = players_table:GetRecordFieldValue(current_record, "potential") or 0
                 local nationality_id = players_table:GetRecordFieldValue(current_record, "nationality") or 0
-                
+
+                -- 1 (palest) - 10 (darkest) skin tone lightness value, used
+                -- client-side to bucket which local headshot photo to show
+                -- (no real in-game player photo source exists) — see
+                -- resolveHeadshotPath in main.js and the players table
+                -- comment in schema.sql for how the value range was
+                -- confirmed via assets/inspect_skintone.lua.
+                local skintone_code = players_table:GetRecordFieldValue(current_record, "skintonecode") or 0
+
                 -- Use headassetid for custom/scanned face lookups, fallback to playerid
                 local asset_id = players_table:GetRecordFieldValue(current_record, "headassetid")
                 local photo_id = (asset_id and asset_id > 0) and asset_id or playerid
@@ -242,6 +250,7 @@ function get_squad_data()
                 player.overall = overall
                 player.potential = potential
                 player.nationality = nationality_id
+                player.skintone_code = skintone_code
                 local resolved_team_id = loaned_out_destination[playerid] or team_id
                 player.club_id = resolved_team_id
                 player.club_name = (resolved_team_id and resolved_team_id > 0) and (GetTeamName(resolved_team_id) or "") or ""
@@ -385,8 +394,8 @@ local function serialize_to_json(tbl, save_uid, current_date)
     for i, p in ipairs(tbl) do
         local attr = p.attributes or {}
         json = json .. string.format(
-            '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"alt_positions":"%s","nationality":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
-            p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.alt_positions, p.nationality, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
+            '{"player_id":%d,"name":"%s","overall":%d,"potential":%d,"position_id":%d,"alt_positions":"%s","nationality":%d,"skintone_code":%d,"club_id":%d,"club_name":"%s","photo_id":%d,"dob":"%s","height":"%s","weight":"%s","preferred_foot":"%s","skill_moves":%d,"weak_foot":%d,"contract_expiry":"%s","playerjointeamdate":"%s","wage":%d,"duration_months":%d,"contract_date":"%s","player_role_":%d,"last_status_change_date":"%s","is_among_top_scorers":%s,"jersey_number":%d,"injury":%s,"league_goals_prev_three_matches":%d,"is_among_top_scorers_in_team":%s,"form":%d,"on_loan":%s,"loan_team_from":%d,"loan_club_name":"%s","loan_date_end":"%s","is_loan_to_buy":%s,"goals":%d,"assists":%d,"appearances":%d,"clean_sheets":%d,"saves":%d,"yellow_cards":%d,"red_cards":%d,"avg_rating":%.2f,"competitions":[',
+            p.player_id, p.name:gsub('"', '\\"'), p.overall, p.potential, p.position_id, p.alt_positions, p.nationality, p.skintone_code, p.club_id, p.club_name:gsub('"', '\\"'), p.photo_id,
             p.dob, p.height, p.weight, p.preferred_foot, p.skill_moves, p.weak_foot, p.contract_expiry, p.playerjointeamdate,
             p.wage, p.duration_months, p.contract_date, p.player_role_, p.last_status_change_date,
             tostring(p.is_among_top_scorers), p.jersey_number, tostring(p.injury), p.league_goals_prev_three_matches, tostring(p.is_among_top_scorers_in_team), p.form,
