@@ -4,6 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EA FC Companion App</title>
+  <!-- Cinzel: the Trophy Cabinet's engraved-plaque club name sign (see
+       #trophy-cabinet-sign) — a stately serif fits the "trophy room
+       nameplate" look better than the app's normal UI font. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-color: #0e1117;
@@ -60,7 +66,7 @@
     .player-name-cell { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .player-name { font-weight: 600; color: #58a6ff; display: inline-flex; align-items: center; gap: 6px; }
     .jersey-badge { background: var(--expand-bg); border: 1px solid var(--border-color); padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
-    .expand-icon { font-size: 10px; color: var(--text-dim); transition: transform 0.2s; }
+    .expand-icon { font-size: 18px; color: var(--text-dim); transition: transform 0.2s; cursor: pointer; padding: 4px 6px; display: inline-block; }
     .player-row.expanded .expand-icon { transform: rotate(90deg); color: var(--accent-color); }
 
     .loan-badge { font-size: 11px; padding: 2px 6px; background: #388bfd22; border: 1px solid #388bfd55; border-radius: 4px; color: #58a6ff; margin-left: 6px; }
@@ -71,6 +77,21 @@
     .rating-badge { padding: 2px 8px; border-radius: 4px; font-weight: 700; background-color: #238636; color: #fff; }
     .pos-badge { padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; text-transform: uppercase; background-color: #21262d; border: 1px solid var(--border-color); }
     .pos-ATT { color: #ff4d4d; } .pos-MID { color: #00ff87; } .pos-DEF { color: #38bdf8; } .pos-GK { color: #facc15; }
+
+    /* Squad, Former Players, and Transfer Hub are each a single primary
+       table (unlike Home/League Stats' stacks of small widgets), so they
+       get a larger scale across text, badges, and headshots — scoped to
+       these three tab containers only, everything else keeps the base
+       table sizing above. */
+    #squad-tab th, #past-players-tab th, #transfers-tab th { font-size: 14px; padding: 16px 18px; }
+    #squad-tab td, #past-players-tab td, #transfers-tab td { font-size: 18px; padding: 16px 18px; }
+    #squad-tab .pos-badge, #past-players-tab .pos-badge, #transfers-tab .pos-badge { font-size: 13px; padding: 3px 8px; }
+    #squad-tab .rating-badge, #past-players-tab .rating-badge, #transfers-tab .rating-badge { font-size: 17px; padding: 3px 10px; }
+    #squad-tab .jersey-badge, #past-players-tab .jersey-badge, #transfers-tab .jersey-badge { font-size: 13px; }
+    #squad-tab .loan-badge, #past-players-tab .loan-badge, #transfers-tab .loan-badge,
+    #squad-tab .injury-badge, #past-players-tab .injury-badge, #transfers-tab .injury-badge,
+    #squad-tab .captain-badge, #past-players-tab .captain-badge, #transfers-tab .captain-badge,
+    #squad-tab .vice-captain-badge, #past-players-tab .vice-captain-badge, #transfers-tab .vice-captain-badge { font-size: 13px; }
 
     .empty-state { text-align: center; padding: 40px; color: var(--text-dim); }
     .zero-stat { color: var(--text-dim); }
@@ -264,6 +285,17 @@
       .home-grid-top, .home-grid-mid { grid-template-columns: 1fr; }
     }
 
+    /* The competition watermark used to be scoped to just the body div
+       below the "Upcoming Match" heading, so it only had that smaller
+       sub-area to fill — sizing it up within that box just made it hit
+       the edges and look cropped. Making the
+       whole card the positioning context instead gives the same
+       background-size:contain watermark the full card to work with (title
+       included), so it can render meaningfully larger while `contain`
+       still guarantees the whole logo stays visible, never clipped. */
+    .upcoming-match-card { position: relative; overflow: hidden; }
+    .upcoming-match-watermark { position: absolute; inset: 0; background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.16; pointer-events: none; z-index: 0; }
+
     .home-toggle { display: flex; gap: 4px; }
     .home-toggle-btn {
       font-size: 11px;
@@ -423,6 +455,68 @@
     .league-history-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
     .league-history-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border-color); }
     .league-history-header h3 { margin: 0; font-size: 17px; }
+
+    /* Trophy Cabinet — the dialog itself is just a transparent frame; the
+       whole visual is the .trophy-cabinet-stage image, sized off the
+       background photo's own ~1115:944 ratio so every slot's percentage
+       coordinates (see TROPHY_CABINET_SLOTS, measured as percentages so
+       they hold even if this file gets replaced by a higher-res export
+       at the same framing/aspect ratio) line up regardless of the
+       dialog's rendered size. */
+    .trophy-cabinet-dialog { background: transparent; border: none; padding: 0; max-width: 1000px; width: 92vw; overflow: visible; }
+    .trophy-cabinet-dialog::backdrop { background: rgba(0, 0, 0, 0.78); }
+    .trophy-cabinet-stage { position: relative; width: 100%; aspect-ratio: 1115 / 944; border-radius: 14px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65); }
+    .trophy-cabinet-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* Sits above the background but below the sign/trophies, so hovering
+       a trophy can dim the room around it without touching the trophy
+       (or the sign) itself — the "spotlight" effect. */
+    .trophy-cabinet-dim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0); transition: background 0.35s ease; pointer-events: none; z-index: 1; }
+    .trophy-cabinet-dim.active { background: rgba(0, 0, 0, 0.6); }
+    .trophy-cabinet-close {
+      position: absolute; top: 14px; right: 14px; z-index: 10;
+      width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.5); color: #fff; border: 1px solid rgba(255, 255, 255, 0.3);
+      cursor: pointer; font-size: 15px; line-height: 1;
+    }
+    .trophy-cabinet-close:hover { background: rgba(0, 0, 0, 0.75); }
+    .trophy-cabinet-sign {
+      position: absolute; left: 19.8%; top: 11.7%; width: 62.8%; height: 8.5%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Cinzel', serif; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+      color: #7a1015; text-shadow: 0 1px 1px rgba(255, 255, 255, 0.35);
+      font-size: clamp(13px, 3.4vw, 30px);
+      z-index: 2; pointer-events: none; white-space: nowrap; overflow: hidden;
+    }
+    .trophy-cabinet-slot {
+      position: absolute; z-index: 2;
+      display: flex; align-items: flex-end; justify-content: center;
+      cursor: pointer;
+    }
+    .trophy-cabinet-slot img {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      transition: transform 0.25s ease, filter 0.25s ease;
+      filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.55));
+    }
+    .trophy-cabinet-slot:hover { z-index: 3; }
+    .trophy-cabinet-slot:hover img { transform: scale(1.16); filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.75)) brightness(1.08); }
+    .trophy-cabinet-tooltip {
+      position: absolute; bottom: 100%; left: 50%; transform: translate(-50%, -10px);
+      background: rgba(8, 8, 10, 0.94); color: #fff; padding: 8px 12px; border-radius: 8px;
+      font-size: 12px; font-weight: 600; white-space: nowrap; text-align: center; line-height: 1.5;
+      opacity: 0; visibility: hidden; transition: opacity 0.2s ease; pointer-events: none;
+    }
+    .trophy-cabinet-tooltip::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border: 6px solid transparent; border-top-color: rgba(8, 8, 10, 0.94);
+    }
+    .trophy-cabinet-tooltip .years { display: block; font-weight: 400; opacity: 0.75; margin-top: 2px; }
+    .trophy-cabinet-slot:hover .trophy-cabinet-tooltip { opacity: 1; visibility: visible; }
+    .trophy-cabinet-open-btn {
+      display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px;
+      background: linear-gradient(135deg, #7a1015, #b91c1c); color: #fff; border: 1px solid rgba(255, 255, 255, 0.25);
+      font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .trophy-cabinet-open-btn:hover { filter: brightness(1.1); }
     .league-history-table-wrap { margin-top: 18px; border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; }
     .league-history-table-wrap table { width: 100%; border-collapse: collapse; }
     .league-history-table-wrap td:last-child, .league-history-table-wrap th:last-child { text-align: right; }
@@ -766,6 +860,7 @@
     <div class="home-header-strip">
       <div>
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <img id="home-team-badge" style="width: 52px; height: 52px; object-fit: contain; display: none;" onerror="this.style.display='none'" onload="this.style.display=''" />
           <h2 id="home-team-title">My Club</h2>
           <span class="home-ingame-date" id="home-ingame-date">📅 N/A</span>
         </div>
@@ -777,9 +872,10 @@
     <div class="youth-mode-warning-banner" id="youth-mode-warning-banner" style="display: none;"></div>
 
     <div class="home-dashboard-grid home-grid-top">
-      <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
-        <h3><span>Upcoming Match</span></h3>
-        <div id="home-upcoming-match-body"></div>
+      <div class="profile-card home-widget upcoming-match-card" style="cursor: pointer;" onclick="switchTab('calendar')">
+        <div class="upcoming-match-watermark" id="home-upcoming-match-watermark"></div>
+        <h3 style="position: relative; z-index: 1;"><span>Upcoming Match</span></h3>
+        <div id="home-upcoming-match-body" style="position: relative; z-index: 1;"></div>
       </div>
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
         <h3><span>League Table</span></h3>
@@ -805,7 +901,7 @@
           </div>
         </div>
         <div class="profile-card home-widget">
-          <h3><span>Trophies</span></h3>
+          <h3><span>Trophies</span><button class="trophy-cabinet-open-btn" onclick="openTrophyCabinet()">🏆 Trophy Cabinet</button></h3>
           <div id="home-trophies-body"></div>
         </div>
       </div>
@@ -1110,7 +1206,7 @@
   <div id="league-stats-tab" class="tab-content">
     <div class="home-header-strip">
       <div style="display: flex; align-items: center; gap: 12px;">
-        <img id="league-stats-league-logo" style="width: 56px; height: 56px; object-fit: contain; display: none;" onerror="this.style.display='none'" />
+        <img id="league-stats-league-logo" style="width: 84px; height: 84px; object-fit: contain; display: none;" onerror="this.style.display='none'" />
         <h2 id="league-stats-league-name">League Stats</h2>
       </div>
       <div style="display: flex; align-items: center; gap: 10px;">
@@ -1216,6 +1312,21 @@
     <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px;">
       <button class="back-btn" style="margin: 0;" onclick="resetHeadshotToAutomatic()">Reset to Automatic</button>
       <button class="back-btn" style="margin: 0;" onclick="closeHeadshotPicker()">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Trophy Cabinet (see openTrophyCabinet) — a fixed background photo
+       (assets/trophies/display-case/trophy-display-case.jpg) with the club's
+       actual won trophies (getTrophiesWon in main.js) placed into
+       pre-mapped shelf slots (TROPHY_CABINET_SLOTS), most prestigious in
+       the big center slot. -->
+  <dialog id="trophy-cabinet-dialog" class="trophy-cabinet-dialog">
+    <button class="trophy-cabinet-close" onclick="document.getElementById('trophy-cabinet-dialog').close()" title="Close">✕</button>
+    <div class="trophy-cabinet-stage">
+      <img class="trophy-cabinet-bg" src="assets/trophies/display-case/trophy-display-case.jpg" alt="" />
+      <div class="trophy-cabinet-dim" id="trophy-cabinet-dim"></div>
+      <div class="trophy-cabinet-sign" id="trophy-cabinet-sign"></div>
+      <div id="trophy-cabinet-slots"></div>
     </div>
   </dialog>
 
@@ -1882,21 +1993,6 @@
       return entry ? `assets/trophies/${entry.file}` : null;
     }
 
-    // Faded background watermark for a competition logo — same "large,
-    // barely-there, sits behind the real content" technique the player
-    // profile used for nation flags before that was replaced with a
-    // small icon; here it's the right fit since there's no text label
-    // competing for space, just decoration behind the match/stat details.
-    function buildCompetitionLogoWatermark(compName) {
-      const url = getCompetitionLogoUrl(compName);
-      if (!url) return '';
-      // background-size: contain (not a flat percentage) guarantees the
-      // whole logo is always visible within the card regardless of the
-      // card's own aspect ratio — a flat percentage was scaling width
-      // and height independently, cropping tall/wide logos off-card.
-      return `<div style="position: absolute; inset: 0; background-image: url('${url}'); background-size: contain; background-repeat: no-repeat; background-position: center; opacity: 0.12; pointer-events: none; z-index: 0;"></div>`;
-    }
-
     // Small +N/-N badge for the attribute/overall watcher — the CUMULATIVE
     // change for the whole current season so far (see overall_delta/
     // attribute_deltas and season_start_overall/season_start_attributes_json
@@ -2278,6 +2374,16 @@
       document.getElementById(`${tabName}-tab`).classList.add('active');
       const btn = document.getElementById(`btn-${tabName}`);
       if (btn) btn.classList.add('active');
+
+      // League Stats is otherwise only (re)rendered by a live data push
+      // (see the league-stats-updated handler) or a season-selector
+      // change — never by just clicking the tab — so if the underlying
+      // globals (currentLeagueStatsLeagueName etc.) changed since the
+      // last render while this tab wasn't visible, switching to it could
+      // show stale content (e.g. a missing logo/name) until the next
+      // push. Re-rendering on every switch guarantees it always reflects
+      // current state instead of depending on that timing.
+      if (tabName === 'league-stats') renderLeagueStatsTab();
     }
 
     function goBackFromProfile() {
@@ -2555,10 +2661,66 @@
       return breakdown;
     }
 
-    function renderCompetitionsTableHtml(competitions) {
-      if (!competitions || competitions.length === 0) {
+    // A competition counts as a "cup" (shown below the leagues) if its
+    // name matches a known knockout competition — matched by keyword
+    // since the real name carries a version-dependent sponsor prefix
+    // (same reasoning as COMPETITION_LOGO_MAP above). "champions league"/
+    // "europa league"/"conference league" all contain the word "league"
+    // despite being cups, so they're matched explicitly rather than
+    // relying on the absence of "league" to mean "cup". Anything that
+    // doesn't match — including an unrecognized foreign league name —
+    // defaults to the league group rather than being mis-bucketed.
+    const CUP_COMPETITION_KEYWORDS = ['champions league', 'europa league', 'conference league', 'carabao', 'fa cup', 'cup', 'trophy', 'shield'];
+    function isCupCompetition(compName) {
+      const lower = String(compName || '').toLowerCase();
+      return CUP_COMPETITION_KEYWORDS.some(k => lower.includes(k));
+    }
+
+    // `includePreseason`/`showTotal` default to the Former Players/Squad
+    // All Time behavior (no preseason row, total at the bottom); the
+    // Squad tab's own per-season and All Time toggles pass the opposite
+    // of both — the user wants preseason kept visible there and no total
+    // row, while Former Players stays as-is. Leagues-before-cups grouping
+    // (see isCupCompetition) always applies either way.
+    function renderCompetitionsTableHtml(competitions, { includePreseason = false, showTotal = true } = {}) {
+      const rows = includePreseason
+        ? (competitions || [])
+        // Preseason/exhibition friendlies pad appearance counts but aren't
+        // a real competition worth a row here — see bucketExhibitionCompetitions.
+        : (competitions || []).filter(c => c.comp_name !== 'Preseason Friendlies');
+      if (rows.length === 0) {
         return `<div class="empty-state" style="padding: 8px; font-size: 12px;">No per-competition data recorded.</div>`;
       }
+
+      // Preseason isn't a league or a cup — grouping it by isCupCompetition
+      // would put it up with the leagues (no keyword match), so it's
+      // pulled out and always appended last regardless of group.
+      const realRows = rows.filter(c => c.comp_name !== 'Preseason Friendlies');
+      const preseasonRows = rows.filter(c => c.comp_name === 'Preseason Friendlies');
+      const ordered = [...realRows.filter(c => !isCupCompetition(c.comp_name)), ...realRows.filter(c => isCupCompetition(c.comp_name)), ...preseasonRows];
+
+      const totals = ordered.reduce((acc, c) => {
+        const apps = Number(c.appearances || 0);
+        acc.appearances += apps;
+        acc.goals += Number(c.goals || 0);
+        acc.assists += Number(c.assists || 0);
+        acc.clean_sheets += Number(c.clean_sheets || 0);
+        acc.__ratingWeightedSum += Number(c.avg_rating || 0) * apps;
+        return acc;
+      }, { appearances: 0, goals: 0, assists: 0, clean_sheets: 0, __ratingWeightedSum: 0 });
+      const totalAvgRating = totals.appearances > 0 ? totals.__ratingWeightedSum / totals.appearances : 0;
+
+      const buildRow = c => `
+        <tr>
+          <td>${competitionNameWithLogo(c.comp_name, c.comp_name || 'League/Cup')}</td>
+          <td>${c.appearances || 0}</td>
+          <td>${c.goals || 0}</td>
+          <td>${c.assists || 0}</td>
+          <td>${c.clean_sheets || 0}</td>
+          <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
+        </tr>
+      `;
+
       return `
         <table class="sub-table">
           <thead>
@@ -2572,16 +2734,17 @@
             </tr>
           </thead>
           <tbody>
-            ${competitions.map(c => `
-              <tr>
-                <td>${competitionNameWithLogo(c.comp_name, c.comp_name || 'League/Cup')}</td>
-                <td>${c.appearances || 0}</td>
-                <td>${c.goals || 0}</td>
-                <td>${c.assists || 0}</td>
-                <td>${c.clean_sheets || 0}</td>
-                <td>${Number(c.avg_rating || 0).toFixed(2)}</td>
-              </tr>
-            `).join('')}
+            ${ordered.map(buildRow).join('')}
+            ${showTotal ? `
+            <tr style="font-weight: 700; border-top: 2px solid var(--border-color);">
+              <td>Total</td>
+              <td>${totals.appearances}</td>
+              <td>${totals.goals}</td>
+              <td>${totals.assists}</td>
+              <td>${totals.clean_sheets}</td>
+              <td>${totalAvgRating.toFixed(2)}</td>
+            </tr>
+            ` : ''}
           </tbody>
         </table>
       `;
@@ -3190,19 +3353,29 @@
       `).join('');
     }
 
-    // Re-fetches the current-season squad (the only place headshot_path
-    // is computed — see getSquadFromDB in main.js) and re-runs it through
-    // the same processIncomingPlayers path a live sync uses, so
-    // currentPlayers picks up the new headshot_path before the profile
-    // re-renders. Squad-only, not a full changeSave()-style reload, since
-    // nothing else about the player actually changed.
+    // Re-fetches every player list that computes its own headshot_path
+    // (getSquadFromDB, getPastPlayers, getSignedPlayers in main.js) so
+    // whichever one the edited player actually belongs to — current
+    // squad, former player, or a Transfer Hub row sourced from either —
+    // picks up the change before the profile re-renders. Originally
+    // squad-only, which meant editing a Former Player's photo saved fine
+    // but the picker's own profile re-render kept showing the old one
+    // (currentPastPlayers was never refetched).
     async function refreshSquadAfterHeadshotChange() {
-      if (!window.api || !window.api.getSquadData) return;
-      try {
-        const rawList = await window.api.getSquadData();
-        processIncomingPlayers(rawList);
-      } catch (e) {
-        console.error('Failed to refresh squad after headshot change:', e);
+      if (window.api && window.api.getSquadData) {
+        try {
+          const rawList = await window.api.getSquadData();
+          processIncomingPlayers(rawList);
+        } catch (e) {
+          console.error('Failed to refresh squad after headshot change:', e);
+        }
+      }
+      if (window.api && window.api.getPastPlayers) {
+        try {
+          await renderPastPlayersTable();
+        } catch (e) {
+          console.error('Failed to refresh former players after headshot change:', e);
+        }
       }
     }
 
@@ -4120,6 +4293,7 @@
             <div class="player-name-cell">
               <span class="player-name">
                 <span class="expand-icon">▶</span>
+                ${buildPlayerAvatarHtml(p, 34, '50%')}
                 ${p.name || 'Unknown'}
                 ${captainDisplay}
                 ${viceCaptainDisplay}
@@ -4180,7 +4354,7 @@
             try {
               const breakdown = await fetchAllTimeCompetitionsForPlayer(p.player_id);
               loaded = true;
-              if (detailRow.classList.contains('open')) wrapper.innerHTML = renderCompetitionsTableHtml(breakdown);
+              if (detailRow.classList.contains('open')) wrapper.innerHTML = renderCompetitionsTableHtml(breakdown, { includePreseason: true, showTotal: false });
             } catch (err) {
               console.error('Failed to load all-time competitions breakdown for player', p.player_id, err);
               if (detailRow.classList.contains('open')) {
@@ -4194,7 +4368,7 @@
           const detailRow = document.createElement('tr');
           detailRow.className = 'detail-row';
           detailRow.id = `detail-${idx}`;
-          detailRow.innerHTML = `<td colspan="12"><div class="detail-wrapper">${renderCompetitionsTableHtml(p.competitions)}</div></td>`;
+          detailRow.innerHTML = `<td colspan="12"><div class="detail-wrapper">${renderCompetitionsTableHtml(p.competitions, { includePreseason: true, showTotal: false })}</div></td>`;
 
           row.onclick = (e) => {
             if (e.target.closest('.player-name') || e.target.closest('.jersey-badge')) {
@@ -4295,6 +4469,7 @@
             position_id: p.position_id,
             dob: p.dob,
             overall: p.overall,
+            headshot_path: p.headshot_path,
             from_team: ourClub,
             to_team: p.current_club || 'Unknown',
             detail: dateLabel || p.departed_season || '—',
@@ -4325,6 +4500,7 @@
             position_id: p.position_id,
             dob: p.dob,
             overall: p.overall,
+            headshot_path: p.headshot_path,
             from_team: ourClub,
             to_team: p.club_name || 'Unknown Club',
             detail: rangeLabel,
@@ -4348,6 +4524,7 @@
           position_id: p.position_id,
           dob: p.dob,
           overall: p.overall,
+          headshot_path: p.headshot_path,
           from_team: p.from_team,
           to_team: ourClub,
           detail: dateLabel || p.signed_season || '—',
@@ -4460,7 +4637,12 @@
         const posInfo = getPositionInfo(t.position_id);
         return `
         <tr class="transfer-row">
-          <td><strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_id ?? t.player_name}')">${t.player_name}</strong></td>
+          <td>
+            <span style="display: inline-flex; align-items: center; gap: 6px;">
+              ${buildPlayerAvatarHtml({ name: t.player_name, headshot_path: t.headshot_path }, 34, '50%')}
+              <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${t.player_id ?? t.player_name}')">${t.player_name}</strong>
+            </span>
+          </td>
           <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
           <td>${computeAge(t.dob) ?? '—'}</td>
           <td><span class="rating-badge">${t.overall || '—'}</span></td>
@@ -4779,7 +4961,10 @@
           <tr class="player-row" id="former-row-${p.player_id}">
             <td>
               <span class="expand-icon" style="cursor: pointer; margin-right: 4px;" onclick="toggleFormerPlayerCompetitions(${p.player_id})" title="Competitions breakdown for their whole time at the club">▶</span>
-              <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong>
+              <span style="display: inline-flex; align-items: center; gap: 6px;">
+                ${buildPlayerAvatarHtml(p, 34, '50%')}
+                <strong class="clickable-name" style="color: #58a6ff;" onclick="openPlayerProfile('${p.player_id}')">${p.name}</strong>
+              </span>
             </td>
             <td><span class="pos-badge pos-${posInfo.group}">${posInfo.label}</span></td>
             <td>${p.__age ?? '—'}</td>
@@ -5467,11 +5652,25 @@
         + (expiryDate.getMonth() - referenceDate.getMonth());
     }
 
-    function renderHomeHeader() {
+    async function renderHomeHeader() {
       const teamName = getMostCommonClubName() || 'My Club';
       const seasonLabel = computeCurrentSeasonLabel();
       const titleEl = document.getElementById('home-team-title');
       if (titleEl) titleEl.textContent = seasonLabel ? `${teamName} ${seasonLabel}` : teamName;
+
+      // Same TheSportsDB lookup the player profile already uses for a
+      // club crest (see fetchClubBadgeUrl) — a real live badge, not a
+      // locally-dropped file, so this needs no asset from the user at all.
+      const badgeEl = document.getElementById('home-team-badge');
+      if (badgeEl) {
+        const badgeUrl = await fetchClubBadgeUrl(teamName);
+        if (badgeUrl) {
+          badgeEl.src = badgeUrl;
+        } else {
+          badgeEl.removeAttribute('src');
+          badgeEl.style.display = 'none';
+        }
+      }
 
       const snapshotNoteEl = document.getElementById('home-snapshot-note');
       if (snapshotNoteEl) {
@@ -5599,8 +5798,11 @@
         .slice()
         .sort((a, b) => parseInt(a.date, 10) - parseInt(b.date, 10))[0];
 
+      const watermarkEl = document.getElementById('home-upcoming-match-watermark');
+
       if (!upcoming) {
         container.innerHTML = `<div class="empty-state" style="padding: 12px;">No upcoming fixtures scheduled.</div>`;
+        if (watermarkEl) watermarkEl.style.backgroundImage = '';
         return;
       }
 
@@ -5623,28 +5825,28 @@
       const teamPlaceHtml = teamStanding ? ordinal(teamStanding.rank) : '—';
       const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
 
+      if (watermarkEl) {
+        const logoUrl = getCompetitionLogoUrl(upcoming.competition);
+        watermarkEl.style.backgroundImage = logoUrl ? `url('${logoUrl}')` : '';
+      }
+
       container.innerHTML = `
-        <div style="position: relative;">
-          ${buildCompetitionLogoWatermark(upcoming.competition)}
-          <div style="position: relative; z-index: 1;">
-            <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
-            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
-            <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
-            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
-            <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
-              <div style="flex: 1;">
-                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-                <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
-                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-                <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
-              </div>
-              <div style="flex: 1;">
-                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-                <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
-                <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-                <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
-              </div>
-            </div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
+        <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
+        <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
+          <div style="flex: 1;">
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
+          </div>
+          <div style="flex: 1;">
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
+            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
           </div>
         </div>
       `;
@@ -6771,6 +6973,96 @@
       }
 
       container.innerHTML = historicalHtml + wonHtml;
+    }
+
+    // Percentage coordinates for each of the cabinet photo's 13 shelf
+    // slots (assets/trophies/display-case/trophy-display-case.jpg),
+    // measured directly off the user's own slot-mapping reference image.
+    // Index 0 is the large center slot — always given to the single most
+    // prestigious trophy actually won (see TROPHY_CABINET_PRESTIGE) — the
+    // rest follow in on-shelf reading order (row by row, left to right).
+    const TROPHY_CABINET_SLOTS = [
+      { left: '42.67%', top: '45.70%', width: '16.65%', height: '23.83%' },
+      { left: '14.00%', top: '26.17%', width: '8.71%', height: '12.63%' },
+      { left: '27.34%', top: '26.17%', width: '8.38%', height: '12.50%' },
+      { left: '66.04%', top: '26.43%', width: '7.72%', height: '12.11%' },
+      { left: '76.52%', top: '26.17%', width: '9.04%', height: '12.37%' },
+      { left: '12.79%', top: '41.53%', width: '9.15%', height: '12.76%' },
+      { left: '28.12%', top: '41.80%', width: '9.37%', height: '12.37%' },
+      { left: '64.17%', top: '41.53%', width: '8.82%', height: '12.76%' },
+      { left: '76.85%', top: '41.67%', width: '8.49%', height: '12.37%' },
+      { left: '13.12%', top: '55.99%', width: '9.26%', height: '14.06%' },
+      { left: '28.23%', top: '56.51%', width: '9.59%', height: '13.54%' },
+      { left: '64.06%', top: '56.25%', width: '8.71%', height: '13.28%' },
+      { left: '77.51%', top: '56.51%', width: '9.70%', height: '13.41%' }
+    ];
+    // Most-to-least prestigious, used both to pick the center-slot trophy
+    // and to order/cap the rest when a save has won more distinct
+    // competitions than there are slots. League titles rank above the
+    // minor domestic cups (Carabao/Vertu) — for a lower-league club,
+    // winning their own league is the bigger achievement, and the cups
+    // belong on a side shelf, not the centerpiece.
+    const TROPHY_CABINET_PRESTIGE = [
+      'champions league', 'europa league', 'conference league', 'fa cup',
+      'premier league', 'championship', 'league one', 'league two',
+      'carabao', 'vertu'
+    ];
+    function trophyCabinetPriority(trophy) {
+      const lower = String(trophy.comp_name || '').toLowerCase();
+      const idx = TROPHY_CABINET_PRESTIGE.findIndex(k => lower.includes(k));
+      return idx === -1 ? TROPHY_CABINET_PRESTIGE.length : idx;
+    }
+
+    async function openTrophyCabinet() {
+      const dialog = document.getElementById('trophy-cabinet-dialog');
+      if (!dialog) return;
+
+      const signEl = document.getElementById('trophy-cabinet-sign');
+      if (signEl) signEl.textContent = getMostCommonClubName() || 'My Club';
+
+      const slotsEl = document.getElementById('trophy-cabinet-slots');
+      const dimEl = document.getElementById('trophy-cabinet-dim');
+      if (slotsEl) slotsEl.innerHTML = '';
+
+      const won = (window.api && window.api.getTrophiesWon) ? ((await window.api.getTrophiesWon()) || []) : [];
+      const displayed = won.slice().sort((a, b) => trophyCabinetPriority(a) - trophyCabinetPriority(b)).slice(0, TROPHY_CABINET_SLOTS.length);
+
+      if (slotsEl) {
+        displayed.forEach((trophy, i) => {
+          const trophyUrl = getCompetitionTrophyUrl(trophy.comp_name);
+          if (!trophyUrl) return; // no artwork for this competition — leave the shelf slot empty rather than guess
+
+          const slot = TROPHY_CABINET_SLOTS[i];
+          const years = (trophy.years && trophy.years.length > 0 ? trophy.years : [trophy.last_won]).filter(Boolean).join(' & ');
+          const name = normalizeCompetitionName(trophy.comp_name);
+          // Some real comp names (e.g. "Vertu Trophy", the EFL Trophy's
+          // sponsor name) already end in "Trophy" — appending it again
+          // would read as "Vertu Trophy Trophy".
+          const trophyLabel = /trophy$/i.test(name) ? name : `${name} Trophy`;
+
+          const el = document.createElement('div');
+          el.className = 'trophy-cabinet-slot';
+          el.style.left = slot.left;
+          el.style.top = slot.top;
+          el.style.width = slot.width;
+          el.style.height = slot.height;
+          el.innerHTML = `
+            <img src="${trophyUrl}" alt="${name}" onerror="this.style.display='none'" />
+            <div class="trophy-cabinet-tooltip">
+              <div>${trophyLabel}${trophy.count > 1 ? ` x${trophy.count}` : ''}</div>
+              ${years ? `<span class="years">${years}</span>` : ''}
+            </div>
+          `;
+          // The dim/"spotlight" overlay covers the whole cabinet, not just
+          // this slot — toggled here rather than in CSS so it darkens the
+          // room around whichever trophy is actually being hovered.
+          el.addEventListener('mouseenter', () => { if (dimEl) dimEl.classList.add('active'); });
+          el.addEventListener('mouseleave', () => { if (dimEl) dimEl.classList.remove('active'); });
+          slotsEl.appendChild(el);
+        });
+      }
+
+      dialog.showModal();
     }
 
     async function renderManagerPPGWidget() {
