@@ -201,6 +201,64 @@ CREATE TABLE IF NOT EXISTS matches (
     UNIQUE(season_id, match_date, opponent, competition)
 );
 
+-- Reconstructed goal-scorer log for PLAYED (not simmed) fixtures, built by
+-- diffing player_season_stats.goals/assists between syncs while today's
+-- fixture is still live (see detectLiveMatchEvents in main.js). The game
+-- exposes no real per-match event data at all — this is the app's own
+-- best-effort reconstruction from season-cumulative stat deltas, so it
+-- only ever captures matches where a squad sync happened to land while
+-- the goal/assist occurred (auto-refresh or a manual/in-game F10 press);
+-- simmed matches and matches missed while the app was closed leave no
+-- trace here.
+--
+-- Keyed by the fixture's natural key (season_id, match_date, competition,
+-- opponent) rather than a matches.id FK — event detection happens WHILE
+-- the fixture is still unresolved, before its row exists in `matches`
+-- (that only gets inserted once the calendar export marks it played).
+-- Consumers join against matches on that same natural key instead.
+CREATE TABLE IF NOT EXISTS match_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    season_id INTEGER NOT NULL,
+    match_date TEXT NOT NULL,
+    competition TEXT NOT NULL,
+    opponent TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL DEFAULT 'goal', -- only 'goal' for now; room to add card events later via the same diffing approach
+    -- Only set when the same sync had exactly one new goal and exactly
+    -- one new assist — the one case unambiguous enough to pair with
+    -- confidence. Any messier combination (a brace, multiple scorers, a
+    -- mismatched assist count) logs the goal(s) unassisted rather than
+    -- guessing at a pairing — no assist is better than a wrong one, same
+    -- philosophy as the POTM detection in player_awards.
+    assisted_by_player_id INTEGER,
+    -- Which side scored — needed explicitly rather than inferred from
+    -- whether player_id is "one of ours", since an opponent scorer also
+    -- gets a lightweight row in `players` (see persistLeagueStats) so
+    -- their name resolves, which would otherwise make them
+    -- indistinguishable from our own players by table membership alone.
+    is_opponent_goal INTEGER NOT NULL DEFAULT 0,
+    -- The diffing approach has no way to detect a penalty — always 0 on
+    -- auto-detected rows; only ever set via the manual edit UI.
+    is_penalty INTEGER NOT NULL DEFAULT 0,
+    -- An own goal counts for the OPPOSING side's score (is_opponent_goal
+    -- reflects that) but is credited to a player on the OTHER team from
+    -- what is_opponent_goal alone would suggest — e.g. an own goal that
+    -- benefits the opponent (is_opponent_goal = 1) is actually committed
+    -- by one of OUR players, so player_id points into our own roster,
+    -- not theirs. Manual-entry only, same as is_penalty — the diffing
+    -- approach has no way to detect this either.
+    is_own_goal INTEGER NOT NULL DEFAULT 0,
+    -- 0 = auto-detected via stat-diffing, 1 = added or corrected by hand
+    -- through the per-match edit UI. Lets the UI show which rows are the
+    -- app's best guess vs. the user's own confirmed record, and lets a
+    -- full match re-edit safely replace only what it owns.
+    is_manual INTEGER NOT NULL DEFAULT 0,
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(assisted_by_player_id) REFERENCES players(player_id)
+);
+
 -- Per-competition standing/progress, upserted every calendar sync from
 -- the same fixture-aggregation the calendar export's "competitions"
 -- array already computes (see export_all.lua). Never overwritten across

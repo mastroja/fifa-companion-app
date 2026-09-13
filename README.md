@@ -1,4 +1,4 @@
-# EA FC Career Companion
+# FIFA Analytics
 
 A companion app for EA Sports FC 26 Career Mode. It reads data out of your save via a Live Editor Lua script bound to a hotkey, and turns it into a Home dashboard, season history, transfer tracking, league stats, and an end-of-season summary — all local, all offline, nothing sent anywhere.
 
@@ -10,7 +10,7 @@ This app depends on a specific combination of game version + Live Editor version
 |---|---|
 | EA Sports FC 26 (Steam) | Build `1.0.139.20381` |
 | FC 26 Live Editor | `v26.3.6` |
-| Companion App | `1.6.0` |
+| FIFA Analytics | `1.7.0` |
 
 
 ## 1. Pin your game version (do this FIRST)
@@ -34,7 +34,7 @@ If your game has *already* auto-updated past `1.0.139.20381`, Steam's client doe
 2. Extract it to a folder (e.g. `D:\Mods\fc26\FC 26 LE v26.3.6\`) 
 3. Confirm the extracted folder's `le_offsets.json` has `"GAME_VER": "1.0.139.20381"` — if it says a different build number, this Live Editor version doesn't match your game and you need a different LE build (or a different game build — see section 1).
 
-## 5. Install the Companion App
+## 5. Install FIFA Analytics
 1. Navigate to the releases page and download the .exe from the latest release. You will only need to do this once, future updated will auto sycn to your app.
 2. During installation, select "for me (user)" when prompted.
 
@@ -58,7 +58,7 @@ This companion app gets all its data from `assets/export_all.lua`
 1. In Live Editor, find the **Lua Engine** / **Hotkeys** section
 2. Point it at `export_all.lua`:
      ```
-     C:\Users\<your username>\AppData\Local\Programs\EA FC Companion App\resources\app.asar.unpacked\assets\export_all.lua
+     C:\Users\<your username>\AppData\Local\Programs\FIFA Analytics\resources\app.asar.unpacked\assets\export_all.lua
      ```
 3. Assign it to **F10**.
 

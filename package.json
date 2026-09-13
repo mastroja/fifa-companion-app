@@ -1,7 +1,7 @@
 {
   "name": "fifa-career-companion",
-  "version": "1.6.0",
-  "description": "Companion app for EA FC Career Mode",
+  "version": "1.7.0",
+  "description": "FIFA Analytics — analytics companion for EA FC Career Mode",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -10,7 +10,7 @@
   },
   "build": {
     "appId": "com.fifa.companion",
-    "productName": "EA FC Companion App",
+    "productName": "FIFA Analytics",
     "win": {
       "target": "nsis",
       "icon": "assets/app-icon/icon.ico"
@@ -20,7 +20,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "EA FC Companion App",
+      "shortcutName": "FIFA Analytics",
       "installerIcon": "assets/app-icon/icon.ico",
       "uninstallerIcon": "assets/app-icon/icon.ico"
     },

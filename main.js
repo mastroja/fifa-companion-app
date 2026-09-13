@@ -44,6 +44,14 @@ let userClubName = null;
 // detection — same best-effort-from-whatever-just-synced approach as the
 // rest of this app's live-only data.
 let latestLeagueStatsPayload = null;
+// Most recently synced ea_fc_calendar_export.json payload — kept here
+// (not persisted) purely so importFifaData's live-match-event detection
+// (see detectLiveMatchEvents) can check "is there a fixture scheduled
+// for today" without re-reading/re-parsing the calendar file on every
+// squad sync. Same best-effort-from-whatever-just-synced approach as
+// latestLeagueStatsPayload above — may be one refresh cycle stale
+// relative to the squad file, since they're watched independently.
+let latestCalendarPayload = null;
 
 // ------------------------------------------------------------------
 // DB bootstrap
@@ -113,6 +121,18 @@ async function initDatabase() {
   [['motm', 'INTEGER DEFAULT 0'], ['avg_rating', 'REAL DEFAULT 0.0']].forEach(([column, type]) => {
     try {
       db.run(`ALTER TABLE season_league_stats ADD COLUMN ${column} ${type};`);
+    } catch (e) {
+      // column already exists, safe to ignore
+    }
+  });
+
+  // is_opponent_goal/is_penalty/is_manual/is_own_goal added to
+  // match_events after some users (this app's own development machine)
+  // already had the table created without them — same backfill pattern
+  // as above.
+  [['is_opponent_goal', 'INTEGER NOT NULL DEFAULT 0'], ['is_penalty', 'INTEGER NOT NULL DEFAULT 0'], ['is_manual', 'INTEGER NOT NULL DEFAULT 0'], ['is_own_goal', 'INTEGER NOT NULL DEFAULT 0']].forEach(([column, type]) => {
+    try {
+      db.run(`ALTER TABLE match_events ADD COLUMN ${column} ${type};`);
     } catch (e) {
       // column already exists, safe to ignore
     }
@@ -671,6 +691,173 @@ function importCalendarMatches(calendarPayload) {
   saveDatabaseToDisk();
 }
 
+// Calendar entries' own `date` field comes as compact "20270807", while
+// current_date (squad/calendar/league-stats exports all carry their own
+// copy) is "2027-08-07" — different formats for the same underlying
+// date. Stripping to digits-only before comparing sidesteps having to
+// know which format either field happens to be in.
+function normalizeDateForCompare(dateStr) {
+  return String(dateStr || '').replace(/[^0-9]/g, '');
+}
+
+// Finds today's fixture in a calendar payload, for match_events' live-
+// match-window detection (see importFifaData). Matches purely on date —
+// deliberately NOT filtered to `!played`, since the squad and calendar
+// exports are written together on the same F10 press: a fixture that
+// finishes between two polls can flip to played=true in the very same
+// sync that also catches its last goal's stat delta, and excluding
+// played fixtures would silently drop that goal. The tradeoff is two
+// fixtures on the same in-game date (rare in career mode) could have
+// their events merged — an accepted, undetected edge case for v1.
+function findTodaysFixture(calendarPayload, inGameDate) {
+  if (!calendarPayload || !Array.isArray(calendarPayload.calendar) || !inGameDate) return null;
+  const target = normalizeDateForCompare(inGameDate);
+  return calendarPayload.calendar.find(m => normalizeDateForCompare(m.date) === target) || null;
+}
+
+// Per-match goal-scorer/assister breakdown for the Calendar tab's per-
+// fixture dropdown and the Home dashboard's last-result card. Reads
+// match_events (auto-detected via stat-diffing, see importFifaData/
+// persistLeagueStats, or added/corrected by hand via saveMatchEvents)
+// joined against `players` for display names, plus the match's actual
+// final score from `matches` so the UI knows the per-side cap on how
+// many scorer entries are even possible.
+function getMatchEvents(seasonId, matchDate, competition, opponent) {
+  if (!db || !seasonId || !matchDate || !competition || !opponent) {
+    return { events: [], userScore: null, opponentScore: null };
+  }
+  const esc = s => String(s).replace(/'/g, "''");
+
+  const matchRes = db.exec(`
+    SELECT user_score, opponent_score FROM matches
+    WHERE season_id = ${seasonId} AND match_date = '${esc(matchDate)}' AND competition = '${esc(competition)}' AND opponent = '${esc(opponent)}'
+    LIMIT 1;
+  `);
+  const userScore = matchRes.length > 0 && matchRes[0].values.length > 0 ? matchRes[0].values[0][0] : null;
+  const opponentScore = matchRes.length > 0 && matchRes[0].values.length > 0 ? matchRes[0].values[0][1] : null;
+
+  const eventsRes = db.exec(`
+    SELECT me.id, me.player_id, p1.name, me.assisted_by_player_id, p2.name, me.is_opponent_goal, me.is_penalty, me.is_manual, me.is_own_goal
+    FROM match_events me
+    JOIN players p1 ON p1.player_id = me.player_id
+    LEFT JOIN players p2 ON p2.player_id = me.assisted_by_player_id
+    WHERE me.season_id = ${seasonId} AND me.match_date = '${esc(matchDate)}' AND me.competition = '${esc(competition)}' AND me.opponent = '${esc(opponent)}'
+    ORDER BY me.is_opponent_goal ASC, me.id ASC;
+  `);
+  const events = eventsRes.length === 0 ? [] : eventsRes[0].values.map(r => ({
+    id: r[0], player_id: r[1], scorer_name: r[2], assisted_by_player_id: r[3], assister_name: r[4],
+    is_opponent_goal: r[5] === 1, is_penalty: r[6] === 1, is_manual: r[7] === 1, is_own_goal: r[8] === 1
+  }));
+
+  return { events, userScore, opponentScore };
+}
+
+// Candidate opponent scorers for the manual edit form — the league-stats
+// export already covers every team in the league (see persistLeagueStats),
+// so this just filters season_league_stats down to one team rather than
+// needing any new data source.
+function getOpponentRosterForMatch(seasonId, opponentTeamName) {
+  if (!db || !seasonId || !opponentTeamName) return [];
+  const esc = String(opponentTeamName).replace(/'/g, "''");
+  const res = db.exec(`
+    SELECT player_id, name, position_id, dob FROM season_league_stats
+    WHERE season_id = ${seasonId} AND team_name = '${esc}'
+    ORDER BY name ASC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(r => ({ player_id: r[0], name: r[1], position_id: r[2], dob: r[3] }));
+}
+
+// Saves a full manual edit of one match's goal-scorer/assister list —
+// always a full replace (delete then re-insert) rather than a patch,
+// since the edit UI always submits the complete intended state for both
+// sides at once. Enforces the same cap the UI already enforces
+// client-side (can't log more scorers on a side than that side actually
+// scored, per the real final score in `matches`) as a server-side
+// backstop, and upserts a lightweight `players` row for any scorer/
+// assister not already known (same partial pattern as the opponent-goal
+// auto-diffing in persistLeagueStats) so every row's name always
+// resolves on the next read.
+function saveMatchEvents(seasonId, matchDate, competition, opponent, events) {
+  if (!db || !seasonId || !matchDate || !competition || !opponent || !Array.isArray(events)) {
+    return { success: false, error: 'Missing match identifier.' };
+  }
+  const esc = s => String(s).replace(/'/g, "''");
+
+  const matchRes = db.exec(`
+    SELECT user_score, opponent_score FROM matches
+    WHERE season_id = ${seasonId} AND match_date = '${esc(matchDate)}' AND competition = '${esc(competition)}' AND opponent = '${esc(opponent)}'
+    LIMIT 1;
+  `);
+  if (matchRes.length === 0 || matchRes[0].values.length === 0) {
+    return { success: false, error: 'This match has no recorded final score yet.' };
+  }
+  const [userScore, opponentScore] = matchRes[0].values[0];
+
+  const ourGoals = events.filter(e => !e.is_opponent_goal);
+  const oppGoals = events.filter(e => e.is_opponent_goal);
+  if (ourGoals.length > userScore || oppGoals.length > opponentScore) {
+    return { success: false, error: `Can't log more scorers than the actual final score (${userScore}-${opponentScore}).` };
+  }
+
+  db.run('BEGIN TRANSACTION;');
+  try {
+    db.run(`
+      DELETE FROM match_events
+      WHERE season_id = ${seasonId} AND match_date = '${esc(matchDate)}' AND competition = '${esc(competition)}' AND opponent = '${esc(opponent)}';
+    `);
+
+    const playerStmt = db.prepare(`
+      INSERT INTO players (player_id, name, position_id, dob)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(player_id) DO UPDATE SET
+        name = excluded.name,
+        position_id = excluded.position_id,
+        dob = excluded.dob;
+    `);
+    const eventStmt = db.prepare(`
+      INSERT INTO match_events (season_id, match_date, competition, opponent, player_id, event_type, assisted_by_player_id, is_opponent_goal, is_penalty, is_manual, is_own_goal)
+      VALUES (?, ?, ?, ?, ?, 'goal', ?, ?, ?, 1, ?);
+    `);
+    try {
+      events.forEach(e => {
+        if (!e.player_id) return;
+        // name/position_id/dob are only present when the frontend sourced
+        // this player from getOpponentRosterForMatch (a player we may
+        // never have seen before) — our own squad's players are already
+        // fully populated via the regular squad sync, so this is a no-op
+        // partial refresh for them.
+        if (e.name) playerStmt.run([e.player_id, e.name, e.position_id || 0, e.dob || '']);
+        if (e.assisted_by_name) playerStmt.run([e.assisted_by_player_id, e.assisted_by_name, e.assisted_by_position_id || 0, e.assisted_by_dob || '']);
+
+        eventStmt.run([
+          seasonId, matchDate, competition, opponent,
+          e.player_id,
+          // Own goals never have an assist, regardless of what the
+          // frontend happened to submit — enforced here too, not just by
+          // the edit form hiding that dropdown for an own-goal slot.
+          e.is_own_goal ? null : (e.assisted_by_player_id || null),
+          e.is_opponent_goal ? 1 : 0,
+          e.is_penalty ? 1 : 0,
+          e.is_own_goal ? 1 : 0
+        ]);
+      });
+    } finally {
+      playerStmt.free();
+      eventStmt.free();
+    }
+
+    db.run('COMMIT;');
+  } catch (err) {
+    db.run('ROLLBACK;');
+    console.error('[DB] Failed to save match events:', err);
+    return { success: false, error: 'Failed to save.' };
+  }
+
+  saveDatabaseToDisk();
+  return { success: true };
+}
+
 // Preseason/exhibition competitions that are real enough to show up in
 // EA's competitions data but aren't real competitions the club actually
 // competed in — never worth a "place finished" or a trophy. Unlike
@@ -862,6 +1049,45 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
     syncSeasonLeagueNameFromResults(seasonId);
   }
 
+  // Opponent-side match_events detection — mirrors the goal/assist
+  // diffing in importFifaData, but scoped to whichever team we're
+  // actually fixtured against today, since this export (unlike the squad
+  // export) covers every team in the league, not just ours. Read the
+  // opponent's previous goals/assists BEFORE the upsert below overwrites
+  // them, same "diff against last sync" approach.
+  const syncInGameDate = leagueStatsPayload.current_date || new Date().toISOString().slice(0, 10);
+  const liveFixture = findTodaysFixture(latestCalendarPayload, syncInGameDate);
+  // Same distinction as importFifaData: a missing previous row only
+  // implies a safe 0 baseline when the season has no completed matches
+  // on record yet at all — otherwise it's an unsynced-earlier-match gap,
+  // not a debut, and guessing 0 would misattribute those goals to today.
+  const seasonHasPriorMatches = db.exec(`SELECT 1 FROM matches WHERE season_id = ${seasonId} LIMIT 1;`).length > 0;
+  const opponentPrevByPlayer = new Map();
+  if (liveFixture && liveFixture.opponent) {
+    const prevRes = db.exec(`SELECT player_id, goals, assists FROM season_league_stats WHERE season_id = ${seasonId} AND team_name = '${liveFixture.opponent.replace(/'/g, "''")}';`);
+    if (prevRes.length > 0) {
+      prevRes[0].values.forEach(([playerId, goals, assists]) => {
+        opponentPrevByPlayer.set(playerId, { goals: goals || 0, assists: assists || 0 });
+      });
+    }
+  }
+  const opponentGoalDeltas = [];
+  const opponentAssistDeltas = [];
+
+  // Partial upsert (name/position_id/dob only) so an opponent scorer has
+  // a `players` row to join against in match_events — same pattern
+  // importYouthAcademy uses for players not yet on the senior squad, so
+  // it can never clobber a richer row a squad sync already wrote for
+  // someone who happens to also be one of ours.
+  const opponentPlayerStmt = db.prepare(`
+    INSERT INTO players (player_id, name, position_id, dob)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(player_id) DO UPDATE SET
+      name = excluded.name,
+      position_id = excluded.position_id,
+      dob = excluded.dob;
+  `);
+
   const stmt = db.prepare(`
     INSERT INTO season_league_stats
       (season_id, player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards, motm, avg_rating, updated_at)
@@ -886,6 +1112,26 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
   try {
     leagueStatsPayload.players.forEach(p => {
       if (!p.player_id) return;
+
+      if (liveFixture && p.team_name === liveFixture.opponent) {
+        // No previous row: implicit 0 baseline only if the season is
+        // genuinely new (seasonHasPriorMatches false); otherwise it's an
+        // unsynced-earlier-match gap, not a debut — skip rather than
+        // misattribute. See the comment above seasonHasPriorMatches.
+        const previous = opponentPrevByPlayer.get(p.player_id);
+        if (previous || !seasonHasPriorMatches) {
+          const prevGoals = previous ? previous.goals : 0;
+          const prevAssists = previous ? previous.assists : 0;
+          const goalDelta = (p.goals || 0) - prevGoals;
+          const assistDelta = (p.assists || 0) - prevAssists;
+          if (goalDelta > 0) {
+            opponentPlayerStmt.run([p.player_id, p.name || 'Unknown', p.position_id || 0, p.dob || '']);
+            opponentGoalDeltas.push({ player_id: p.player_id, count: goalDelta });
+          }
+          if (assistDelta > 0) opponentAssistDeltas.push({ player_id: p.player_id, count: assistDelta });
+        }
+      }
+
       stmt.run([
         seasonId, p.player_id, p.name || 'Unknown', p.team_name || '', p.overall || 0,
         p.position_id || 0, p.dob || '', p.appearances || 0, p.goals || 0, p.assists || 0,
@@ -894,7 +1140,38 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
       ]);
     });
   } finally {
+    opponentPlayerStmt.free();
     stmt.free();
+  }
+
+  // Same "no assist is better than a wrong one" pairing rule as
+  // importFifaData's match_events logging — see schema.sql.
+  if (liveFixture && opponentGoalDeltas.length > 0) {
+    const assistedBy = (opponentGoalDeltas.length === 1 && opponentGoalDeltas[0].count === 1 &&
+      opponentAssistDeltas.length === 1 && opponentAssistDeltas[0].count === 1)
+      ? opponentAssistDeltas[0].player_id
+      : null;
+
+    const matchEventStmt = db.prepare(`
+      INSERT INTO match_events (season_id, match_date, competition, opponent, player_id, event_type, assisted_by_player_id, is_opponent_goal)
+      VALUES (?, ?, ?, ?, ?, 'goal', ?, 1);
+    `);
+    try {
+      opponentGoalDeltas.forEach(({ player_id, count }) => {
+        for (let i = 0; i < count; i++) {
+          matchEventStmt.run([
+            seasonId,
+            liveFixture.date || syncInGameDate,
+            liveFixture.competition || '',
+            liveFixture.opponent || '',
+            player_id,
+            assistedBy
+          ]);
+        }
+      });
+    } finally {
+      matchEventStmt.free();
+    }
   }
 
   saveDatabaseToDisk();
@@ -2654,9 +2931,9 @@ function importFifaData(jsonPayload) {
   // once up front rather than per player to avoid a query per row.
   const previousStatsByPlayer = new Map();
   if (currentSeasonId) {
-    const prevRes = db.exec(`SELECT player_id, overall, attributes_json, season_start_overall, season_start_attributes_json FROM player_season_stats WHERE season_id = ${currentSeasonId};`);
+    const prevRes = db.exec(`SELECT player_id, overall, attributes_json, season_start_overall, season_start_attributes_json, goals, assists FROM player_season_stats WHERE season_id = ${currentSeasonId};`);
     if (prevRes.length > 0) {
-      prevRes[0].values.forEach(([playerId, overall, attributesJson, seasonStartOverall, seasonStartAttributesJson]) => {
+      prevRes[0].values.forEach(([playerId, overall, attributesJson, seasonStartOverall, seasonStartAttributesJson, goals, assists]) => {
         previousStatsByPlayer.set(playerId, {
           overall,
           attributes: JSON.parse(attributesJson || '{}'),
@@ -2665,11 +2942,20 @@ function importFifaData(jsonPayload) {
           // post-migration, but keeps this from ever computing a delta
           // against nothing).
           seasonStartOverall: seasonStartOverall != null ? seasonStartOverall : overall,
-          seasonStartAttributes: seasonStartAttributesJson ? JSON.parse(seasonStartAttributesJson) : JSON.parse(attributesJson || '{}')
+          seasonStartAttributes: seasonStartAttributesJson ? JSON.parse(seasonStartAttributesJson) : JSON.parse(attributesJson || '{}'),
+          // goals/assists as of the LAST sync (not the season-start
+          // baseline like overall/attributes above) — match_events wants
+          // "did this go up since the previous poll", not "since the
+          // season began". See the goal/assist diffing below.
+          goals: goals || 0,
+          assists: assists || 0
         });
       });
     }
   }
+
+  const goalDeltas = []; // [{player_id, count}], populated in the forEach below
+  const assistDeltas = []; // [{player_id, count}]
 
   // Currently-open injury episodes (end_date IS NULL) for this save, so
   // the sync loop below can tell "still injured from before" apart from
@@ -2705,6 +2991,27 @@ function importFifaData(jsonPayload) {
   // below, since both want "the in-game date we first noticed this
   // change", not wall-clock sync time.
   const syncInGameDate = jsonPayload.current_date || new Date().toISOString().slice(0, 10);
+
+  // Live-match-window check, done once per sync rather than per player.
+  // Only non-null while today's fixture (per the calendar export) is in
+  // progress — see findTodaysFixture and match_events in schema.sql.
+  const liveFixture = findTodaysFixture(latestCalendarPayload, syncInGameDate);
+
+  // Whether this season already has a completed match on record — NOT
+  // the same question as "does this player have a player_season_stats
+  // row yet". A season can have real match history (calendar syncs
+  // independently) while this is still the first SQUAD sync of that
+  // season — e.g. auto-refresh was off for the season's opening
+  // fixture(s) and only just got turned on. In that case a missing
+  // previous row does NOT mean "0 goals so far this season", it means
+  // "unknown" — assuming 0 would misattribute goals actually scored in
+  // an earlier, unsynced match to today's fixture. Only treat a missing
+  // row as an implicit 0 baseline when the season is genuinely brand
+  // new (zero prior matches on record at all); otherwise skip that
+  // player's diff this sync rather than guess.
+  const seasonHasPriorMatches = currentSeasonId
+    ? db.exec(`SELECT 1 FROM matches WHERE season_id = ${currentSeasonId} LIMIT 1;`).length > 0
+    : false;
 
   // One shared timestamp for every row in this sync batch. Previously each
   // row's updated_at was set via SQL's CURRENT_TIMESTAMP, evaluated
@@ -2818,6 +3125,26 @@ function importFifaData(jsonPayload) {
       const overallDelta = previous ? (p.overall || 0) - (previous.seasonStartOverall || 0) : 0;
       const attributeDeltas = previous ? computeAttributeDeltas(previous.seasonStartAttributes, p.attributes || {}) : {};
 
+      // Goal/assist event detection — only bothers diffing at all while
+      // today's fixture is live (see liveFixture above); outside that
+      // window goals/assists still update normally below, just with
+      // nothing logged to match_events. previous.goals/assists is last
+      // SYNC's value (not the season-start baseline used above), since
+      // this wants "changed since the last poll", not "since the season
+      // began". No previous row + a genuinely fresh season (see
+      // seasonHasPriorMatches above) implies a safe 0 baseline; no
+      // previous row with real match history already on record means an
+      // unknown starting point (a sync coverage gap, not a debut) — skip
+      // rather than misattribute earlier-match goals to today.
+      if (liveFixture && (previous || !seasonHasPriorMatches)) {
+        const prevGoals = previous ? previous.goals : 0;
+        const prevAssists = previous ? previous.assists : 0;
+        const goalDelta = (p.goals || 0) - prevGoals;
+        const assistDelta = (p.assists || 0) - prevAssists;
+        if (goalDelta > 0) goalDeltas.push({ player_id: p.player_id, count: goalDelta });
+        if (assistDelta > 0) assistDeltas.push({ player_id: p.player_id, count: assistDelta });
+      }
+
       playerStmt.run([
         p.player_id,
         p.name || 'Unknown',
@@ -2906,6 +3233,42 @@ function importFifaData(jsonPayload) {
         // else: same contract, same expiry as last sync — no-op, row unchanged.
       }
     });
+
+    // Log this sync's goal_deltas (collected in the loop above) to
+    // match_events, now that the full batch is known. Pairing an assist
+    // to a goal only happens in the one unambiguous case — exactly one
+    // scorer with exactly one new goal, and exactly one provider with
+    // exactly one new assist, in this same sync. Anything messier (a
+    // brace, multiple scorers, a mismatched assist count) logs every
+    // goal unassisted rather than guessing — see match_events in
+    // schema.sql for why.
+    if (liveFixture && goalDeltas.length > 0) {
+      const assistedBy = (goalDeltas.length === 1 && goalDeltas[0].count === 1 &&
+        assistDeltas.length === 1 && assistDeltas[0].count === 1)
+        ? assistDeltas[0].player_id
+        : null;
+
+      const matchEventStmt = db.prepare(`
+        INSERT INTO match_events (season_id, match_date, competition, opponent, player_id, event_type, assisted_by_player_id, is_opponent_goal)
+        VALUES (?, ?, ?, ?, ?, 'goal', ?, 0);
+      `);
+      try {
+        goalDeltas.forEach(({ player_id, count }) => {
+          for (let i = 0; i < count; i++) {
+            matchEventStmt.run([
+              currentSeasonId,
+              liveFixture.date || syncInGameDate,
+              liveFixture.competition || '',
+              liveFixture.opponent || '',
+              player_id,
+              assistedBy
+            ]);
+          }
+        });
+      } finally {
+        matchEventStmt.free();
+      }
+    }
 
     injuryOpenStmt.free();
     injuryCloseStmt.free();
@@ -4045,36 +4408,98 @@ function deletePlayer(playerId) {
 // ------------------------------------------------------------------
 
 // Live Editor's export_all.lua is bound to a global F10 hotkey there —
-// simulating that keypress (via a one-off PowerShell SendKeys call) is
-// how the app triggers a re-export without the user alt-tabbing over
-// and pressing it themselves. This only synthesizes a keystroke; the
-// file watcher below picks up whatever Live Editor writes as a result.
+// simulating that keypress is how the app triggers a re-export without
+// the user alt-tabbing over and pressing it themselves. This only
+// synthesizes a keystroke; the file watcher below picks up whatever
+// Live Editor writes as a result.
 //
-// SendKeys always delivers to whatever window currently has OS focus —
-// which is this app's own window when the user clicks the button, not
-// the game. So the game window has to be brought to the foreground
-// first (WScript.Shell's AppActivate, the standard SendKeys pairing)
-// or the F10 keystroke never reaches Live Editor's hotkey handler at
-// all. The companion window is refocused afterward so the user isn't
-// left staring at the game.
+// Live Editor has no window of its own — confirmed 2026-09-13, it draws
+// its UI as an overlay inside the game's own render rather than running
+// as a separate process/HWND.
+//
+// History of what didn't work, 2026-09-13 (kept so nobody re-tries these):
+// user32 keybd_event, SendInput with KEYEVENTF_SCANCODE (real hardware
+// scan code, not just a virtual-key code), and PostMessage of
+// WM_KEYDOWN/WM_KEYUP straight to the game's own window handle — none of
+// them ever reached Live Editor at all (confirmed by watching its own
+// Lua log: nothing happens for any of these, but a real physical F10
+// press shows up immediately). Live Editor almost certainly uses a
+// system-wide low-level keyboard hook to catch its hotkey regardless of
+// what's focused, and such hooks routinely filter out anything flagged
+// as synthetic/injected — which every one of those three approaches is,
+// by construction. There's no flag or delivery method left to try; a
+// software-only fix that avoids ever touching focus isn't achievable
+// here without a virtual input driver (a much bigger step — out of
+// scope unless this genuinely can't be lived with).
+//
+// The only approach ever confirmed to actually work is the original
+// WScript.Shell AppActivate + SendKeys — a REAL synthetic keystroke
+// delivered while the game is the genuine foreground window (which is
+// what a low-level hook actually needs: not "hardware vs software", but
+// the target being truly focused when the OS routes the event). That
+// unavoidably requires the game to have focus at the moment F10 fires.
+//
+// Given that, this only ever calls AppActivate for two safe cases:
+//   - `isManual` (user clicked the Refresh button): they've already left
+//     the game to click something in this app, so bringing the game
+//     forward isn't a new problem — same behavior the button always had.
+//   - auto-refresh, but ONLY when the game is ALREADY the foreground
+//     window: activating an already-active window is a genuine no-op —
+//     no WM_KILLFOCUS/WM_SETFOCUS cycle, nothing visibly changes — so
+//     this is safe too.
+// Auto-refresh skips the tick entirely (tries again next interval)
+// whenever the game ISN'T already focused, rather than forcing a switch
+// — the one case this can't cover is refreshing while you're tabbed
+// away from the game, which simply has to wait until you tab back.
 const GAME_WINDOW_TITLE = 'EA SPORTS FC 26';
 
-function triggerLiveEditorRefresh() {
+function triggerLiveEditorRefresh(isManual) {
   return new Promise(resolve => {
-    const psCommand = [
-      "$activated = (New-Object -ComObject WScript.Shell).AppActivate('" + GAME_WINDOW_TITLE + "');",
-      "if (-not $activated) { Write-Output 'ACTIVATE_FAILED'; exit 1 }",
-      "Start-Sleep -Milliseconds 150;",
-      "Add-Type -AssemblyName System.Windows.Forms;",
-      "[System.Windows.Forms.SendKeys]::SendWait('{F10}');"
-    ].join(' ');
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], (err, stdout) => {
-      if (mainWindow) mainWindow.focus();
-      if (err || (stdout || '').includes('ACTIVATE_FAILED')) {
-        console.error('[Refresh] Failed to send F10 hotkey — could not find/focus the game window ("' + GAME_WINDOW_TITLE + '"). Is the game running?', err ? err.message : '');
+    const psCommand = `
+$typeDef = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class WinCheck {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+}
+'@
+Add-Type -TypeDefinition $typeDef
+$sb = New-Object System.Text.StringBuilder 256
+[WinCheck]::GetWindowText([WinCheck]::GetForegroundWindow(), $sb, 256) | Out-Null
+$gameAlreadyFocused = ($sb.ToString() -eq '${GAME_WINDOW_TITLE}')
+
+if (-not $gameAlreadyFocused -and -not $${isManual ? 'true' : 'false'}) {
+  Write-Output 'SKIPPED_NOT_FOCUSED'
+  exit 0
+}
+
+$activated = (New-Object -ComObject WScript.Shell).AppActivate('${GAME_WINDOW_TITLE}')
+if (-not $activated) { Write-Output 'ACTIVATE_FAILED'; exit 1 }
+Start-Sleep -Milliseconds 150
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.SendKeys]::SendWait('{F10}')
+Write-Output 'SENT_OK'
+`;
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCommand], { windowsHide: true }, (err, stdout) => {
+      const output = (stdout || '').trim();
+      // Only steal the companion window's own focus back when WE were
+      // the ones who moved it away (the manual button, clicked from
+      // here) — never after a genuinely-focus-free auto-refresh tick,
+      // where the game already had focus and should keep it.
+      if (isManual && mainWindow) mainWindow.focus();
+
+      if (output === 'SKIPPED_NOT_FOCUSED') {
+        console.log('[Refresh] Skipped — game isn\'t the focused window right now, and this was an auto-refresh tick (won\'t force a switch). Will try again next interval.');
+        resolve(false);
+      } else if (err || output === 'ACTIVATE_FAILED') {
+        console.error(`[Refresh] Failed to send F10 — could not find/focus the game window ("${GAME_WINDOW_TITLE}"). Is the game running?`, err ? err.message : '');
         resolve(false);
       } else {
-        console.log('[Refresh] Focused game window and sent F10 — waiting on Live Editor to write updated export files.');
+        console.log('[Refresh] Sent F10 — waiting on Live Editor to write updated export files.');
         resolve(true);
       }
     });
@@ -4131,7 +4556,7 @@ function setupAutoUpdater() {
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update ready',
-      message: 'A new version of EA FC Companion App has been downloaded.',
+      message: 'A new version of FIFA Analytics has been downloaded.',
       detail: 'Restart now to install it, or it will install automatically the next time you quit.',
       buttons: ['Restart Now', 'Later'],
       defaultId: 0,
@@ -4154,7 +4579,7 @@ function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'EA FC Companion App',
+    title: 'FIFA Analytics',
     // The packaged Windows build gets its icon from build.win.icon in
     // package.json instead (electron-builder bakes that into the .exe
     // itself) — this only covers the window/taskbar icon while running
@@ -4176,7 +4601,7 @@ ipcMain.handle('get-seasons-list', () => getSeasonsList());
 ipcMain.handle('get-all-time-squad', () => getAllTimeSquadStats());
 ipcMain.handle('get-past-players', () => getPastPlayers());
 ipcMain.handle('get-player-history', (_event, playerId) => getPlayerHistory(playerId));
-ipcMain.handle('trigger-refresh', () => triggerLiveEditorRefresh());
+ipcMain.handle('trigger-refresh', (_event, isManual) => triggerLiveEditorRefresh(!!isManual));
 ipcMain.handle('get-career-totals', () => getCareerTotalsForSquad());
 ipcMain.handle('get-manager-ppg', () => getManagerSeasonPPG());
 ipcMain.handle('get-team-record-seasons', () => getTeamRecordSeasons());
@@ -4229,6 +4654,9 @@ ipcMain.handle('get-season-alerts', (_event, saveId) => getSeasonAlerts(saveId))
 ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayReminder(saveId, seasonId));
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
+ipcMain.handle('get-match-events', (_event, seasonId, matchDate, competition, opponent) => getMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent));
+ipcMain.handle('get-opponent-roster-for-match', (_event, seasonId, opponentTeamName) => getOpponentRosterForMatch(seasonId || currentSeasonId, opponentTeamName));
+ipcMain.handle('save-match-events', (_event, seasonId, matchDate, competition, opponent, events) => saveMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent, events));
 
 // ------------------------------------------------------------------
 // Connected Career (optional sync module -- see connected_career/,
@@ -4269,6 +4697,7 @@ app.whenReady().then(async () => {
       try {
         const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
         const startupCalendarPayload = JSON.parse(rawCalendar);
+        latestCalendarPayload = startupCalendarPayload;
         refreshLeagueTeamsFromCalendar(startupCalendarPayload);
         importCalendarMatches(startupCalendarPayload);
         persistSeasonCompetitionResults(startupCalendarPayload);
@@ -4311,6 +4740,7 @@ app.whenReady().then(async () => {
         try {
           const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
           const calendarPayload = JSON.parse(rawCalendar);
+          latestCalendarPayload = calendarPayload;
 
           // resolveActiveSave returns false when this sync had a blank
           // save_uid while a different save was already active (see its

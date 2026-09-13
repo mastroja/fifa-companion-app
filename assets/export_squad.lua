@@ -440,7 +440,7 @@ local file = io.open(json_path, "w+")
 if file then
     file:write(serialize_to_json(squad_array, save_uid, current_date_str))
     file:close()
-    LOGGER:LogInfo("EA FC Companion: Squad export with headassetid and badges successful!")
+    LOGGER:LogInfo("FIFA Analytics: Squad export with headassetid and badges successful!")
 else
-    LOGGER:LogError("EA FC Companion: Failed to open export path.")
+    LOGGER:LogError("FIFA Analytics: Failed to open export path.")
 end

@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EA FC Companion App</title>
+  <title>FIFA Analytics</title>
   <!-- Anton: the trophy-win celebration pop-up's headline font (see
        .trophy-champions-title). Cinzel: the Trophy Cabinet's
        engraved-plaque club name sign (see #trophy-cabinet-sign) — a
        stately serif fits the "trophy room nameplate" look better than the
-       app's normal UI font. -->
+       app's normal UI font. Poppins: the header wordmark (see .app-brand)
+       — a rounded geometric sans matching the "FIFA Analytics" logotype
+       in the app icon/branding reference, since the app's normal UI font
+       (Segoe UI) doesn't have that same rounded, bold logotype look. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Cinzel:wght@600;700&family=Poppins:wght@500;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-color: #0e1117;
@@ -36,6 +39,16 @@
 
     header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
     h1 { font-size: 24px; font-weight: 700; cursor: pointer; }
+
+    /* Logo + wordmark lockup, replacing the old plain-text <h1>. Poppins
+       (loaded above) matches the rounded geometric sans in the app
+       icon's own "FIFA Analytics" logotype — the app's normal UI font
+       (Segoe UI) doesn't have that look. */
+    .app-brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .app-brand img { width: 44px; height: 44px; object-fit: contain; flex-shrink: 0; }
+    .app-brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .app-brand-title { font-family: 'Poppins', -apple-system, sans-serif; font-size: 22px; font-weight: 700; color: var(--text-color); }
+    .app-brand-subtitle { font-family: 'Poppins', -apple-system, sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.5px; color: var(--text-dim); text-transform: uppercase; margin-top: 2px; }
     
     .header-controls { display: flex; gap: 12px; align-items: center; }
     .badge {
@@ -70,6 +83,15 @@
     
     .player-row:hover, .transfer-row:hover { background-color: var(--hover-color); }
     .player-row, .clickable-name { cursor: pointer; }
+
+    /* Calendar tab — one card per fixture, same visual language as the
+       Home dashboard's match card (see buildFixtureCardBodyHtml). */
+    .calendar-fixture-list { display: flex; flex-direction: column; gap: 10px; }
+    .calendar-fixture-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px 20px; position: relative; overflow: hidden; }
+    .calendar-fixture-card.is-completed { cursor: pointer; }
+    .calendar-fixture-card.is-completed:hover { border-color: var(--accent-color); }
+    .calendar-fixture-expand { border-top: 1px solid var(--border-color); margin-top: 10px; padding-top: 10px; position: relative; z-index: 1; }
+    .calendar-fixture-card-content { position: relative; z-index: 1; }
     
     .player-name-cell { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .player-name { font-weight: 600; color: #58a6ff; display: inline-flex; align-items: center; gap: 6px; }
@@ -828,6 +850,7 @@
        while closed. */
     #trophy-win-dialog[open] { display: flex; flex-direction: column; align-items: stretch; }
     #trophy-win-dialog::backdrop { background: rgba(0, 0, 0, 0.8); }
+    #match-events-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
     #trophy-win-confetti-container { position: relative; overflow: hidden; flex: 1; }
     .trophy-win-image {
       position: absolute; inset: 0; width: 100%; height: 100%;
@@ -880,7 +903,13 @@
 <body>
 
   <header>
-    <h1 onclick="switchTab('home')">EA FC Companion App</h1>
+    <div class="app-brand" onclick="switchTab('home')">
+      <img src="assets/app-icon/icon.png" alt="FIFA Analytics logo" />
+      <div class="app-brand-text">
+        <div class="app-brand-title">FIFA Analytics</div>
+        <div class="app-brand-subtitle">Career Mode Stats</div>
+      </div>
+    </div>
     <div class="header-controls">
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
@@ -1319,21 +1348,12 @@
       />
     </div>
 
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th onclick="sortCalendar('date')" style="cursor: pointer;">Date <span id="sort-indicator-date">↕</span></th>
-            <th onclick="sortCalendar('competition')" style="cursor: pointer;">Competition <span id="sort-indicator-competition">↕</span></th>
-            <th>Opponent</th>
-            <th>Home / Away</th>
-            <th>Result</th>
-          </tr>
-        </thead>
-        <tbody id="calendar-tbody">
-          <tr><td colspan="5" class="empty-state">No calendar data loaded.</td></tr>
-        </tbody>
-      </table>
+    <!-- One card per fixture, same visual style as the Home dashboard's
+         match card (see buildFixtureCardBodyHtml) — a completed fixture's
+         card is clickable to expand its goal-scorer/assister breakdown
+         inline (see toggleCalendarCardExpand), not a popup. -->
+    <div id="calendar-list" class="calendar-fixture-list">
+      <div class="empty-state">No calendar data loaded.</div>
     </div>
   </div>
 
@@ -1559,6 +1579,24 @@
     <button class="back-btn" style="margin-top: 16px; width: 100%; justify-content: center;" onclick="dismissYouthWarningPopup()">Got it</button>
   </dialog>
 
+  <!-- Per-match goal-scorer/assister details — opened from a Calendar tab
+       row or the Home "Last Result" card. See openMatchEventsDialog(). -->
+  <dialog id="match-events-dialog" style="background: var(--card-bg); color: var(--text-color); border: 1px solid #444; border-radius: 8px; padding: 20px; max-width: 520px; width: 90%; max-height: 85vh; overflow: hidden;">
+    <div style="display: flex; flex-direction: column; max-height: calc(85vh - 40px);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; flex-shrink: 0;">
+        <h3 id="match-events-title" style="margin: 0;">Match Details</h3>
+        <button class="back-btn" style="margin: 0;" onclick="closeMatchEventsDialog()">✕</button>
+      </div>
+      <div id="match-events-subtitle" style="color: var(--text-dim); font-size: 13px; margin-bottom: 14px; flex-shrink: 0;"></div>
+      <div id="match-events-body" style="overflow-y: auto; flex: 1;"></div>
+      <div style="display: flex; gap: 8px; margin-top: 16px; flex-shrink: 0;">
+        <button class="back-btn" id="match-events-edit-btn" style="flex: 1; justify-content: center;" onclick="enterMatchEventsEditMode()">✏️ Edit</button>
+        <button class="back-btn" id="match-events-apply-btn" style="flex: 1; justify-content: center; display: none;" onclick="applyMatchEventsEdit()">✔ Apply</button>
+        <button class="back-btn" style="flex: 1; justify-content: center;" onclick="closeMatchEventsDialog()">Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- End of Season Overview — see openSeasonOverview() in the script.
        A plain overlay div (not <dialog>) so the pop-in/slide animations
        and the print-only summary trick both work cleanly. -->
@@ -1579,16 +1617,10 @@
     // just their own matches (see export_all.lua's LEAGUE-WIDE FIXTURE
     // RESULTS block) — backs the Home ticker's "GW N Results" section.
     let currentLeagueFixtures = [];
-    // 'auto' is the default — not a real column, just a signal to
-    // filterAndRenderCalendar's sort to use the two-block ordering (see
-    // there) instead of a flat single-direction sort. Clicking a real
-    // column header via sortCalendar overrides it with a normal sort,
-    // same as any other sortable table in this app.
-    let currentSortColumn1 = 'auto';
-    let currentSortAscending1 = true;
 
     function processIncomingCalendar(data) {
       currentCalendar = Array.isArray(data) ? data : (data?.calendar || []);
+      applyLeagueTheme(getPrimaryLeagueName());
       const activeDate = data?.current_date || 'N/A';
       currentIngameDate = data?.current_date || null;
       currentTeamColors = (data && data.team_colors) || null;
@@ -1704,21 +1736,11 @@
       });
     }
 
-    function sortCalendar(column) {
-      if (currentSortColumn1 === column) {
-        currentSortAscending1 = !currentSortAscending1;
-      } else {
-        currentSortColumn1 = column;
-        currentSortAscending1 = true;
-      }
-      filterAndRenderCalendar();
-    }
-
     function filterAndRenderCalendar() {
       const filterValue = document.getElementById('calendar-filter').value;
       const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
-      const tbody = document.getElementById('calendar-tbody');
-      tbody.innerHTML = '';
+      const container = document.getElementById('calendar-list');
+      container.innerHTML = '';
 
       let filtered = currentCalendar.filter(match => {
         const isCompleted = match.played || match.score !== undefined;
@@ -1733,86 +1755,312 @@
         return true;
       });
 
-      // Default ordering: most recent RESULT on top, soonest UPCOMING
-      // fixture on top — not a single ascending/descending sort, since
-      // that would need two different directions for the played-vs-not
-      // halves of the table. Results block (newest first) always comes
-      // before the upcoming block (soonest first), so scrolling down
-      // reads as "what just happened" → "what's coming up next".
-      // Overridden by clicking a real column header (see sortCalendar).
-      if (currentSortColumn1 === 'auto') {
-        const isDone = m => m.played || m.score !== undefined;
-        filtered.sort((a, b) => {
-          const aDone = isDone(a), bDone = isDone(b);
-          if (aDone !== bDone) return aDone ? -1 : 1;
-          const dateA = parseInt(a.date, 10) || 0;
-          const dateB = parseInt(b.date, 10) || 0;
-          return aDone ? dateB - dateA : dateA - dateB;
-        });
-      } else {
-        filtered.sort((a, b) => {
-          let valA = a[currentSortColumn1] || '';
-          let valB = b[currentSortColumn1] || '';
-
-          if (currentSortColumn1 === 'date') {
-            valA = parseInt(valA, 10) || 0;
-            valB = parseInt(valB, 10) || 0;
-          } else {
-            valA = valA.toString().toLowerCase();
-            valB = valB.toString().toLowerCase();
-          }
-
-          if (valA < valB) return currentSortAscending1 ? -1 : 1;
-          if (valA > valB) return currentSortAscending1 ? 1 : -1;
-          return 0;
-        });
-      }
-
-      document.getElementById('sort-indicator-date').textContent = currentSortColumn1 === 'date' ? (currentSortAscending1 ? '▲' : '▼') : '↕';
-      document.getElementById('sort-indicator-competition').textContent = currentSortColumn1 === 'competition' ? (currentSortAscending1 ? '▲' : '▼') : '↕';
+      // Most recent RESULT on top, soonest UPCOMING fixture on top — not a
+      // single ascending/descending sort, since that needs two different
+      // directions for the played-vs-not halves of the list. Results
+      // block (newest first) always comes before the upcoming block
+      // (soonest first), so scrolling down reads as "what just happened"
+      // → "what's coming up next".
+      const isDone = m => m.played || m.score !== undefined;
+      filtered.sort((a, b) => {
+        const aDone = isDone(a), bDone = isDone(b);
+        if (aDone !== bDone) return aDone ? -1 : 1;
+        const dateA = parseInt(a.date, 10) || 0;
+        const dateB = parseInt(b.date, 10) || 0;
+        return aDone ? dateB - dateA : dateA - dateB;
+      });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No fixtures match your criteria.</td></tr>`;
+        container.innerHTML = `<div class="empty-state">No fixtures match your criteria.</div>`;
         return;
       }
 
-      filtered.forEach(match => {
-        const row = document.createElement('tr');
-        row.className = 'transfer-row';
-        
-        let resultDisplay = `<span style="color: var(--text-dim);">Scheduled</span>`;
-        
-        if (match.played && match.score) {
-          const parts = match.score.split('-');
-          if (parts.length === 2) {
-            const homeScore = parseInt(parts[0].trim(), 10);
-            const awayScore = parseInt(parts[1].trim(), 10);
-            
-            const userTeamScore = match.is_home ? homeScore : awayScore;
-            const opponentScore = match.is_home ? awayScore : homeScore;
-            
-            let color = 'var(--text-main)';
-            if (userTeamScore > opponentScore) {
-              color = '#3fb950';
-            } else if (userTeamScore < opponentScore) {
-              color = '#f85149';
-            }
-            
-            resultDisplay = `<strong style="color: ${color};">${match.score}</strong>`;
-          } else {
-            resultDisplay = `<strong>${match.score}</strong>`;
-          }
+      filtered.forEach((match, idx) => {
+        const isCompleted = match.played && match.score;
+        const logoUrl = getCompetitionLogoUrl(match.competition);
+        const card = document.createElement('div');
+        card.className = 'calendar-fixture-card' + (isCompleted ? ' is-completed' : '');
+        card.innerHTML = (logoUrl ? `<div class="upcoming-match-watermark" style="background-image: url('${logoUrl}');"></div>` : '') +
+          `<div class="calendar-fixture-card-content">` +
+          buildFixtureCardBodyHtml(match) +
+          (isCompleted ? `<div id="calendar-card-expand-${idx}" class="calendar-fixture-expand" style="display: none;"></div>` : '') +
+          `</div>`;
+        if (isCompleted) {
+          card.title = 'Click for goal scorers';
+          card.onclick = () => toggleCalendarCardExpand(idx, match);
         }
-
-        row.innerHTML = `
-          <td><strong>${formatDateMMDDYYYY(match.date)}</strong></td>          
-          <td>${match.competition || 'League Match'}</td>
-          <td>${match.opponent || 'TBD'}</td>
-          <td>${match.is_home ? 'Home' : 'Away'}</td>
-          <td>${resultDisplay}</td>
-        `;
-        tbody.appendChild(row);
+        container.appendChild(card);
       });
+    }
+
+    // Lazily fetches match_events the first time a card is expanded, then
+    // just toggles visibility on repeat clicks — no need to hit the DB
+    // again for a card the user already opened once this render.
+    async function toggleCalendarCardExpand(idx, match) {
+      const el = document.getElementById(`calendar-card-expand-${idx}`);
+      if (!el) return;
+
+      if (el.style.display !== 'none') {
+        el.style.display = 'none';
+        return;
+      }
+      el.style.display = 'block';
+      if (el.dataset.loaded) return;
+
+      el.innerHTML = `<div class="empty-state" style="padding: 8px;">Loading…</div>`;
+      const data = await window.api.getMatchEvents(null, match.date, match.competition, match.opponent);
+      el.dataset.loaded = '1';
+
+      const ours = (data.events || []).filter(e => !e.is_opponent_goal);
+      const theirs = (data.events || []).filter(e => e.is_opponent_goal);
+      el.innerHTML = `
+        <div style="display: flex; justify-content: center; gap: 40px;">
+          <div style="text-align: right;">${scorerSideListHtml(ours) || '<span style="font-size: 12px; color: var(--text-dim);">No scorers on record.</span>'}</div>
+          <div style="text-align: left;">${scorerSideListHtml(theirs) || ''}</div>
+        </div>
+        <div style="text-align: center; margin-top: 8px;">
+          <button class="back-btn calendar-card-edit-btn" style="font-size: 11px; padding: 3px 10px;">✏️ Edit</button>
+        </div>
+      `;
+      el.querySelector('.calendar-card-edit-btn').onclick = (ev) => { ev.stopPropagation(); openMatchEventsDialog(match, true); };
+    }
+
+    // ------------------------------------------------------------------
+    // Per-match goal-scorer/assister details (view + manual edit)
+    // ------------------------------------------------------------------
+    //
+    // Backed by match_events (main.js: getMatchEvents/saveMatchEvents),
+    // populated automatically via live stat-diffing where possible (see
+    // TODO_v1.7.0-features.md) and correctable/fillable by hand here for
+    // whatever the diffing missed. Opened from a completed Calendar row
+    // (see filterAndRenderCalendar) or the Home "Last Result" card (see
+    // renderUpcomingMatchWidget).
+    let matchEventsCurrentMatch = null; // { date, competition, opponent, is_home, score }
+    let matchEventsCurrentData = null; // { events, userScore, opponentScore }
+    let matchEventsSquadCache = null; // fetched once per edit session, not re-fetched per row
+    let matchEventsOpponentCache = null;
+
+    // startInEdit skips straight to the edit form (used by every "✏️ Edit"
+    // trigger elsewhere on the page, since those already show the
+    // read-only view inline — reopening it inside the dialog too would
+    // just be redundant). Omit it for a plain view-only open.
+    async function openMatchEventsDialog(match, startInEdit) {
+      if (!match) return;
+      matchEventsCurrentMatch = match;
+      const dialog = document.getElementById('match-events-dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+
+      document.getElementById('match-events-title').textContent = `vs ${match.opponent || 'TBD'}`;
+      document.getElementById('match-events-subtitle').textContent =
+        `${formatDateMMDDYYYY(match.date)} • ${match.competition || 'League Match'} • ${match.is_home ? 'Home' : 'Away'}`;
+      document.getElementById('match-events-body').innerHTML = `<div class="empty-state">Loading…</div>`;
+      document.getElementById('match-events-edit-btn').style.display = '';
+      document.getElementById('match-events-apply-btn').style.display = 'none';
+
+      matchEventsCurrentData = await window.api.getMatchEvents(null, match.date, match.competition, match.opponent);
+      if (startInEdit) {
+        await enterMatchEventsEditMode();
+      } else {
+        renderMatchEventsViewMode();
+      }
+    }
+
+    function closeMatchEventsDialog() {
+      const dialog = document.getElementById('match-events-dialog');
+      if (dialog && dialog.open) dialog.close();
+      matchEventsCurrentMatch = null;
+      matchEventsCurrentData = null;
+    }
+
+    function renderMatchEventsViewMode() {
+      const data = matchEventsCurrentData;
+      const body = document.getElementById('match-events-body');
+      const editBtn = document.getElementById('match-events-edit-btn');
+      document.getElementById('match-events-apply-btn').style.display = 'none';
+
+      if (!data || data.userScore === null || data.userScore === undefined) {
+        body.innerHTML = `<div class="empty-state">This match hasn't finished yet.</div>`;
+        editBtn.style.display = 'none';
+        return;
+      }
+      editBtn.style.display = '';
+
+      const ours = data.events.filter(e => !e.is_opponent_goal);
+      const theirs = data.events.filter(e => e.is_opponent_goal);
+
+      const renderList = list => {
+        if (list.length === 0) return `<div style="color: var(--text-dim); font-size: 13px; padding: 4px 0;">No scorers on record.</div>`;
+        return list.map(e => `
+          <div style="padding: 6px 0; border-bottom: 1px solid rgba(128,128,128,0.2);">
+            <div>
+              ${e.is_own_goal ? '<span style="color: #f85149;">⬤</span>' : '⚽'}
+              ${e.scorer_name}${e.is_penalty ? ' <span style="color: var(--text-dim);">(pen)</span>' : ''}${e.is_own_goal ? ' <span style="color: var(--text-dim);">(OG)</span>' : ''}
+            </div>
+            ${e.assister_name ? `<div style="color: var(--accent-color); font-size: 14px; font-weight: 600; margin-top: 2px;">👟 Assist by ${e.assister_name}</div>` : ''}
+          </div>
+        `).join('');
+      };
+
+      body.innerHTML = `
+        <div style="text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 16px;">${data.userScore} - ${data.opponentScore}</div>
+        <div style="margin-bottom: 16px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Your Goals</div>
+          ${renderList(ours)}
+        </div>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 6px;">Their Goals</div>
+          ${renderList(theirs)}
+        </div>
+      `;
+    }
+
+    async function enterMatchEventsEditMode() {
+      const match = matchEventsCurrentMatch;
+      const data = matchEventsCurrentData;
+      if (!match || !data || data.userScore === null || data.userScore === undefined) return;
+
+      document.getElementById('match-events-body').innerHTML = `<div class="empty-state">Loading…</div>`;
+      const [squad, opponentRoster] = await Promise.all([
+        window.api.getSquadData(),
+        window.api.getOpponentRosterForMatch(null, match.opponent)
+      ]);
+      matchEventsSquadCache = squad || [];
+      matchEventsOpponentCache = opponentRoster || [];
+
+      renderMatchEventsEditForm();
+      document.getElementById('match-events-edit-btn').style.display = 'none';
+      document.getElementById('match-events-apply-btn').style.display = '';
+    }
+
+    function matchEventsRosterOptionsHtml(roster, selectedId, isAssistSelect) {
+      let html = `<option value="">${isAssistSelect ? '— No assist —' : '— Select —'}</option>`;
+      html += roster.map(p => `<option value="${p.player_id}" ${String(p.player_id) === String(selectedId || '') ? 'selected' : ''}>${p.name}</option>`).join('');
+      return html;
+    }
+
+    // Fixed slot count per side = that side's actual final score — this
+    // IS the cap the user asked for (can't log more scorers than a side
+    // actually scored), enforced structurally by only ever rendering
+    // that many rows rather than needing a separate add/remove UI.
+    function renderMatchEventsEditForm() {
+      const data = matchEventsCurrentData;
+      const body = document.getElementById('match-events-body');
+
+      const buildSideRows = (isOpponentSide, count, roster, oppositeRoster) => {
+        const existing = data.events.filter(e => e.is_opponent_goal === isOpponentSide);
+        if (count === 0) return `<div style="color: var(--text-dim); font-size: 13px;">No goals to log.</div>`;
+        let rows = '';
+        for (let i = 0; i < count; i++) {
+          const ev = existing[i] || null;
+          const isOG = !!(ev && ev.is_own_goal);
+          // An own goal's scorer comes from the OTHER side's roster (a
+          // player scoring against their own team) — reflect that when
+          // re-populating an existing own-goal row.
+          const scorerRoster = isOG ? oppositeRoster : roster;
+          rows += `
+            <div class="match-event-edit-row" data-opponent-side="${isOpponentSide}" style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap;">
+              <select class="match-event-scorer-select" style="flex: 2; min-width: 140px;">${matchEventsRosterOptionsHtml(scorerRoster, ev ? ev.player_id : '', false)}</select>
+              <select class="match-event-assist-select" style="flex: 2; min-width: 140px;" ${isOG ? 'disabled' : ''}>${matchEventsRosterOptionsHtml(roster, ev ? ev.assisted_by_player_id : '', true)}</select>
+              <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap;">
+                <input type="checkbox" class="match-event-pen-check" ${ev && ev.is_penalty ? 'checked' : ''}> Pen
+              </label>
+              <label style="display: flex; align-items: center; gap: 4px; font-size: 13px; white-space: nowrap;" title="Own goal — scored by a player on the OTHER team, against themselves">
+                <input type="checkbox" class="match-event-og-check" ${isOG ? 'checked' : ''}> OG
+              </label>
+            </div>
+          `;
+        }
+        return rows;
+      };
+
+      body.innerHTML = `
+        <div style="text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 16px;">${data.userScore} - ${data.opponentScore}</div>
+        <div style="margin-bottom: 16px;">
+          <div style="font-weight: 600; margin-bottom: 6px;">Your Goals (${data.userScore})</div>
+          <div id="match-events-our-rows">${buildSideRows(false, data.userScore, matchEventsSquadCache, matchEventsOpponentCache)}</div>
+        </div>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 6px;">Their Goals (${data.opponentScore})</div>
+          <div id="match-events-their-rows">${buildSideRows(true, data.opponentScore, matchEventsOpponentCache, matchEventsSquadCache)}</div>
+        </div>
+      `;
+
+      // Wired up after the DOM exists rather than inline — checking "OG"
+      // swaps that row's scorer dropdown to the OTHER side's roster (an
+      // own goal is always committed by a player on the opposite team
+      // from whoever it's credited to) and disables the assist dropdown,
+      // since an own goal never has one.
+      body.querySelectorAll('.match-event-edit-row').forEach(row => {
+        const ogCheck = row.querySelector('.match-event-og-check');
+        const scorerSelect = row.querySelector('.match-event-scorer-select');
+        const assistSelect = row.querySelector('.match-event-assist-select');
+        const isOpponentSide = row.dataset.opponentSide === 'true';
+        ogCheck.onchange = () => {
+          const normalRoster = isOpponentSide ? matchEventsOpponentCache : matchEventsSquadCache;
+          const otherRoster = isOpponentSide ? matchEventsSquadCache : matchEventsOpponentCache;
+          scorerSelect.innerHTML = matchEventsRosterOptionsHtml(ogCheck.checked ? otherRoster : normalRoster, '', false);
+          assistSelect.disabled = ogCheck.checked;
+          if (ogCheck.checked) assistSelect.value = '';
+        };
+      });
+    }
+
+    function collectMatchEventRows(containerId, isOpponentGoal, roster, oppositeRoster, events) {
+      document.querySelectorAll(`#${containerId} .match-event-edit-row`).forEach(row => {
+        const scorerSelect = row.querySelector('.match-event-scorer-select');
+        const assistSelect = row.querySelector('.match-event-assist-select');
+        const penCheck = row.querySelector('.match-event-pen-check');
+        const ogCheck = row.querySelector('.match-event-og-check');
+        if (!scorerSelect.value) return; // empty slot — not every cap slot has to be filled in
+
+        const isOG = !!(ogCheck && ogCheck.checked);
+        const scorerRoster = isOG ? oppositeRoster : roster;
+        const scorer = scorerRoster.find(p => String(p.player_id) === scorerSelect.value);
+        const assister = (!isOG && assistSelect.value) ? roster.find(p => String(p.player_id) === assistSelect.value) : null;
+
+        events.push({
+          player_id: parseInt(scorerSelect.value, 10),
+          // name/position_id/dob let saveMatchEvents upsert a `players` row
+          // for a scorer we've never captured before (mainly opponents —
+          // our own squad is already fully populated via the regular sync).
+          name: scorer ? scorer.name : undefined,
+          position_id: scorer ? scorer.position_id : undefined,
+          dob: scorer ? scorer.dob : undefined,
+          assisted_by_player_id: assister ? parseInt(assistSelect.value, 10) : null,
+          assisted_by_name: assister ? assister.name : undefined,
+          assisted_by_position_id: assister ? assister.position_id : undefined,
+          assisted_by_dob: assister ? assister.dob : undefined,
+          is_penalty: !!(penCheck && penCheck.checked),
+          is_opponent_goal: isOpponentGoal,
+          is_own_goal: isOG
+        });
+      });
+    }
+
+    async function applyMatchEventsEdit() {
+      const match = matchEventsCurrentMatch;
+      if (!match) return;
+
+      const events = [];
+      collectMatchEventRows('match-events-our-rows', false, matchEventsSquadCache, matchEventsOpponentCache, events);
+      collectMatchEventRows('match-events-their-rows', true, matchEventsOpponentCache, matchEventsSquadCache, events);
+
+      const applyBtn = document.getElementById('match-events-apply-btn');
+      applyBtn.disabled = true;
+      const result = await window.api.saveMatchEvents(null, match.date, match.competition, match.opponent, events);
+      applyBtn.disabled = false;
+
+      if (!result || !result.success) {
+        alert((result && result.error) || 'Failed to save match details.');
+        return;
+      }
+
+      matchEventsCurrentData = await window.api.getMatchEvents(null, match.date, match.competition, match.opponent);
+      renderMatchEventsViewMode();
+
+      // Refresh whatever's currently showing this match's summary.
+      if (typeof filterAndRenderCalendar === 'function') filterAndRenderCalendar();
+      if (typeof renderUpcomingMatchWidget === 'function') renderUpcomingMatchWidget();
     }
 
     let currentPlayers = [];
@@ -2150,6 +2398,85 @@
       { match: 'league two', file: 'efl-leaguetwo-logo.png' },
       { match: 'premier league', file: 'premierleague-logo.png' }
     ];
+
+    // Dynamic league theming — swaps the app's core theme variables to
+    // match whichever league the save's team currently competes in, so
+    // the visual identity tracks promotion/relegation instead of staying
+    // one fixed color scheme all career. Real official brand colors for
+    // each tier (from the user's own reference), background/border/hover
+    // shades derived from each league's darker signature color (navy for
+    // the three EFL tiers, deep purple for the Prem) so the app stays a
+    // dark theme, just tinted — not a literal read of the bright brand
+    // hex values, which are too light/saturated to use as a background
+    // wholesale. `match` keys deliberately mirror COMPETITION_LOGO_MAP's
+    // (same substring-matching approach against match.competition) so
+    // "which league is this" is answered identically everywhere in the
+    // app. Any league not listed here — including before calendar data
+    // has ever loaded — falls back to the plain :root defaults below,
+    // per the user's explicit ask to keep the current theme as default
+    // for an unrecognized league.
+    const LEAGUE_THEMES = [
+      {
+        match: 'premier league',
+        vars: {
+          '--accent-color': '#E90052',
+          '--bg-color': '#150a1e',
+          '--card-bg': '#22102e',
+          '--border-color': '#3D195B',
+          '--hover-color': '#2c1640'
+        }
+      },
+      {
+        match: 'championship',
+        vars: {
+          '--accent-color': '#B69B40',
+          '--bg-color': '#10142a',
+          '--card-bg': '#1a2142',
+          '--border-color': '#283271',
+          '--hover-color': '#212a54'
+        }
+      },
+      {
+        match: 'league one',
+        vars: {
+          '--accent-color': '#DB1D1C',
+          '--bg-color': '#0f1226',
+          '--card-bg': '#191f3d',
+          '--border-color': '#283271',
+          '--hover-color': '#20274a'
+        }
+      },
+      {
+        match: 'league two',
+        vars: {
+          '--accent-color': '#F00D0C',
+          '--bg-color': '#0e1124',
+          '--card-bg': '#181e3a',
+          '--border-color': '#283271',
+          '--hover-color': '#1f2648'
+        }
+      }
+    ];
+    // Every variable any theme above might touch — always reset ALL of
+    // these before applying a new theme (or none, for an unrecognized
+    // league), so a leftover override from a PREVIOUS league can never
+    // survive a promotion/relegation or a fall-through to "unknown".
+    const THEMEABLE_CSS_VARS = ['--accent-color', '--bg-color', '--card-bg', '--border-color', '--hover-color'];
+    let currentAppliedLeagueTheme = null; // avoids touching the DOM on every calendar sync when the league hasn't actually changed
+
+    function applyLeagueTheme(leagueName) {
+      const lower = String(leagueName || '').toLowerCase();
+      const theme = LEAGUE_THEMES.find(t => lower.includes(t.match));
+      const themeKey = theme ? theme.match : null;
+      if (themeKey === currentAppliedLeagueTheme) return;
+      currentAppliedLeagueTheme = themeKey;
+
+      const root = document.documentElement.style;
+      THEMEABLE_CSS_VARS.forEach(v => root.removeProperty(v));
+      if (theme) {
+        Object.entries(theme.vars).forEach(([k, v]) => root.setProperty(k, v));
+      }
+    }
     // Trophy renders (a physical trophy, not a competition badge) — used
     // next to something actually WON (Trophies widget), as opposed to the
     // flat logo above used just to identify a competition. Play-off wins
@@ -5557,12 +5884,15 @@
     let refreshTimeoutHandle = null;
 
     // Persisted across launches (localStorage — a per-machine UI
-    // preference, not save data) since triggerRefresh() steals window
-    // focus and sends a real F10 keypress to the game: it can't run
-    // quietly in the background, so it's gated on document.hasFocus() at
-    // each tick — only ever fires while the user is actually looking at
-    // this app, never while they're alt-tabbed away, mid-match, or doing
-    // anything else.
+    // preference, not save data). triggerRefresh() used to steal window
+    // focus and send a real F10 keypress to the game, so this was gated
+    // on document.hasFocus() at each tick — only firing while the user
+    // was actually looking at this app, never while alt-tabbed away or
+    // mid-match. As of 2026-09-13, triggerLiveEditorRefresh() (main.js)
+    // injects F10 via a focus-independent keybd_event call instead, so
+    // that gate no longer applies and auto-refresh now defaults to ON —
+    // it's meant to run continuously in the background, including while
+    // the game has focus.
     let autoRefreshIntervalHandle = null;
     const AUTO_REFRESH_INTERVAL_MS = 60000;
     const AUTO_REFRESH_STORAGE_KEY = 'autoRefreshEnabled';
@@ -5575,20 +5905,23 @@
       if (!enabled) return;
 
       autoRefreshIntervalHandle = setInterval(() => {
-        if (document.hasFocus()) triggerRefresh();
+        triggerRefresh(false);
       }, AUTO_REFRESH_INTERVAL_MS);
     }
 
-    // Restores the checkbox (and the interval, if it was left on) from
-    // the last session — runs once at script load, after the checkbox
-    // element above has already been parsed into the DOM.
+    // Restores the checkbox (and the interval) from the last session —
+    // runs once at script load, after the checkbox element above has
+    // already been parsed into the DOM. Defaults to enabled when there's
+    // no stored preference yet (first run, or localStorage unavailable).
     (function restoreAutoRefreshPreference() {
-      let wasEnabled = false;
-      try { wasEnabled = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY) === '1'; } catch (e) { /* localStorage unavailable — defaults off */ }
-      if (!wasEnabled) return;
+      let enabled = true;
+      try {
+        const stored = localStorage.getItem(AUTO_REFRESH_STORAGE_KEY);
+        if (stored !== null) enabled = stored === '1';
+      } catch (e) { /* localStorage unavailable — defaults on */ }
       const checkbox = document.getElementById('auto-refresh-toggle');
-      if (checkbox) checkbox.checked = true;
-      onAutoRefreshToggle(true);
+      if (checkbox) checkbox.checked = enabled;
+      onAutoRefreshToggle(enabled);
     })();
 
     // ------------------------------------------------------------------
@@ -5837,7 +6170,15 @@
       btn.textContent = isRefreshing ? '↻ Refreshing…' : '↻ Refresh';
     }
 
-    async function triggerRefresh() {
+    // isManual defaults true (the Refresh button's own calling
+    // convention — clicking it always means the user already left the
+    // game for this app, so bringing the game forward isn't a new
+    // problem). The auto-refresh interval explicitly passes false — see
+    // triggerLiveEditorRefresh in main.js for why that distinction
+    // matters: an auto-refresh tick only ever fires if the game is
+    // ALREADY the focused window, skipping (not forcing a switch)
+    // otherwise, so it never steals focus the way a manual click can.
+    async function triggerRefresh(isManual = true) {
       if (!window.api || !window.api.triggerRefresh) return;
 
       setRefreshButtonState(true);
@@ -5849,7 +6190,7 @@
       // actually running to receive the F10 press.
       refreshTimeoutHandle = setTimeout(() => setRefreshButtonState(false), 5000);
 
-      const sent = await window.api.triggerRefresh();
+      const sent = await window.api.triggerRefresh(isManual);
       if (!sent) {
         clearTimeout(refreshTimeoutHandle);
         setRefreshButtonState(false);
@@ -6237,6 +6578,106 @@
       renderUpcomingMatchWidget();
     }
 
+    // Shared by the Home dashboard's match card and every Calendar tab
+    // fixture card (see filterAndRenderCalendar) — competition/matchweek
+    // line, date, the score-or-"Vs" line, and the "@ home team" line.
+    // Deliberately does NOT include the goal-scorer breakdown (that's
+    // fetched separately, async, per the caller's own display need — the
+    // Home card always shows it, Calendar cards only fetch it once
+    // expanded) or the League Position/form panel (Home-only, via
+    // opts.showRank — never useful on a completed result).
+    function buildFixtureCardBodyHtml(match, opts = {}) {
+      const showLast = !!(match.played && match.score);
+      const teamName = getMostCommonClubName() || 'My Club';
+      const homeTeamName = match.is_home ? teamName : (match.opponent || 'TBD');
+      const leftTeamName = teamName;
+      const rightTeamName = match.opponent || 'Opponent';
+
+      const primaryLeague = getPrimaryLeagueName();
+      let competitionLine = match.competition || 'League Match';
+      if (primaryLeague && match.competition === primaryLeague) {
+        // For an unplayed fixture this is the NEXT matchweek (one more
+        // than played so far); for a past result it's the matchweek that
+        // match itself was — everything played up to and including it.
+        const matchweek = showLast
+          ? currentCalendar.filter(m => m.played && m.competition === primaryLeague && parseInt(m.date, 10) <= parseInt(match.date, 10)).length
+          : currentCalendar.filter(m => m.played && m.competition === primaryLeague).length + 1;
+        competitionLine += ` - Matchweek ${matchweek}`;
+      }
+
+      let centerLineHtml;
+      if (showLast) {
+        const parts = (match.score || '').split('-').map(s => parseInt(s.trim(), 10));
+        const [homeScore, awayScore] = parts;
+        const userScore = match.is_home ? homeScore : awayScore;
+        const oppScore = match.is_home ? awayScore : homeScore;
+        let scoreColor = 'var(--text-main)';
+        if (Number.isFinite(userScore) && Number.isFinite(oppScore)) {
+          if (userScore > oppScore) scoreColor = '#3fb950';
+          else if (userScore < oppScore) scoreColor = '#f85149';
+        }
+        centerLineHtml = `${leftTeamName} <span style="color: ${scoreColor};">${Number.isFinite(userScore) ? userScore : '?'} - ${Number.isFinite(oppScore) ? oppScore : '?'}</span> ${rightTeamName}`;
+      } else {
+        centerLineHtml = `${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}`;
+      }
+
+      let rankHtml = '';
+      if (opts.showRank && !showLast) {
+        const teamStanding = leagueStandings ? leagueStandings.find(t => t.team_name === leftTeamName) : null;
+        const oppStanding = leagueStandings ? leagueStandings.find(t => t.team_name === rightTeamName) : null;
+        const teamPlaceHtml = teamStanding ? ordinal(teamStanding.rank) : '—';
+        const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
+        rankHtml = `
+          <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px; margin-top: 12px;">
+            <div style="flex: 1;">
+              <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+              <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
+              <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+              <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
+            </div>
+            <div style="flex: 1;">
+              <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
+              <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
+              <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
+              <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(match.date)}</div>
+        <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${centerLineHtml}</div>
+        <div style="text-align: center; font-size: 12px; color: var(--text-dim);">@ ${homeTeamName}</div>
+        ${rankHtml}
+      `;
+    }
+
+    // Renders one side's goal list for the flanking scorers display (our
+    // side always on the left, matching buildFixtureCardBodyHtml's score
+    // line, which always puts our team on the left regardless of home/away).
+    // An own goal marks its ball icon red instead of the normal ⚽ — a
+    // plain colored circle rather than trying to recolor the ⚽ emoji
+    // itself (CSS filters on full-color emoji render inconsistently
+    // across platforms/fonts; a plain text glyph honors `color`
+    // reliably everywhere). It's on the roster of the OTHER side (see
+    // saveMatchEvents) — a player from the other team scoring against
+    // themselves — so the red marker is what sets it apart from a
+    // normal goal in this same list.
+    function scorerSideListHtml(list) {
+      if (!list.length) return '';
+      return list.map(e => `
+        <div style="margin-bottom: 8px;">
+          <div style="font-size: 16px; font-weight: 600;">
+            ${e.is_own_goal ? '<span style="color: #f85149;">⬤</span>' : '⚽'}
+            ${e.scorer_name}${e.is_penalty ? ' <span style="font-weight: 400; color: var(--text-dim);">(pen)</span>' : ''}${e.is_own_goal ? ' <span style="font-weight: 400; color: var(--text-dim);">(OG)</span>' : ''}
+          </div>
+          ${e.assister_name ? `<div style="font-size: 14px; color: var(--accent-color); font-weight: 600; margin-top: 2px;">👟 Assist by ${e.assister_name}</div>` : ''}
+        </div>
+      `).join('');
+    }
+
     function renderUpcomingMatchWidget() {
       const container = document.getElementById('home-upcoming-match-body');
       if (!container) return;
@@ -6273,72 +6714,37 @@
         return;
       }
 
-      const teamName = getMostCommonClubName() || 'My Club';
-      const homeTeamName = match.is_home ? teamName : (match.opponent || 'TBD');
-      const leftTeamName = teamName;
-      const rightTeamName = match.opponent || 'Opponent';
-
-      const primaryLeague = getPrimaryLeagueName();
-      let competitionLine = match.competition || 'League Match';
-      if (primaryLeague && match.competition === primaryLeague) {
-        // For the upcoming fixture this is the NEXT matchweek (one more
-        // than played so far); for a past result it's the matchweek that
-        // match itself was — everything played up to and including it.
-        const matchweek = showLast
-          ? currentCalendar.filter(m => m.played && m.competition === primaryLeague && parseInt(m.date, 10) <= parseInt(match.date, 10)).length
-          : currentCalendar.filter(m => m.played && m.competition === primaryLeague).length + 1;
-        competitionLine += ` - Matchweek ${matchweek}`;
-      }
-
-      const teamStanding = leagueStandings ? leagueStandings.find(t => t.team_name === leftTeamName) : null;
-      const oppStanding = leagueStandings ? leagueStandings.find(t => t.team_name === rightTeamName) : null;
-
-      const teamPlaceHtml = teamStanding ? ordinal(teamStanding.rank) : '—';
-      const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
-
       if (watermarkEl) {
         const logoUrl = getCompetitionLogoUrl(match.competition);
         watermarkEl.style.backgroundImage = logoUrl ? `url('${logoUrl}')` : '';
       }
 
-      let centerLineHtml;
-      if (showLast) {
-        const parts = (match.score || '').split('-').map(s => parseInt(s.trim(), 10));
-        const [homeScore, awayScore] = parts;
-        const userScore = match.is_home ? homeScore : awayScore;
-        const oppScore = match.is_home ? awayScore : homeScore;
-        let scoreColor = 'var(--text-main)';
-        if (Number.isFinite(userScore) && Number.isFinite(oppScore)) {
-          if (userScore > oppScore) scoreColor = '#3fb950';
-          else if (userScore < oppScore) scoreColor = '#f85149';
-        }
-        centerLineHtml = `${leftTeamName} <span style="color: ${scoreColor};">${Number.isFinite(userScore) ? userScore : '?'} - ${Number.isFinite(oppScore) ? oppScore : '?'}</span> ${rightTeamName}`;
-      } else {
-        centerLineHtml = `${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}`;
-      }
-
-      container.innerHTML = `
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(match.date)}</div>
-        <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${centerLineHtml}</div>
-        <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
-        ${showLast ? '' : `
-        <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
-          <div style="flex: 1;">
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${teamPlaceHtml}</div>
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(teamStanding ? teamStanding.form : [])}</div>
-          </div>
-          <div style="flex: 1;">
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
-            <div style="font-size: 20px; font-weight: 700; color: var(--accent-color); margin: 4px 0 12px;">${oppPlaceHtml}</div>
-            <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 6px;">Last 5 Results</div>
-            <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
-          </div>
+      container.innerHTML = buildFixtureCardBodyHtml(match, { showRank: true }) + (showLast ? `
+        <div id="home-last-result-scorers" style="display: flex; justify-content: center; gap: 32px; margin: 10px 0 4px;">
+          <div style="text-align: right;">Loading…</div>
+          <div style="text-align: left;"></div>
         </div>
-        `}
-      `;
+        <div style="text-align: center; margin-top: 4px;">
+          <button class="back-btn" id="home-last-result-edit-btn" style="font-size: 11px; padding: 3px 10px;" onclick="event.stopPropagation();">✏️ Edit</button>
+        </div>
+      ` : '');
+
+      if (showLast) {
+        const editBtn = document.getElementById('home-last-result-edit-btn');
+        if (editBtn) editBtn.onclick = (ev) => { ev.stopPropagation(); openMatchEventsDialog(match, true); };
+
+        window.api.getMatchEvents(null, match.date, match.competition, match.opponent).then(data => {
+          const el = document.getElementById('home-last-result-scorers');
+          if (!el) return; // widget re-rendered again before this resolved
+          const events = (data && data.events) || [];
+          const ours = events.filter(e => !e.is_opponent_goal);
+          const theirs = events.filter(e => e.is_opponent_goal);
+          el.innerHTML = `
+            <div style="text-align: right;">${scorerSideListHtml(ours) || '<span style="font-size: 12px; color: var(--text-dim);">No scorers on record.</span>'}</div>
+            <div style="text-align: left;">${scorerSideListHtml(theirs) || ''}</div>
+          `;
+        });
+      }
     }
 
     // [{ rank, team_name, played, wins, draws, losses, goals_for, goals_against, points }],
@@ -9768,7 +10174,7 @@
       const d = seasonOverviewData;
       printEl.innerHTML = `
         <h1 style="margin-bottom:4px;">${d.club_name} — ${d.year_label} Season Summary</h1>
-        <div style="margin-bottom:20px; color:#555;">Generated from EA FC Companion App</div>
+        <div style="margin-bottom:20px; color:#555;">Generated from FIFA Analytics</div>
         ${summaryContent.innerHTML}
       `;
 
