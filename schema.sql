@@ -249,6 +249,8 @@ CREATE TABLE IF NOT EXISTS season_league_stats (
     clean_sheets INTEGER,
     yellow_cards INTEGER,
     red_cards INTEGER,
+    motm INTEGER DEFAULT 0,
+    avg_rating REAL DEFAULT 0.0,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(season_id) REFERENCES seasons(id),
     UNIQUE(season_id, player_id)

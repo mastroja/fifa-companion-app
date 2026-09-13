@@ -10,7 +10,7 @@ This app depends on a specific combination of game version + Live Editor version
 |---|---|
 | EA Sports FC 26 (Steam) | Build `1.0.139.20381` |
 | FC 26 Live Editor | `v26.3.6` |
-| Companion App | `1.4.1` |
+| Companion App | `1.6.0` |
 
 
 ## 1. Pin your game version (do this FIRST)

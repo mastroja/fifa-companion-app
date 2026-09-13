@@ -107,6 +107,17 @@ async function initDatabase() {
     }
   });
 
+  // motm/avg_rating added to season_league_stats for the Most-MOTM and
+  // PFA Player of the Year awards (see generateSeasonAwardsIfNeeded) —
+  // same backfill-existing-DBs pattern as above.
+  [['motm', 'INTEGER DEFAULT 0'], ['avg_rating', 'REAL DEFAULT 0.0']].forEach(([column, type]) => {
+    try {
+      db.run(`ALTER TABLE season_league_stats ADD COLUMN ${column} ${type};`);
+    } catch (e) {
+      // column already exists, safe to ignore
+    }
+  });
+
   // One-time backfill for rows that predate season_start_overall/
   // season_start_attributes_json (added above) — a season already in
   // progress at the moment of this upgrade has no real "start of season"
@@ -675,7 +686,8 @@ function importCalendarMatches(calendarPayload) {
 // name. Add new one-off real names to EXHIBITION_COMPETITION_NAMES; add
 // new randomized-code FORMATS to EXHIBITION_COMPETITION_PATTERNS.
 const EXHIBITION_COMPETITION_NAMES = new Set([
-  'European International Cup'
+  'European International Cup',
+  'Champions Trophy'
 ]);
 const EXHIBITION_COMPETITION_PATTERNS = [
   /^COB[A-Za-z]\d+$/
@@ -852,8 +864,8 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
 
   const stmt = db.prepare(`
     INSERT INTO season_league_stats
-      (season_id, player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      (season_id, player_id, name, team_name, overall, position_id, dob, appearances, goals, assists, clean_sheets, yellow_cards, red_cards, motm, avg_rating, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(season_id, player_id) DO UPDATE SET
       name = excluded.name,
       team_name = excluded.team_name,
@@ -866,6 +878,8 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
       clean_sheets = excluded.clean_sheets,
       yellow_cards = excluded.yellow_cards,
       red_cards = excluded.red_cards,
+      motm = excluded.motm,
+      avg_rating = excluded.avg_rating,
       updated_at = CURRENT_TIMESTAMP;
   `);
 
@@ -875,7 +889,8 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
       stmt.run([
         seasonId, p.player_id, p.name || 'Unknown', p.team_name || '', p.overall || 0,
         p.position_id || 0, p.dob || '', p.appearances || 0, p.goals || 0, p.assists || 0,
-        p.clean_sheets || 0, p.yellow_cards || 0, p.red_cards || 0
+        p.clean_sheets || 0, p.yellow_cards || 0, p.red_cards || 0,
+        p.motm || 0, p.avg_rating || 0
       ]);
     });
   } finally {
@@ -1255,7 +1270,17 @@ function getSeasonOverview(saveId, seasonId) {
     },
     transfers: getSeasonTransfersForSeason(saveId, seasonId, yearLabel),
     progression: getSeasonPlayerProgression(saveId, seasonId),
-    progression_history: getSquadProgressionHistory(saveId, seasonId)
+    progression_history: getSquadProgressionHistory(saveId, seasonId),
+    // Full all-time trophy list (same shape/ordering data the Home
+    // dashboard's browsable Trophy Cabinet uses) — backs the season
+    // overview's own trophy cabinet page, which needs the complete
+    // cabinet arrangement to know where each of this season's new wins
+    // (won_competitions above) actually lands once "shelved" alongside
+    // everything won in previous seasons. Safe to compute unconditionally
+    // here (not just when won_competitions is non-empty) since this is
+    // always called for a season that already ended, so no later win
+    // could exist yet to be missing from it.
+    all_time_trophies: getTrophiesWon(saveId)
   };
 }
 
@@ -2274,6 +2299,53 @@ function generateSeasonEndReviewIfNeeded(saveId, endedSeasonId) {
 // per-season snapshot of league-wide stats, so this is a best-effort read
 // of "whoever was on top when the season last synced," same as the rest
 // of this app's live-only data.
+// Position ids 0-11 (GK + the 8 defender slots + the 3 defensive-mid
+// slots RDM/CDM/LDM) — matches index.html's POSITION_MAP groupings
+// (GK/DEF, plus the DM trio it lumps into "MID" alongside CM/CAM). This
+// is the exact "GKs/Defenders/CDMs only" eligibility for the POTY
+// clean-sheet component, decided 2026-09-12 (see TODO_v1.6.0-features.md)
+// so a striker can't pick up clean-sheet credit. Duplicated here rather
+// than shared with index.html's POSITION_MAP since main.js (the Electron
+// main process) has no access to that client-side script.
+const POTY_CLEAN_SHEET_ELIGIBLE_MAX_POSITION_ID = 11;
+
+// PFA Player of the Year — a season-wide composite score over the SAME
+// league-only player pool the other awards use (see
+// generateSeasonAwardsIfNeeded), not a simple top-of-one-stat pick.
+// Formula and weights locked 2026-09-12 after testing against sample
+// data (see TODO_v1.6.0-features.md for the full design rationale):
+// MOTM 30% / average rating 30% / goals+assists 25% / clean sheet rate
+// 15%, each normalized onto a fixed 0-100 scale (not relative to this
+// season's field, so scores stay comparable year to year) before
+// weighting, and each counting stat rate-normalized by appearances
+// (not raw totals) so a part-time player isn't structurally favored or
+// a full-season one penalized. Requires at least 70% of the season's
+// games (approximated as 70% of whoever in the pool played the most —
+// there's no separate "total games in the season" figure available
+// here) to be eligible at all, since a rate stat alone is blind to
+// sample size.
+function computeSeasonPotyWinner(leaguePlayers) {
+  const maxAppearances = leaguePlayers.reduce((max, p) => Math.max(max, p.appearances || 0), 0);
+  if (maxAppearances === 0) return null;
+  const minAppearances = maxAppearances * 0.7;
+
+  let best = null;
+  leaguePlayers.forEach(p => {
+    const apps = p.appearances || 0;
+    if (apps < minAppearances) return; // eligibility gate
+
+    const ratingScore = ((p.avg_rating || 0) / 10) * 30;
+    const motmScore = Math.min((p.motm || 0) / apps / 0.5, 1) * 30;
+    const gaScore = Math.min(((p.goals || 0) + (p.assists || 0)) / apps / 1.0, 1) * 25;
+    const csEligible = (p.position_id || 0) <= POTY_CLEAN_SHEET_ELIGIBLE_MAX_POSITION_ID;
+    const csScore = csEligible ? ((p.clean_sheets || 0) / apps) * 15 : 0;
+
+    const total = ratingScore + motmScore + gaScore + csScore;
+    if (!best || total > best.score) best = { player_id: p.player_id, score: total };
+  });
+  return best;
+}
+
 function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
   if (!db || !latestLeagueStatsPayload || !Array.isArray(latestLeagueStatsPayload.players)) return;
   const leaguePlayers = latestLeagueStatsPayload.players;
@@ -2286,7 +2358,8 @@ function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
   const categories = [
     { key: 'goals', award: 'golden_boot' },
     { key: 'assists', award: 'playmaker' },
-    { key: 'clean_sheets', award: 'golden_glove', positionFilter: 0 } // position_id 0 == GK
+    { key: 'clean_sheets', award: 'golden_glove', positionFilter: 0 }, // position_id 0 == GK
+    { key: 'motm', award: 'motm_leader' }
   ];
 
   categories.forEach(({ key, award, positionFilter }) => {
@@ -2303,6 +2376,16 @@ function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
     `, [top.player_id, endedSeasonId, award, top[key]]);
     console.log(`[Awards] ${award} for player ${top.player_id} in season ${endedSeasonId} (${top[key]} ${key}).`);
   });
+
+  const poty = computeSeasonPotyWinner(leaguePlayers);
+  if (poty && ourPlayerIds.has(poty.player_id)) {
+    db.run(`
+      INSERT INTO player_awards (player_id, season_id, award_type, stat_value)
+      VALUES (?, ?, 'poty', ?)
+      ON CONFLICT(season_id, award_type) DO NOTHING;
+    `, [poty.player_id, endedSeasonId, Math.round(poty.score)]);
+    console.log(`[Awards] poty for player ${poty.player_id} in season ${endedSeasonId} (score ${poty.score.toFixed(1)}).`);
+  }
 
   saveDatabaseToDisk();
 }
@@ -2326,15 +2409,15 @@ function getPlayerTrophies(playerId, saveId = activeSaveId) {
   return res[0].values.map(row => ({ comp_name: row[0], year_label: row[1] }));
 }
 
-const AWARD_LABELS = { golden_boot: 'Golden Boot', playmaker: 'Playmaker', golden_glove: 'Golden Glove' };
-const AWARD_STAT_LABELS = { golden_boot: 'goals', playmaker: 'assists', golden_glove: 'clean sheets' };
+const AWARD_LABELS = { golden_boot: 'Golden Boot', playmaker: 'Playmaker', golden_glove: 'Golden Glove', motm_leader: 'Most Man of the Match', poty: 'PFA Player of the Year' };
+const AWARD_STAT_LABELS = { golden_boot: 'goals', playmaker: 'assists', golden_glove: 'clean sheets', motm_leader: 'MOTM', poty: 'pts' };
 
 // This player's individual season-end awards for a save (see
 // generateSeasonAwardsIfNeeded), most recent first.
 function getPlayerAwards(playerId, saveId = activeSaveId) {
   if (!db || !playerId || !saveId) return [];
   const res = db.exec(`
-    SELECT a.award_type, a.stat_value, se.year_label
+    SELECT a.award_type, a.stat_value, se.year_label, se.league_name
     FROM player_awards a
     JOIN seasons se ON se.id = a.season_id
     WHERE a.player_id = ${playerId} AND se.save_id = ${saveId}
@@ -2346,7 +2429,11 @@ function getPlayerAwards(playerId, saveId = activeSaveId) {
     label: AWARD_LABELS[row[0]] || row[0],
     stat_label: AWARD_STAT_LABELS[row[0]] || 'stat',
     stat_value: row[1],
-    year_label: row[2]
+    year_label: row[2],
+    // Only meaningful for per-tier award art (motm_leader) — see
+    // AWARD_TROPHY_FILES/renderProfileAwards in index.html, which picks
+    // the icon matching whichever division this SEASON was played in.
+    league_name: row[3]
   }));
 }
 
@@ -2355,6 +2442,48 @@ function getPlayerHonours(playerId, saveId = activeSaveId) {
     trophies: getPlayerTrophies(playerId, saveId),
     awards: getPlayerAwards(playerId, saveId)
   };
+}
+
+// Live running MOTM tally for the CURRENT season only — separate from
+// player_awards (which only ever records the league-wide SEASON LEADER
+// at season-end, see generateSeasonAwardsIfNeeded). This is a plain
+// season_league_stats read so it updates on every sync, immediately
+// reflecting a MOTM the moment it's earned, for any player who's won at
+// least one — not just whoever finishes the season on top. Also returns
+// the season's league_name so the client can pick the matching
+// per-division MOTM badge art.
+// Backs the player profile's live MOTM badge, which now follows the same
+// Season/All-Time selector as the Stats card. With a yearLabel, returns
+// that ONE season's tally (plus which league it was, for the matching
+// per-division badge art); without one, returns the career total summed
+// across every season on record for this save — the per-division art
+// for a career total just falls back to whatever the client's current
+// league is (see getMotmBadgeFile in index.html), since a career can
+// span multiple divisions.
+function getPlayerMotmTally(playerId, saveId = activeSaveId, yearLabel = null) {
+  if (!db || !playerId || !saveId) return null;
+
+  if (yearLabel) {
+    const res = db.exec(`
+      SELECT sls.motm, se.league_name
+      FROM season_league_stats sls
+      JOIN seasons se ON se.id = sls.season_id
+      WHERE sls.player_id = ${playerId} AND se.save_id = ${saveId} AND se.year_label = '${String(yearLabel).replace(/'/g, "''")}'
+      LIMIT 1;
+    `);
+    if (res.length === 0 || res[0].values.length === 0) return null;
+    const [motm, league_name] = res[0].values[0];
+    return { motm: motm || 0, league_name };
+  }
+
+  const res = db.exec(`
+    SELECT SUM(sls.motm)
+    FROM season_league_stats sls
+    JOIN seasons se ON se.id = sls.season_id
+    WHERE sls.player_id = ${playerId} AND se.save_id = ${saveId};
+  `);
+  const motm = (res.length > 0 && res[0].values.length > 0) ? (res[0].values[0][0] || 0) : 0;
+  return { motm, league_name: null };
 }
 
 // The oldest unacknowledged season-end review for a save, or null.
@@ -4073,6 +4202,7 @@ ipcMain.handle('enable-youth-mode', (_event, saveId) => enableYouthMode(saveId))
 ipcMain.handle('clear-former-players', (_event, saveId) => clearFormerPlayers(saveId));
 ipcMain.handle('get-pending-season-review', (_event, saveId) => getPendingSeasonReview(saveId));
 ipcMain.handle('get-player-honours', (_event, playerId, saveId) => getPlayerHonours(playerId, saveId));
+ipcMain.handle('get-player-motm-tally', (_event, playerId, saveId, yearLabel) => getPlayerMotmTally(playerId, saveId, yearLabel));
 ipcMain.handle('acknowledge-season-review', (_event, reviewId) => acknowledgeSeasonReview(reviewId));
 ipcMain.handle('get-league-stats-for-season', (_event, seasonId) => getLeagueStatsForSeason(seasonId));
 ipcMain.handle('get-season-standings', (_event, seasonId) => getSeasonStandings(seasonId));

@@ -1442,6 +1442,41 @@ do
     end
 
     -- ============================================================
+    -- LEAGUE-WIDE FIXTURES — the same fixture pool just used to build the
+    -- standings table above (filtered to the primary competition), but
+    -- exported as raw match-by-match rows (both completed AND upcoming)
+    -- instead of aggregated into a table. Backs the Home ticker's
+    -- "GW N Results" / "GW N Schedule" sections, which need every match
+    -- around the league for a given round, not just the user's own
+    -- fixtures. There's no documented/discovered round-number field on a
+    -- fixture, so the client infers rounds by chunking this chronological
+    -- list into groups of (team count / 2) matches — standard for a
+    -- round-robin league, same trick used when no broadcast-style
+    -- matchday number is available.
+    -- ============================================================
+    local league_fixtures_json_list = {}
+    if primary_comp_obj_id ~= nil then
+        local comp_fixtures_chrono = {}
+        for i = 1, #resolved_fixtures do
+            local rf = resolved_fixtures[i]
+            if rf.comp_obj_id == primary_comp_obj_id and rf.home_id > 0 and rf.away_id > 0 then
+                table.insert(comp_fixtures_chrono, rf)
+            end
+        end
+        table.sort(comp_fixtures_chrono, function(a, b) return a.date < b.date end)
+
+        for i = 1, #comp_fixtures_chrono do
+            local rf = comp_fixtures_chrono[i]
+            table.insert(league_fixtures_json_list, string.format(
+                '{"home_team":"%s","away_team":"%s","home_score":%d,"away_score":%d,"date":"%d","completed":%s}',
+                (GetTeamName(rf.home_id) or ""):gsub('"', '\\"'),
+                (GetTeamName(rf.away_id) or ""):gsub('"', '\\"'),
+                rf.home_score, rf.away_score, rf.date, tostring(rf.completed)
+            ))
+        end
+    end
+
+    -- ============================================================
     -- ALL-COMPETITIONS STANDINGS/PROGRESS — same fixture-aggregation
     -- technique as the primary-league standings above, generalized to
     -- EVERY competition the user's team has fixtures in (comp_fixture_
@@ -1497,6 +1532,13 @@ do
 
         local comp_name = GetCompetitionNameByObjID(comp_obj_id) or "Competition"
         local standing_text = ""
+        -- Only ever set true in the knockout branch below (a round-robin
+        -- league/group format has no elimination concept) — lets the
+        -- companion app show a knocked-out competition in red instead of
+        -- relying on parsing "Nth Round" text, which reads identically
+        -- whether that round was a loss (eliminated) or the round still
+        -- to come (still alive).
+        local is_eliminated = false
 
         if is_round_robin then
             local team_stats2 = {}
@@ -1612,7 +1654,8 @@ do
             if completed_count == 0 then
                 standing_text = "Not Started"
             elseif not last_completed_won then
-                standing_text = string.format("%d%s Round", completed_count, ordinal_suffix(completed_count))
+                is_eliminated = true
+                standing_text = string.format("Eliminated (%d%s Round)", completed_count, ordinal_suffix(completed_count))
             elseif has_upcoming then
                 local next_round = completed_count + 1
                 standing_text = string.format("%d%s Round", next_round, ordinal_suffix(next_round))
@@ -1623,8 +1666,8 @@ do
 
         if standing_text ~= "" then
             table.insert(competitions_json_list, string.format(
-                '{"name":"%s","icon":"%s","standing":"%s"}',
-                comp_name:gsub('"', '\\"'), comp_icon(comp_name), standing_text:gsub('"', '\\"')
+                '{"name":"%s","icon":"%s","standing":"%s","eliminated":%s}',
+                comp_name:gsub('"', '\\"'), comp_icon(comp_name), standing_text:gsub('"', '\\"'), tostring(is_eliminated)
             ))
         end
     end
@@ -1673,7 +1716,7 @@ do
     local save_uid_escaped = save_uid:gsub('"', '\\"')
 
     local json_output = string.format(
-        '{\n  "save_uid": "%s",\n  "club_name": "%s",\n  "current_date": "%s",\n  "captain_id": %d,\n  "team_colors": {"primary":{"r":%d,"g":%d,"b":%d},"secondary":{"r":%d,"g":%d,"b":%d},"tertiary":{"r":%d,"g":%d,"b":%d}},\n  "trophies": {"league_titles":%d,"domestic_cups":%d,"uefa_cl_wins":%d,"uefa_el_wins":%d,"uefa_uecl_wins":%d},\n  "manager": {"name":"%s","join_date":"%s"},\n  "standings": [\n    %s\n  ],\n  "manager_history": [\n    %s\n  ],\n  "competitions": [\n    %s\n  ],\n  "calendar": [\n    %s\n  ]\n}',
+        '{\n  "save_uid": "%s",\n  "club_name": "%s",\n  "current_date": "%s",\n  "captain_id": %d,\n  "team_colors": {"primary":{"r":%d,"g":%d,"b":%d},"secondary":{"r":%d,"g":%d,"b":%d},"tertiary":{"r":%d,"g":%d,"b":%d}},\n  "trophies": {"league_titles":%d,"domestic_cups":%d,"uefa_cl_wins":%d,"uefa_el_wins":%d,"uefa_uecl_wins":%d},\n  "manager": {"name":"%s","join_date":"%s"},\n  "standings": [\n    %s\n  ],\n  "manager_history": [\n    %s\n  ],\n  "competitions": [\n    %s\n  ],\n  "calendar": [\n    %s\n  ],\n  "league_fixtures": [\n    %s\n  ]\n}',
         save_uid_escaped,
         club_name_escaped,
         formatted_date,
@@ -1686,7 +1729,8 @@ do
         table.concat(standings_json_list, ",\n    "),
         table.concat(manager_history_json_list, ",\n    "),
         table.concat(competitions_json_list, ",\n    "),
-        table.concat(fixtures_json_list, ",\n    ")
+        table.concat(fixtures_json_list, ",\n    "),
+        table.concat(league_fixtures_json_list, ",\n    ")
     )
 
     local target_path = "C:\\Users\\Public\\ea_fc_calendar_export.json"
@@ -1768,16 +1812,28 @@ do
             if not combined[pid] then
                 combined[pid] = {
                     team_id = tid, appearances = 0, goals = 0, assists = 0,
-                    clean_sheets = 0, yellow_cards = 0, red_cards = 0
+                    clean_sheets = 0, yellow_cards = 0, red_cards = 0, motm = 0,
+                    rating_weighted_sum = 0
                 }
             end
             local c = combined[pid]
-            c.appearances = c.appearances + (stat.app or 0)
+            local app = stat.app or 0
+            -- Same raw-value normalization the squad export block already
+            -- uses for avg_rating (stat.avg needs /app then /10) — kept as
+            -- an appearances-weighted sum here too, in case a player has
+            -- more than one row for this exact competition (e.g. a
+            -- mid-season transfer between two clubs in the same league),
+            -- same reasoning as that block's own weighted average.
+            local avg = stat.avg or 0
+            if app > 1 then avg = (avg / app) / 10 elseif app == 1 then avg = avg / 10 end
+            c.appearances = c.appearances + app
             c.goals = c.goals + (stat.goals or 0)
             c.assists = c.assists + (stat.assists or 0)
             c.clean_sheets = c.clean_sheets + (stat.clean_sheets or 0)
             c.yellow_cards = c.yellow_cards + (stat.yellow or 0)
             c.red_cards = c.red_cards + (stat.red or 0)
+            c.motm = c.motm + (stat.motm or 0)
+            c.rating_weighted_sum = c.rating_weighted_sum + (avg * app)
         end
     end
 
@@ -1801,10 +1857,12 @@ do
                 local raw_dob = league_players_table:GetRecordFieldValue(rec, "birthdate") or 0
                 local name = (GetPlayerName(pid) or ""):gsub('"', '\\"')
                 local team_name = league_team_name(c.team_id):gsub('"', '\\"')
+                local avg_rating = c.appearances > 0 and (c.rating_weighted_sum / c.appearances) or 0
                 table.insert(league_players_json_list, string.format(
-                    '{"player_id":%d,"name":"%s","team_name":"%s","overall":%d,"position_id":%d,"dob":"%s","appearances":%d,"goals":%d,"assists":%d,"clean_sheets":%d,"yellow_cards":%d,"red_cards":%d}',
+                    '{"player_id":%d,"name":"%s","team_name":"%s","overall":%d,"position_id":%d,"dob":"%s","appearances":%d,"goals":%d,"assists":%d,"clean_sheets":%d,"yellow_cards":%d,"red_cards":%d,"motm":%d,"avg_rating":%.2f}',
                     pid, name, team_name, overall, position_id, league_convert_fifa_date(raw_dob),
-                    c.appearances, c.goals, c.assists, c.clean_sheets, c.yellow_cards, c.red_cards
+                    c.appearances, c.goals, c.assists, c.clean_sheets, c.yellow_cards, c.red_cards,
+                    c.motm, avg_rating
                 ))
             end
             rec = league_players_table:GetNextValidRecord()
