@@ -1521,12 +1521,17 @@ function getTrophiesWon(saveId = activeSaveId) {
   `);
   if (res.length === 0) return [];
 
+  // years (every season it was won, not just the latest) backs the Home
+  // dashboard's Trophy Cabinet hover tooltip — added alongside the
+  // pre-existing count/last_won fields the Trophies widget already reads,
+  // so that display is unaffected.
   const byComp = new Map();
   res[0].values.forEach(([comp_name, year_label]) => {
-    if (!byComp.has(comp_name)) byComp.set(comp_name, { comp_name, count: 0, last_won: null });
+    if (!byComp.has(comp_name)) byComp.set(comp_name, { comp_name, count: 0, last_won: null, years: [] });
     const entry = byComp.get(comp_name);
     entry.count += 1;
     entry.last_won = year_label;
+    entry.years.push(year_label);
   });
 
   return Array.from(byComp.values());
@@ -3345,7 +3350,7 @@ function getPastPlayers(saveId = activeSaveId) {
   // the same club would mix its past players into this one's list.
   const pastRes = db.exec(`
     SELECT p.player_id, p.name, p.position_id, p.dob, p.nationality, p.height, p.weight, p.alt_positions,
-           s.overall, s.potential, s.wage, s.club_id, se.year_label, s.season_id, s.updated_at
+           s.overall, s.potential, s.wage, s.club_id, se.year_label, s.season_id, s.updated_at, p.skintone_code
     FROM player_season_stats s
     JOIN players p ON p.player_id = s.player_id
     JOIN seasons se ON se.id = s.season_id
@@ -3361,9 +3366,9 @@ function getPastPlayers(saveId = activeSaveId) {
   const lastKnown = new Map();
   const firstYearLabelByPlayer = new Map();
   pastRes[0].values.forEach(row => {
-    const [player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, club_id, year_label, season_id, updated_at] = row;
+    const [player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, club_id, year_label, season_id, updated_at, skintone_code] = row;
     if (!firstYearLabelByPlayer.has(player_id)) firstYearLabelByPlayer.set(player_id, year_label);
-    lastKnown.set(player_id, { player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, year_label, season_id, updated_at });
+    lastKnown.set(player_id, { player_id, name, position_id, dob, nationality, height, weight, alt_positions, overall, potential, wage, year_label, season_id, updated_at, skintone_code });
   });
 
   // See clearFormerPlayers/former_players_cleared_before — a player whose
@@ -3384,6 +3389,7 @@ function getPastPlayers(saveId = activeSaveId) {
   }
 
   const watchlistStatus = readWatchlistStatus();
+  const manualHeadshots = getManualHeadshotOverrides();
 
   const results = [];
   lastKnown.forEach((info, playerId) => {
@@ -3426,7 +3432,8 @@ function getPastPlayers(saveId = activeSaveId) {
       joined_season: joinedSeason,
       departed_season: info.year_label,
       years_active: yearsActive,
-      current_club: currentClub
+      current_club: currentClub,
+      headshot_path: manualHeadshots.get(info.player_id) || resolveHeadshotPath(info.player_id, info.dob, info.nationality, info.skintone_code)
     });
   });
 
@@ -3551,9 +3558,11 @@ function getSignedPlayers(saveId = activeSaveId) {
     });
   }
 
-  const bioRes = db.exec(`SELECT player_id, name, position_id, dob FROM players;`);
+  const bioRes = db.exec(`SELECT player_id, name, position_id, dob, nationality, skintone_code FROM players;`);
   const bioById = new Map();
-  if (bioRes.length > 0) bioRes[0].values.forEach(([player_id, name, position_id, dob]) => bioById.set(player_id, { name, position_id, dob }));
+  if (bioRes.length > 0) bioRes[0].values.forEach(([player_id, name, position_id, dob, nationality, skintone_code]) => bioById.set(player_id, { name, position_id, dob, nationality, skintone_code }));
+
+  const manualHeadshots = getManualHeadshotOverrides();
 
   const results = [];
   activeIds.forEach(playerId => {
@@ -3591,7 +3600,8 @@ function getSignedPlayers(saveId = activeSaveId) {
       from_team: fromTeam,
       is_academy: isAcademy,
       signed_season: earliest ? earliest.year_label : null,
-      contract_date: contractDateByPlayer.get(playerId) || ''
+      contract_date: contractDateByPlayer.get(playerId) || '',
+      headshot_path: manualHeadshots.get(playerId) || resolveHeadshotPath(playerId, bio.dob, bio.nationality, bio.skintone_code)
     });
   });
 
