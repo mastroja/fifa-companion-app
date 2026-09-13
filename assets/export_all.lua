@@ -1497,6 +1497,13 @@ do
 
         local comp_name = GetCompetitionNameByObjID(comp_obj_id) or "Competition"
         local standing_text = ""
+        -- Only ever set true in the knockout branch below (a round-robin
+        -- league/group format has no elimination concept) — lets the
+        -- companion app show a knocked-out competition in red instead of
+        -- relying on parsing "Nth Round" text, which reads identically
+        -- whether that round was a loss (eliminated) or the round still
+        -- to come (still alive).
+        local is_eliminated = false
 
         if is_round_robin then
             local team_stats2 = {}
@@ -1612,7 +1619,8 @@ do
             if completed_count == 0 then
                 standing_text = "Not Started"
             elseif not last_completed_won then
-                standing_text = string.format("%d%s Round", completed_count, ordinal_suffix(completed_count))
+                is_eliminated = true
+                standing_text = string.format("Eliminated (%d%s Round)", completed_count, ordinal_suffix(completed_count))
             elseif has_upcoming then
                 local next_round = completed_count + 1
                 standing_text = string.format("%d%s Round", next_round, ordinal_suffix(next_round))
@@ -1623,8 +1631,8 @@ do
 
         if standing_text ~= "" then
             table.insert(competitions_json_list, string.format(
-                '{"name":"%s","icon":"%s","standing":"%s"}',
-                comp_name:gsub('"', '\\"'), comp_icon(comp_name), standing_text:gsub('"', '\\"')
+                '{"name":"%s","icon":"%s","standing":"%s","eliminated":%s}',
+                comp_name:gsub('"', '\\"'), comp_icon(comp_name), standing_text:gsub('"', '\\"'), tostring(is_eliminated)
             ))
         end
     end

@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EA FC Companion App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-color: #0e1117;
@@ -631,6 +634,36 @@
       100% { transform: translateY(640px) rotate(540deg); opacity: 0; }
     }
 
+    #trophy-win-dialog {
+      background: #0d1117;
+      color: #fff; border: 2px solid #ffd700; border-radius: 14px;
+      padding: 0; width: 90vw; height: 88vh; max-width: 1000px;
+      box-shadow: 0 0 60px rgba(255, 215, 0, 0.35);
+      display: flex; flex-direction: column; align-items: stretch;
+      overflow: hidden;
+      /* Native <dialog> centers itself via the UA stylesheet (position:
+         fixed, inset auto, margin auto) — nothing here should touch
+         position/inset/margin on the dialog element itself. */
+    }
+    #trophy-win-dialog::backdrop { background: rgba(0, 0, 0, 0.8); }
+    #trophy-win-confetti-container { position: relative; overflow: hidden; flex: 1; }
+    .trophy-win-image {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; z-index: 0;
+    }
+    .trophy-win-overlay {
+      position: absolute; inset: 0; z-index: 1;
+      background: linear-gradient(180deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.15) 45%, rgba(0,0,0,0.7) 100%);
+    }
+    .trophy-champions-title {
+      position: absolute; inset: 0; z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Anton', Impact, 'Arial Narrow Bold', sans-serif;
+      font-size: 56px; letter-spacing: 1.5px; text-transform: uppercase;
+      color: #ffd700; text-shadow: 0 0 24px rgba(255, 215, 0, 0.6), 0 4px 10px rgba(0, 0, 0, 0.95);
+      line-height: 1.2; text-align: center; padding: 0 40px;
+    }
+
     #season-overview-print { display: none; }
     @media print {
       /* No margin option is passed to Electron's printToPDF (see
@@ -670,7 +703,7 @@
       <select id="save-select" onchange="changeSave(this.value)" title="Switch which career save to view"></select>
       <button class="refresh-btn" onclick="deleteCurrentSave()" title="Permanently delete the selected save's history">🗑</button>
       <span class="badge youth-mode-header-badge" id="youth-mode-header-badge" style="display: none;" title="Youth Squad Career Mode is permanently enabled for this save.">🎓 Youth Mode Active</span>
-      <button class="refresh-btn" id="youth-mode-header-rules-btn" onclick="openYouthRulesDialog()" style="display: none; padding: 4px 10px;" title="View the Youth Squad Career Mode rules (rating cap, signing types, transfer rules).">📋 Rules</button>
+      <button class="refresh-btn" id="youth-mode-season-reminder-btn" onclick="openYouthMyRulesDialog()" style="display: none; padding: 4px 10px; border-color: #d29922; color: #d29922;" title="Just the rule that applies to your team right now — who you can sign, who you must sell, and your squad cap. The full rules reference is still in Settings.">⚠️ Squad Rules</button>
       <button class="refresh-btn" id="refresh-btn" onclick="triggerRefresh()" title="Sends the F10 hotkey to Live Editor to re-run export_all.lua">↻ Refresh</button>
       <div class="settings-wrap" id="settings-wrap">
         <button class="refresh-btn settings-gear-btn" id="settings-gear-btn" onclick="toggleSettingsPanel()" title="Settings">⚙️</button>
@@ -714,7 +747,8 @@
             </div>
           </div>
           <div class="settings-section">
-            <h4>Connected Career</h4>
+            <details id="connected-career-details">
+              <summary style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 10px; cursor: pointer;">Connected Career</summary>
             <div class="settings-row" id="connected-career-not-joined-row">
               <span style="color: var(--text-dim);">Not connected</span>
               <button class="refresh-btn" id="connected-career-join-btn" onclick="openConnectedCareerJoinDialog()" title="Keep player attributes and results in sync with another save via a shared code.">Join a Connected Career</button>
@@ -738,6 +772,14 @@
                 <button class="refresh-btn" onclick="onConnectedCareerConfirmMirrorResults()" title="Step 4: after running create_mirrored_players.lua, saves the real id mapping it resolved so future attribute syncs know where to write.">4. Confirm Results</button>
               </div>
               <div id="connected-career-mirror-status" style="font-size: 12px; color: var(--text-dim);"></div>
+            </div>
+            </details>
+          </div>
+          <div class="settings-section">
+            <h4>Debug</h4>
+            <div class="settings-row">
+              <span style="color: var(--text-dim);">Preview the trophy win celebration (doesn't record a real win)</span>
+              <button class="refresh-btn" onclick="testTrophyWinPopup()" title="Runs the exact same pop-up the app shows on a real trophy win, using your current league as the example.">🎉 Preview</button>
             </div>
           </div>
         </div>
@@ -778,7 +820,13 @@
 
     <div class="home-dashboard-grid home-grid-top">
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
-        <h3><span>Upcoming Match</span></h3>
+        <h3 style="display: flex; justify-content: space-between; align-items: center;">
+          <span id="home-match-card-title">Upcoming Match</span>
+          <div class="home-toggle" id="home-match-card-toggle" style="display: none;">
+            <button class="home-toggle-btn active" id="home-match-card-upcoming-btn" onclick="event.stopPropagation(); setHomeMatchCardView(false)">Upcoming</button>
+            <button class="home-toggle-btn" id="home-match-card-last-btn" onclick="event.stopPropagation(); setHomeMatchCardView(true)">Last Result</button>
+          </div>
+        </h3>
         <div id="home-upcoming-match-body"></div>
       </div>
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
@@ -1146,11 +1194,11 @@
 
     <div class="home-dashboard-grid home-grid-top">
       <div class="profile-card home-widget">
-        <h3><span>Top 5 Yellow Cards</span></h3>
+        <h3><span>🟨 Top 5 Yellow Cards</span></h3>
         <div id="league-stats-yellow-cards-body"></div>
       </div>
       <div class="profile-card home-widget">
-        <h3><span>Top 5 Red Cards</span></h3>
+        <h3><span>🟥 Top 5 Red Cards</span></h3>
         <div id="league-stats-red-cards-body"></div>
       </div>
     </div>
@@ -1269,6 +1317,38 @@
     <button class="back-btn" style="margin-top: 16px; width: 100%; justify-content: center; flex-shrink: 0;" onclick="closeYouthRulesDialog()">Got it</button>
   </dialog>
 
+  <!-- Trophy win celebration — fires once per save/season whenever a
+       competition's standing flips to "Winner" (see checkForNewTrophyWins),
+       covering both the primary league and any cup. Confetti spawns into
+       #trophy-win-confetti-container (see spawnTrophyWinConfetti). -->
+  <dialog id="trophy-win-dialog">
+    <div id="trophy-win-confetti-container">
+      <img class="trophy-win-image" id="trophy-win-image" src="" alt="" onerror="this.style.display='none'" />
+      <div class="trophy-win-overlay"></div>
+      <div class="trophy-champions-title" id="trophy-win-title"></div>
+    </div>
+    <button class="back-btn" style="margin: 16px; justify-content: center;" onclick="closeTrophyWinDialog()">Continue</button>
+  </dialog>
+
+  <!-- Youth Squad Career Mode: "My Rules" — just the cap/signing/transfer
+       rule that actually applies to this team right now (see
+       renderYouthMyRulesBody), instead of the full reference tables in
+       youth-rules-dialog above. Auto-shown once per season (see
+       renderYouthSeasonRulesReminder), reopenable any time via the header
+       "⚠️ Squad Rules" button, which stays visible permanently whenever
+       Youth Mode is enabled. -->
+  <dialog id="youth-my-rules-dialog" style="background: var(--card-bg); color: var(--text-color); border: 1px solid #d29922; border-radius: 8px; padding: 20px; max-width: 480px; width: 90%; max-height: 80vh; overflow: hidden;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-shrink: 0;">
+      <h3 style="margin: 0;">⚠️ My Youth Mode Rules</h3>
+      <button class="back-btn" style="margin: 0;" onclick="closeYouthMyRulesDialog()">✕</button>
+    </div>
+    <div id="youth-my-rules-body" class="youth-rules-body-scroll"></div>
+    <div style="display: flex; gap: 8px; margin-top: 16px; flex-shrink: 0;">
+      <button class="back-btn" style="flex: 1; justify-content: center;" onclick="openFullYouthRulesFromMyRules()" title="See every league's rules, not just yours">📋 View Full Rules</button>
+      <button class="back-btn" style="flex: 1; justify-content: center;" onclick="closeYouthMyRulesDialog()">Got it</button>
+    </div>
+  </dialog>
+
   <!-- Youth Squad Career Mode: occasional attention-grabbing popup for an
        ongoing (in-season) overrated-squad violation. Separate from the
        always-available inline banner on Home — see renderYouthModeWarning. -->
@@ -1332,6 +1412,7 @@
 
       if (data?.competitions && Array.isArray(data.competitions)) {
         updateCompetitionsDisplay(data.competitions);
+        checkForNewTrophyWins(data.competitions);
       }
 
       filterAndRenderCalendar();
@@ -1398,9 +1479,13 @@
         const iconHtml = logoUrl
           ? `<img src="${logoUrl}" alt="" style="width: 32px; height: 32px; object-fit: contain; vertical-align: middle; margin-right: 8px;" onerror="this.outerHTML='${comp.icon || '⚽'} '" />`
           : `${comp.icon || '⚽'} `;
+        // `eliminated` comes straight from export_all.lua's knockout-round
+        // branch; the text-prefix check is a fallback for any payload that
+        // predates that field (older cached data, etc).
+        const isEliminated = !!comp.eliminated || /^Eliminated/.test(comp.standing || '');
         row.innerHTML = `
           <span class="comp-name">${iconHtml}${comp.name}</span>
-          <span class="comp-standing">${comp.standing}</span>
+          <span class="comp-standing"${isEliminated ? ' style="color: #ff4d4d; font-weight: 700;"' : ''}>${comp.standing}</span>
         `;
         container.appendChild(row);
       });
@@ -1880,6 +1965,35 @@
       const lower = String(compName).toLowerCase();
       const entry = COMPETITION_TROPHY_MAP.find(e => lower.includes(e.match));
       return entry ? `assets/trophies/${entry.file}` : null;
+    }
+
+    // A player physically lifting the trophy — used only for the win
+    // celebration pop-up (see checkForNewTrophyWins), as opposed to the
+    // flat trophy render above used in reference lists. Same match order/
+    // reasoning as COMPETITION_TROPHY_MAP (play-off checked before the
+    // plain league name it's a variant of). Filenames are .jfif as
+    // provided in assets/trophies/trophy-lift/, including its two
+    // "elf-" (not "efl-") typos in the Championship/League One files.
+    const COMPETITION_TROPHY_LIFT_MAP = [
+      { match: 'play-off', file: 'efl-promotionplayoff-lift.jfif' },
+      { match: 'playoff', file: 'efl-promotionplayoff-lift.jfif' },
+      { match: 'champions league', file: 'championsleague-lift.jfif' },
+      { match: 'conference league', file: 'europa-confleague-lift.jfif' },
+      { match: 'europa league', file: 'europa-league-lift.jfif' },
+      { match: 'carabao', file: 'carabaocup-lift.jfif' },
+      { match: 'fa cup', file: 'facup-lift.jfif' },
+      { match: 'vertu', file: 'vertucup-lift.jfif' },
+      { match: 'championship', file: 'elf-championship-lift.jfif' },
+      { match: 'league one', file: 'elf-leagueone-lift.jfif' },
+      { match: 'league two', file: 'efl-leaguetwo-lift.jfif' },
+      { match: 'premier league', file: 'premierleague-lift.jfif' }
+    ];
+
+    function getCompetitionTrophyLiftUrl(compName) {
+      if (!compName) return null;
+      const lower = String(compName).toLowerCase();
+      const entry = COMPETITION_TROPHY_LIFT_MAP.find(e => lower.includes(e.match));
+      return entry ? `assets/trophies/trophy-lift/${entry.file}` : null;
     }
 
     // Faded background watermark for a competition logo — same "large,
@@ -4689,8 +4803,10 @@
     // (Transfer History) can reuse this same fetch instead of each making
     // their own round trip — refreshed alongside the Former Players table.
     let currentPastPlayers = [];
-    let pastPlayersSortColumn = 'departed_season';
-    let pastPlayersSortAscending = false;
+    let pastPlayersSortColumn = 'position_id';
+    // Ascending on position_id means GK (POSITION_SORT_ORDER's lowest
+    // value) sorts first — matches the active squad table's default.
+    let pastPlayersSortAscending = true;
 
     async function renderPastPlayersTable() {
       if (!window.api || !window.api.getPastPlayers) return;
@@ -4758,8 +4874,9 @@
           valB = getLastName(b.name).toLowerCase();
           return pastPlayersSortAscending ? valA.localeCompare(valB) : valB.localeCompare(valA);
         } else if (pastPlayersSortColumn === 'position_id') {
-          valA = getPositionInfo(a.position_id).label;
-          valB = getPositionInfo(b.position_id).label;
+          valA = POSITION_SORT_ORDER[getPositionInfo(a.position_id).label] || 99;
+          valB = POSITION_SORT_ORDER[getPositionInfo(b.position_id).label] || 99;
+          return pastPlayersSortAscending ? valA - valB : valB - valA;
         } else if (pastPlayersSortColumn === '__value' || pastPlayersSortColumn === '__soldFor') {
           valA = Number(valA || 0); valB = Number(valB || 0);
           return pastPlayersSortAscending ? valA - valB : valB - valA;
@@ -5590,6 +5707,18 @@
       }).join('');
     }
 
+    // Set by the card's header tabs — switches between the next fixture
+    // and the most recently played result on the same Home dashboard
+    // card, without triggering the card's own whole-surface
+    // onclick="switchTab('calendar')" (stopped via event.stopPropagation()
+    // on each tab button, same pattern as toggleLeagueTableExpanded).
+    let homeMatchCardShowingLast = false;
+
+    function setHomeMatchCardView(showLast) {
+      homeMatchCardShowingLast = showLast;
+      renderUpcomingMatchWidget();
+    }
+
     function renderUpcomingMatchWidget() {
       const container = document.getElementById('home-upcoming-match-body');
       if (!container) return;
@@ -5598,23 +5727,46 @@
         .filter(m => !m.played)
         .slice()
         .sort((a, b) => parseInt(a.date, 10) - parseInt(b.date, 10))[0];
+      const lastPlayed = currentCalendar
+        .filter(m => m.played && m.score)
+        .slice()
+        .sort((a, b) => parseInt(b.date, 10) - parseInt(a.date, 10))[0];
 
-      if (!upcoming) {
-        container.innerHTML = `<div class="empty-state" style="padding: 12px;">No upcoming fixtures scheduled.</div>`;
+      // Only worth offering the toggle once there's actually something on
+      // both sides to flip between.
+      const showLast = homeMatchCardShowingLast && !!lastPlayed;
+
+      const titleEl = document.getElementById('home-match-card-title');
+      if (titleEl) titleEl.textContent = showLast ? 'Last Result' : 'Upcoming Match';
+
+      const toggleGroup = document.getElementById('home-match-card-toggle');
+      if (toggleGroup) {
+        toggleGroup.style.display = (upcoming && lastPlayed) ? 'flex' : 'none';
+        document.getElementById('home-match-card-upcoming-btn').classList.toggle('active', !showLast);
+        document.getElementById('home-match-card-last-btn').classList.toggle('active', showLast);
+      }
+
+      const match = showLast ? lastPlayed : upcoming;
+      if (!match) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">${showLast ? 'No matches played yet.' : 'No upcoming fixtures scheduled.'}</div>`;
         return;
       }
 
       const teamName = getMostCommonClubName() || 'My Club';
-      const homeTeamName = upcoming.is_home ? teamName : (upcoming.opponent || 'TBD');
-      const awayTeamName = upcoming.is_home ? (upcoming.opponent || 'TBD') : teamName;
+      const homeTeamName = match.is_home ? teamName : (match.opponent || 'TBD');
       const leftTeamName = teamName;
-      const rightTeamName = upcoming.opponent || 'Opponent';
+      const rightTeamName = match.opponent || 'Opponent';
 
       const primaryLeague = getPrimaryLeagueName();
-      let competitionLine = upcoming.competition || 'League Match';
-      if (primaryLeague && upcoming.competition === primaryLeague) {
-        const leagueMatchesPlayed = currentCalendar.filter(m => m.played && m.competition === primaryLeague).length;
-        competitionLine += ` - Matchweek ${leagueMatchesPlayed + 1}`;
+      let competitionLine = match.competition || 'League Match';
+      if (primaryLeague && match.competition === primaryLeague) {
+        // For the upcoming fixture this is the NEXT matchweek (one more
+        // than played so far); for a past result it's the matchweek that
+        // match itself was — everything played up to and including it.
+        const matchweek = showLast
+          ? currentCalendar.filter(m => m.played && m.competition === primaryLeague && parseInt(m.date, 10) <= parseInt(match.date, 10)).length
+          : currentCalendar.filter(m => m.played && m.competition === primaryLeague).length + 1;
+        competitionLine += ` - Matchweek ${matchweek}`;
       }
 
       const teamStanding = leagueStandings ? leagueStandings.find(t => t.team_name === leftTeamName) : null;
@@ -5623,14 +5775,31 @@
       const teamPlaceHtml = teamStanding ? ordinal(teamStanding.rank) : '—';
       const oppPlaceHtml = oppStanding ? ordinal(oppStanding.rank) : '—';
 
+      let centerLineHtml;
+      if (showLast) {
+        const parts = (match.score || '').split('-').map(s => parseInt(s.trim(), 10));
+        const [homeScore, awayScore] = parts;
+        const userScore = match.is_home ? homeScore : awayScore;
+        const oppScore = match.is_home ? awayScore : homeScore;
+        let scoreColor = 'var(--text-main)';
+        if (Number.isFinite(userScore) && Number.isFinite(oppScore)) {
+          if (userScore > oppScore) scoreColor = '#3fb950';
+          else if (userScore < oppScore) scoreColor = '#f85149';
+        }
+        centerLineHtml = `${leftTeamName} <span style="color: ${scoreColor};">${Number.isFinite(userScore) ? userScore : '?'} - ${Number.isFinite(oppScore) ? oppScore : '?'}</span> ${rightTeamName}`;
+      } else {
+        centerLineHtml = `${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}`;
+      }
+
       container.innerHTML = `
         <div style="position: relative;">
-          ${buildCompetitionLogoWatermark(upcoming.competition)}
+          ${buildCompetitionLogoWatermark(match.competition)}
           <div style="position: relative; z-index: 1;">
             <div style="text-align: center; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px;">${competitionLine}</div>
-            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(upcoming.date)}</div>
-            <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${leftTeamName} <span style="color: var(--text-dim); font-weight: 500;">Vs</span> ${rightTeamName}</div>
+            <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 2px;">${formatDateMMDDYYYY(match.date)}</div>
+            <div style="text-align: center; font-size: 22px; font-weight: 700; margin: 10px 0 4px;">${centerLineHtml}</div>
             <div style="text-align: center; font-size: 12px; color: var(--text-dim); margin-bottom: 16px;">@ ${homeTeamName}</div>
+            ${showLast ? '' : `
             <div style="display: flex; justify-content: space-around; text-align: center; gap: 12px;">
               <div style="flex: 1;">
                 <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">League Position</div>
@@ -5645,6 +5814,7 @@
                 <div style="display: flex; gap: 4px; justify-content: center;">${formChipsHtml(oppStanding ? oppStanding.form : [])}</div>
               </div>
             </div>
+            `}
           </div>
         </div>
       `;
@@ -5684,7 +5854,9 @@
 
     // Shared by the Home widget's windowed view and the League Stats
     // tab's full table — same row markup either way.
-    function buildStandingsTableHtml(rows, teamName) {
+    function buildStandingsTableHtml(rows, teamName, leagueName, totalTeams) {
+      const tier = findPyramidTier(leagueName);
+      const total = totalTeams || rows.length;
       return `
         <table class="sub-table">
           <thead><tr><th>#</th><th>Team</th><th>GP</th><th>W-D-L</th><th>GF / GA</th><th>GD</th><th>PTS</th></tr></thead>
@@ -5693,8 +5865,15 @@
               const gd = t.goals_for - t.goals_against;
               const gdStr = gd > 0 ? `+${gd}` : `${gd}`;
               const isUs = t.team_name === teamName;
+              const zone = tier ? getLeagueTableZone(t.rank, total, tier.tier) : null;
+              // Zone color wins the background (seeing "we're in the
+              // relegation zone" at a glance matters more than the plain
+              // isUs tint) — isUs still gets bold text either way so our
+              // row stays identifiable even when zone-colored.
+              const background = zone ? `background: ${LEAGUE_TABLE_ZONE_COLORS[zone]}40;` : (isUs ? 'background: #00ff8715;' : '');
+              const rowStyle = background + (isUs ? 'font-weight: 700;' : '');
               return `
-                <tr style="${isUs ? 'background: #00ff8715; font-weight: 700;' : ''}">
+                <tr style="${rowStyle}" ${zone ? `title="${LEAGUE_TABLE_ZONE_LABELS[zone]}"` : ''}>
                   <td>${t.rank}</td>
                   <td>${t.team_name}</td>
                   <td>${t.played}</td>
@@ -5722,7 +5901,7 @@
       const teamName = getMostCommonClubName() || '';
       const rows = leagueTableExpanded ? leagueStandings : getLeagueTableWindowRows(leagueStandings, teamName);
 
-      container.innerHTML = buildStandingsTableHtml(rows, teamName) + (leagueStandings.length > 5 ? `
+      container.innerHTML = buildStandingsTableHtml(rows, teamName, getPrimaryLeagueName(), leagueStandings.length) + (leagueStandings.length > 5 ? `
         <button class="home-toggle-btn" style="margin-top: 8px;" onclick="event.stopPropagation(); toggleLeagueTableExpanded()">
           ${leagueTableExpanded ? 'Show My Position' : `Show Full Table (${leagueStandings.length} teams)`}
         </button>
@@ -5930,12 +6109,27 @@
       const arrow = (colKey) => key === colKey ? (dir === 'desc' ? ' ▼' : ' ▲') : '';
       const th = (colKey, label) => `<th style="cursor: pointer; user-select: none;" onclick="setLeagueStatsTableSort('${colKey}')">${label}${arrow(colKey)}</th>`;
 
+      // Zone coloring (promotion/playoff/relegation/European qualification)
+      // uses each row's real `rank`, not the current display sort, so it
+      // stays correct no matter which column the table is sorted by. The
+      // champion (rank 1) deliberately gets no special color of its own —
+      // it just shares the promotion/Champions League zone's green like
+      // every other team in that zone (per the user, 2026-09-12).
+      const tier = findPyramidTier(getDisplayedLeagueStatsLeagueName());
+      const totalTeams = standings.length;
       const rowsHtml = windowed.map((t, i) => {
         const gd = t.goals_for - t.goals_against;
         const gdStr = gd > 0 ? `+${gd}` : `${gd}`;
         const isUs = t.team_name === teamName;
+        const zone = tier ? getLeagueTableZone(t.rank, totalTeams, tier.tier) : null;
+        // Zone color wins the background over the plain isUs tint, with
+        // isUs staying bold either way so our row is still identifiable
+        // when zone-colored.
+        const background = zone ? `background: ${LEAGUE_TABLE_ZONE_COLORS[zone]}40;` : (isUs ? 'background: #00ff8715;' : '');
+        const rowStyle = background + (isUs ? 'font-weight: 700;' : '');
+        const rowTitle = zone ? LEAGUE_TABLE_ZONE_LABELS[zone] : '';
         return `
-          <tr style="${isUs ? 'background: #00ff8715; font-weight: 700;' : ''}">
+          <tr style="${rowStyle}" ${rowTitle ? `title="${rowTitle}"` : ''}>
             <td>${key === 'points' ? t.rank : i + 1}</td>
             <td>${t.team_name}</td>
             <td>${t.played}</td>
@@ -6041,7 +6235,7 @@
       const tableRows = winner ? ranked.slice(1) : ranked;
       const rankOffset = winner ? 2 : 1;
 
-      const statLabel = statKey === 'goals' ? 'G' : statKey === 'assists' ? 'A' : statKey === 'clean_sheets' ? 'CS' : statKey === 'yellow_cards' ? 'YC' : 'RC';
+      const statLabel = statKey === 'goals' ? 'G' : statKey === 'assists' ? 'A' : statKey === 'clean_sheets' ? 'CS' : statKey === 'yellow_cards' ? '🟨 YC' : '🟥 RC';
       // The three award cards (goals/assists/clean_sheets) share a
       // 3-column row — narrower than the 2-column Yellow/Red row — and
       // the full 7-column table (#, Player, Team, OVR, Age, Apps, stat)
@@ -6547,6 +6741,53 @@
       if (!compName) return null;
       const lname = compName.toLowerCase();
       return ENGLAND_PYRAMID.find(t => lname.includes(t.name.toLowerCase())) || null;
+    }
+
+    // League table zone highlighting (see TODO_v1.6.0-features.md) — a
+    // team's promotion/playoff/relegation/European-qualification zone
+    // based on final league position. Relegation is always the bottom 3
+    // positions relative to that division's own team count (matches the
+    // Championship's real rule) rather than a fixed "18th-20th", which
+    // would only ever make sense for the 20-team Premier League and leave
+    // rows 21-24 uncolored in the 24-team divisions below it — confirmed
+    // with the user rather than assumed.
+    const LEAGUE_TABLE_ZONE_COLORS = {
+      promotion: '#00e676',
+      playoff: '#ffd740',
+      relegation: '#ff5252',
+      ucl: '#00e676',
+      europa: '#448aff',
+      conference: '#80d8ff'
+    };
+
+    const LEAGUE_TABLE_ZONE_LABELS = {
+      promotion: 'Automatic Promotion',
+      playoff: 'Promotion Play-offs',
+      relegation: 'Relegation',
+      ucl: 'Champions League',
+      europa: 'Europa League',
+      conference: 'Europa Conference League'
+    };
+
+    function getLeagueTableZone(rank, totalTeams, tierNumber) {
+      if (!rank || !totalTeams || !tierNumber) return null;
+
+      // Championship / League One / League Two only.
+      if (tierNumber >= 2) {
+        if (rank <= 2) return 'promotion';
+        if (rank <= 6) return 'playoff';
+      }
+
+      if (rank > totalTeams - 3) return 'relegation';
+
+      // Premier League only.
+      if (tierNumber === 1) {
+        if (rank <= 4) return 'ucl';
+        if (rank === 5) return 'europa';
+        if (rank === 6) return 'conference';
+      }
+
+      return null;
     }
 
     // Parses the leading number out of standings text like "5th" (see
@@ -7296,8 +7537,16 @@
       const rulesBtn = document.getElementById('settings-youth-mode-rules-btn');
       if (rulesBtn) rulesBtn.style.display = currentYouthModeEnabled ? '' : 'none';
 
-      const headerRulesBtn = document.getElementById('youth-mode-header-rules-btn');
-      if (headerRulesBtn) headerRulesBtn.style.display = currentYouthModeEnabled ? 'inline-block' : 'none';
+      // The header's own single entry point is "My Rules" (below) —
+      // the plain full-reference button now only lives in Settings
+      // (settings-youth-mode-rules-btn above), to avoid two
+      // near-identical buttons sitting in the header at once. Always
+      // visible whenever Youth Mode is on (not gated to a transfer-window
+      // date) — per the user, it should "just stay up there". The
+      // once-per-season auto-popup is separate — see
+      // renderYouthSeasonRulesReminder.
+      const seasonReminderBtn = document.getElementById('youth-mode-season-reminder-btn');
+      if (seasonReminderBtn) seasonReminderBtn.style.display = currentYouthModeEnabled ? 'inline-block' : 'none';
     }
 
     // Builds the "Squad Rating Cap" table straight from
@@ -7385,6 +7634,82 @@
         : { league: r.label, prospect: `Below ${r.avg}`, squad: `${r.avg}–${r.maxNum}`, marquee: `${r.maxNum + 1}+` });
     }
 
+    // Which Transfer Rules row (within a league section) a season's
+    // outcome maps to — index into that section's `rules` array, ordered
+    // best-to-worst outcome to match YOUTH_TRANSFER_RULES' own row order.
+    // `promoted`/`promotedViaPlayoff`/`relegated` are read straight from
+    // getSeasonOverviewPreview, which already derives them correctly by
+    // comparing tiers across the season boundary (not by position alone —
+    // see domain-league-promotion-rules) so this only needs to
+    // approximate the fuzzier "mid-table" vs "battled to survive" middle
+    // ground, which was never given hard position cutoffs to begin with.
+    function classifyYouthTransferOutcomeIndex(tierNumber, totalTeams, position, won, promoted, promotedViaPlayoff, relegated) {
+      if (relegated) return tierNumber === 1 ? 5 : 4; // always the section's last row
+      const nearBottom = !!(position && totalTeams && position >= totalTeams - 6);
+      if (tierNumber === 1) {
+        if (won) return 0; // Title
+        if (position && position <= 4) return 1; // Champions League spot
+        if (position && position <= 6) return 2; // Europa / mid-upper table
+        return nearBottom ? 4 : 3; // Relegation battle survival vs Mid-table (neutral)
+      }
+      if (promoted) return promotedViaPlayoff ? 1 : 0; // Playoff / Automatic promotion
+      return nearBottom ? 3 : 2; // Relegation battle survival vs Mid-table
+    }
+
+    // Resolves which cap-table row and which Transfer Rules row actually
+    // apply to this save right now, per the user's request to highlight
+    // (not just list) the applicable rules. Two different seasons matter
+    // here: the CURRENT league decides which cap row applies (known from
+    // day one of a season, before any standings exist), while the
+    // Transfer Rules outcome is inherently about LAST season's result —
+    // it's the reward/punishment for what already happened, which is also
+    // the only sane fallback for Premier League cap banding right at
+    // season start, before this season's own table means anything yet.
+    async function resolveYouthRulesHighlightContext() {
+      const tier = findPyramidTier(getPrimaryLeagueName());
+      if (!tier) return { capIndex: null, transferSectionIndex: null, transferRowIndex: null };
+
+      let overview = null;
+      if (currentSaveId && window.api && window.api.getSeasonOverviewPreview) {
+        try { overview = await window.api.getSeasonOverviewPreview(currentSaveId); } catch (e) { overview = null; }
+      }
+      const lastLeague = overview && overview.league ? overview.league : null;
+      const lastTotalTeams = (overview && overview.standings && overview.standings.length) || null;
+
+      let capIndex = null;
+      if (tier.tier === 1) {
+        const liveRule = resolveYouthModeLiveRule();
+        if (liveRule && liveRule.tier === 1) {
+          capIndex = YOUTH_MODE_PREMIER_LEAGUE_BANDS.findIndex(b => b.leagueAverage === liveRule.leagueAverage && b.margin === liveRule.margin);
+        } else if (lastLeague && lastLeague.position) {
+          const lastTier = findPyramidTier(lastLeague.comp_name);
+          if (lastTier && lastTier.tier === 1) {
+            capIndex = YOUTH_MODE_PREMIER_LEAGUE_BANDS.indexOf(getYouthModePremierLeagueBand(lastLeague.position));
+          }
+        }
+        // No live table yet and no top-flight history to fall back on
+        // (e.g. freshly promoted) — assume the most restrictive band
+        // rather than the most generous one.
+        if (capIndex === null || capIndex === -1) capIndex = YOUTH_MODE_PREMIER_LEAGUE_BANDS.length - 1;
+      } else {
+        capIndex = YOUTH_MODE_PREMIER_LEAGUE_BANDS.length + [2, 3, 4].indexOf(tier.tier);
+      }
+
+      let transferSectionIndex = null, transferRowIndex = null;
+      if (lastLeague) {
+        const lastTier = findPyramidTier(lastLeague.comp_name);
+        if (lastTier) {
+          transferSectionIndex = lastTier.tier - 1; // YOUTH_TRANSFER_RULES is ordered Prem/Championship/L1/L2 = tier 1-4
+          transferRowIndex = classifyYouthTransferOutcomeIndex(
+            lastTier.tier, lastTotalTeams, lastLeague.position, lastLeague.won,
+            lastLeague.promoted, lastLeague.promoted_via_playoff, lastLeague.relegated
+          );
+        }
+      }
+
+      return { capIndex, transferSectionIndex, transferRowIndex };
+    }
+
     function renderYouthRulesBody() {
       const body = document.getElementById('youth-rules-body');
       if (!body) return;
@@ -7435,6 +7760,81 @@
     function closeYouthRulesDialog() {
       const dialog = document.getElementById('youth-rules-dialog');
       if (dialog && dialog.open) dialog.close();
+    }
+
+    // "My Rules" — just the one cap row, signing-type row, and transfer
+    // rule that actually apply to this team, instead of the full reference
+    // tables above. Reuses resolveYouthRulesHighlightContext's resolved
+    // indices (current league for the cap/signing rows, last season's
+    // result for the transfer rule) to pick the single applicable row out
+    // of the same underlying data the full dialog uses.
+    async function renderYouthMyRulesBody() {
+      const body = document.getElementById('youth-my-rules-body');
+      if (!body) return;
+
+      body.innerHTML = `<p class="youth-rules-note">Loading…</p>`;
+
+      const { capIndex, transferSectionIndex, transferRowIndex } = await resolveYouthRulesHighlightContext();
+      const capRows = buildYouthRulesCapRows();
+      const signingRows = buildYouthSigningTypeRows(capRows);
+      const capRow = capIndex !== null ? capRows[capIndex] : null;
+      const signingRow = capIndex !== null ? signingRows[capIndex] : null;
+      const transferSection = transferSectionIndex !== null ? YOUTH_TRANSFER_RULES[transferSectionIndex] : null;
+      const transferOutcome = transferSection && transferRowIndex !== null ? transferSection.rules[transferRowIndex] : null;
+
+      if (!capRow && !transferOutcome) {
+        body.innerHTML = `<p class="youth-rules-note">Nothing to show yet — no recognized league on record for this save.</p>`;
+        return;
+      }
+
+      body.innerHTML = `
+        ${capRow ? `
+          <div class="youth-rules-section">
+            <h4>📊 ${capRow.label}</h4>
+            <table class="youth-rules-cap-table">
+              <thead><tr><th class="num">Avg OVR</th><th class="num">Max OVR</th><th class="num">Allowed Over</th></tr></thead>
+              <tbody><tr><td class="num">${capRow.avg}</td><td class="num">${capRow.maxDisplay}</td><td class="num">${capRow.allowanceDisplay}</td></tr></tbody>
+            </table>
+            <p class="youth-rules-note">Checked at the end of each season — go over the allowance and you'll get a warning naming who to sell.</p>
+          </div>
+        ` : ''}
+        ${signingRow ? `
+          <div class="youth-rules-section">
+            <h4>🧾 Signing Types by OVR</h4>
+            <table class="youth-rules-cap-table">
+              <thead><tr><th class="num">Prospect</th><th class="num">Squad Player</th><th class="num">Marquee</th></tr></thead>
+              <tbody><tr><td class="num">${signingRow.prospect}</td><td class="num">${signingRow.squad}</td><td class="num">${signingRow.marquee}</td></tr></tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${transferOutcome ? `
+          <div class="youth-rules-section">
+            <h4>📝 Transfer Rule <span style="font-weight: 400; font-size: 12px; color: var(--text-dim);">(${transferSection.league}, based on last season's result)</span></h4>
+            <ul class="season-review-players">
+              <li><span>${transferOutcome[0]}</span><span>${transferOutcome[1]}</span></li>
+            </ul>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    async function openYouthMyRulesDialog() {
+      const dialog = document.getElementById('youth-my-rules-dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+      await renderYouthMyRulesBody();
+    }
+
+    function closeYouthMyRulesDialog() {
+      const dialog = document.getElementById('youth-my-rules-dialog');
+      if (dialog && dialog.open) dialog.close();
+    }
+
+    // Swaps My Rules for the full reference dialog rather than stacking
+    // them — closing one native <dialog> before showModal()-ing another
+    // keeps only one on the top layer at a time.
+    function openFullYouthRulesFromMyRules() {
+      closeYouthMyRulesDialog();
+      openYouthRulesDialog();
     }
 
     async function onYouthModeButtonClick() {
@@ -7802,7 +8202,47 @@
       `, 'No injuries recorded this season.');
     }
 
+    // New-season reminder for Youth Squad Career Mode's rules (who we can
+    // sign, who we must sell, our squad cap) — separate from the
+    // overrated-squad VIOLATION warning above, which only fires when
+    // there's an actual problem. This is a plain reminder that fires every
+    // season regardless of violations: the header "⚠️ Squad Rules" button
+    // stays up permanently whenever Youth Mode is on (see
+    // updateYouthModeButton), and this just handles auto-popping the "My
+    // Rules" dialog once per season. Tracked via localStorage (same
+    // pattern as the monthly warning-popup re-trigger above) rather than a
+    // new DB column/migration, since this is purely a client-side "have I
+    // shown this yet" flag.
+    function youthSeasonReminderStorageKey() {
+      return `youthSeasonReminderShown:${currentSaveId}`;
+    }
+
+    function renderYouthSeasonRulesReminder() {
+      if (!currentYouthModeEnabled) return;
+      const seasonLabel = computeCurrentSeasonLabel();
+      if (!seasonLabel) return;
+
+      let alreadyShown = false;
+      try {
+        alreadyShown = localStorage.getItem(youthSeasonReminderStorageKey()) === seasonLabel;
+      } catch (e) {
+        alreadyShown = false; // localStorage unavailable — no auto-popup, but the header button is always there anyway
+      }
+
+      // Skip (and try again on a later render) rather than stacking on top
+      // of another already-open dialog — e.g. the season review/overview
+      // dialogs that can also fire right at a season boundary (see the
+      // sequencing comment in populateSaveSelector). Don't mark it shown
+      // until it actually gets to display.
+      if (!alreadyShown && !document.querySelector('dialog[open]')) {
+        openYouthMyRulesDialog();
+        try { localStorage.setItem(youthSeasonReminderStorageKey(), seasonLabel); } catch (e) { /* no persistence available */ }
+      }
+    }
+
     function renderYouthModeWarning() {
+      renderYouthSeasonRulesReminder();
+
       const banner = document.getElementById('youth-mode-warning-banner');
       if (!banner) return;
 
@@ -8144,6 +8584,112 @@
       }
     }
 
+    // ---- Trophy win celebration ----
+    //
+    // export_all.lua writes the literal text "Winner" into a competition's
+    // standing the moment the final match is actually won — for BOTH the
+    // primary league (round-robin branch, once season_complete) and any
+    // knockout cup (see the "Eliminated (Nth Round)" change alongside it),
+    // so this one check covers league titles and cup wins alike with no
+    // separate detection needed per competition type.
+    //
+    // Celebrated-once tracking is per (save, season, competition) via
+    // localStorage — same lightweight pattern as youthSeasonReminderShown
+    // and the monthly warning-popup re-trigger elsewhere in this file —
+    // rather than a new DB column, since it's purely a client-side "have I
+    // shown this yet" flag and a season reset already happens naturally
+    // (a new season's competitions start back at "Not Started").
+    let trophyWinPopupQueue = [];
+    let trophyWinPopupShowing = false;
+
+    function checkForNewTrophyWins(competitions) {
+      if (!Array.isArray(competitions) || !currentSaveId) return;
+      const seasonLabel = computeCurrentSeasonLabel();
+      if (!seasonLabel) return;
+
+      competitions.forEach(comp => {
+        if (comp.standing !== 'Winner' || !comp.name) return;
+        const key = `trophyCelebrated:${currentSaveId}:${seasonLabel}:${comp.name}`;
+        let alreadyCelebrated = false;
+        try { alreadyCelebrated = localStorage.getItem(key) === '1'; } catch (e) { alreadyCelebrated = false; }
+        if (alreadyCelebrated) return;
+
+        try { localStorage.setItem(key, '1'); } catch (e) { /* no persistence — will just re-offer next sync */ }
+        trophyWinPopupQueue.push(comp.name);
+      });
+
+      maybeShowNextTrophyWinPopup();
+    }
+
+    // Settings panel "🎉 Preview" button — runs the exact same render path
+    // as a real win (queue + maybeShowNextTrophyWinPopup), just skipping
+    // the "Winner" detection and localStorage dedup above, so nothing
+    // about this is recorded as a real celebration.
+    function testTrophyWinPopup() {
+      // Replaces whatever's showing/queued rather than appending — clicking
+      // Preview repeatedly used to stack up extra queued popups (each click
+      // added one, but only one can show at a time), so closing one just
+      // revealed another a moment later, looking like Continue was broken.
+      const existing = document.getElementById('trophy-win-dialog');
+      if (existing && existing.open) existing.close();
+      trophyWinPopupShowing = false;
+      trophyWinPopupQueue = [getPrimaryLeagueName() || 'FA Cup'];
+      maybeShowNextTrophyWinPopup();
+    }
+
+    // Called after checkForNewTrophyWins, on closing the current popup,
+    // and on every Home render (in case an earlier attempt was blocked by
+    // another dialog — e.g. the season review/overview or youth reminder
+    // dialogs that can also fire right at a season boundary).
+    function maybeShowNextTrophyWinPopup() {
+      if (trophyWinPopupShowing || trophyWinPopupQueue.length === 0) return;
+      if (document.querySelector('dialog[open]')) return;
+
+      const compName = trophyWinPopupQueue.shift();
+      trophyWinPopupShowing = true;
+
+      const teamName = getMostCommonClubName() || 'My Club';
+      const displayName = normalizeCompetitionName(compName) || compName;
+      const titleEl = document.getElementById('trophy-win-title');
+      if (titleEl) titleEl.textContent = `${teamName} ${displayName} Champions`;
+
+      const imgEl = document.getElementById('trophy-win-image');
+      const liftUrl = getCompetitionTrophyLiftUrl(compName);
+      if (imgEl) {
+        imgEl.style.display = liftUrl ? '' : 'none';
+        if (liftUrl) imgEl.src = liftUrl;
+      }
+
+      const dialog = document.getElementById('trophy-win-dialog');
+      if (dialog && !dialog.open) dialog.showModal();
+      spawnTrophyWinConfetti();
+    }
+
+    function spawnTrophyWinConfetti() {
+      const container = document.getElementById('trophy-win-confetti-container');
+      if (!container) return;
+      const colors = ['#ffd700', '#00ff87', '#58a6ff', '#f778ba', '#ffa657'];
+      for (let i = 0; i < 60; i++) {
+        const piece = document.createElement('div');
+        piece.className = 'confetti-piece';
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.background = colors[i % colors.length];
+        piece.style.animationDuration = `${1.4 + Math.random() * 1.2}s`;
+        piece.style.animationDelay = `${Math.random() * 0.5}s`;
+        container.appendChild(piece);
+        setTimeout(() => piece.remove(), 3200);
+      }
+    }
+
+    function closeTrophyWinDialog() {
+      const dialog = document.getElementById('trophy-win-dialog');
+      if (dialog && dialog.open) dialog.close();
+      trophyWinPopupShowing = false;
+      // Small pause before the next queued trophy (a rare multi-trophy
+      // sync) so it reads as a new moment, not the same dialog twitching.
+      setTimeout(maybeShowNextTrophyWinPopup, 400);
+    }
+
     // Small inline zigzag-trend icon used instead of an emoji for
     // promoted/relegated headlines — 'up' green for promotion, 'down' red
     // for relegation, with an arrowhead at the trailing end.
@@ -8204,7 +8750,7 @@
       const realNameByTier = {};
       d.league_history.forEach(h => { realNameByTier[h.tier] = h.tier_name; });
       const historyChart = d.league_history.length > 1 ? buildLeagueHistoryChartSvg(d.league_history, realNameByTier) : '';
-      const fullTable = (d.standings && d.standings.length > 0) ? buildStandingsTableHtml(d.standings, d.club_name) : '';
+      const fullTable = (d.standings && d.standings.length > 0) ? buildStandingsTableHtml(d.standings, d.club_name, l.comp_name, d.standings.length) : '';
 
       return `
         <div class="season-overview-title" style="font-size:20px;">${competitionNameWithLogo(l.comp_name, normalizeCompetitionName(l.comp_name), 26)}</div>
@@ -8230,7 +8776,7 @@
           ${d.other_competitions.map(c => `
             <div class="season-overview-comp-row">
               <span>${competitionNameWithLogo(c.comp_name, normalizeCompetitionName(c.comp_name))}</span>
-              <span class="${c.standing === 'Winner' ? 'won' : ''}">${c.standing === 'Winner' ? '🏆 Winner' : c.standing}</span>
+              <span class="${c.standing === 'Winner' ? 'won' : ''}" style="${/^Eliminated/.test(c.standing || '') ? 'color: #ff4d4d; font-weight: 700;' : ''}">${c.standing === 'Winner' ? '🏆 Winner' : c.standing}</span>
             </div>
           `).join('')}
         </div>
@@ -8658,6 +9204,7 @@
 
     function renderHomeDashboard() {
       renderHomeHeader();
+      maybeShowNextTrophyWinPopup(); // retry a queued trophy popup that got blocked by another dialog earlier
       renderYouthModeWarning();
       renderYouthModeDangerZone();
       renderSquadAgeProfile();
