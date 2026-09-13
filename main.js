@@ -691,6 +691,18 @@ function importCalendarMatches(calendarPayload) {
       if (db.getRowsModified() > 0 && activeSaveId) {
         detectMatchGoalNews(activeSaveId, currentSeasonId, match.date || '', match.competition || '', match.opponent || '');
         detectStreakNews(activeSaveId, currentSeasonId);
+
+        // "Once a matchweek" news curation — only a completed PRIMARY
+        // LEAGUE fixture counts as a matchweek boundary (cup rounds
+        // don't), matching this app's existing "matchweek" vocabulary
+        // (see buildFixtureCardBodyHtml in index.html, which counts the
+        // same way client-side).
+        if (findPyramidTierServer(match.competition)) {
+          const safeCompetition = String(match.competition).replace(/'/g, "''");
+          const matchweekRes = db.exec(`SELECT COUNT(*) FROM matches WHERE season_id = ${currentSeasonId} AND competition = '${safeCompetition}';`);
+          const matchweek = matchweekRes.length > 0 ? matchweekRes[0].values[0][0] : null;
+          curateNewsEditionIfNeeded(activeSaveId, currentSeasonId, matchweek);
+        }
       }
     });
   } finally {
@@ -2259,25 +2271,89 @@ function recordNewsItem(saveId, { seasonId, newsType, headline, body, playerId, 
       eventDate ? normalizeDateForCompare(eventDate) : null, dedupeKey]);
 }
 
-// News feed for the Home dashboard's News tab, most recent event first.
-// Joins players for a display name since news_items only stores
-// player_id — a player who's since left the club can still be named.
-function getNewsItems(saveId = activeSaveId, limit = 30) {
-  if (!db || !saveId) return [];
-  const res = db.exec(`
-    SELECT n.news_type, n.headline, n.body, n.player_id, p.name, n.team_name, n.event_date, n.created_at
+// Rough "how newsworthy is this" ordering used to pick a matchweek's (up
+// to) 3 stories out of whatever's pending (see curateNewsEditionIfNeeded)
+// — higher sorts first. Ties (including any news_type not listed here)
+// fall back to most recent first.
+const NEWS_TYPE_PRIORITY = {
+  competition_win: 100,
+  hat_trick: 90,
+  race_lead_change: 80,
+  player_of_month: 75,
+  motm: 70,
+  transfer: 65,
+  new_captain: 60,
+  youth_promotion: 55,
+  win_streak: 50,
+  unbeaten_streak: 48,
+  brace: 45,
+  milestone: 40,
+  contract_signed: 35,
+  injury_recovery: 25,
+  injury: 20
+};
+
+// Groups whatever news_items are still pending (edition_id IS NULL) into
+// a fresh "edition" of up to 3 stories, ranked by NEWS_TYPE_PRIORITY then
+// recency — called once per matchweek (see the primary-league-fixture
+// check in importCalendarMatches), not on every sync, per the user's
+// ask for a curated weekly drop rather than a running feed. Anything
+// pending but not picked stays pending and is reconsidered next
+// matchweek alongside whatever's new by then — nothing is ever dropped
+// silently, just possibly delayed behind more newsworthy stories.
+function curateNewsEditionIfNeeded(saveId, seasonId, matchweek) {
+  if (!db || !saveId) return;
+  const pendingRes = db.exec(`SELECT id, news_type, event_date FROM news_items WHERE save_id = ${saveId} AND edition_id IS NULL;`);
+  const pending = pendingRes.length > 0 ? pendingRes[0].values : [];
+  if (pending.length === 0) return;
+
+  const ranked = pending
+    .map(([id, newsType, eventDate]) => ({ id, priority: NEWS_TYPE_PRIORITY[newsType] || 10, eventDate: eventDate || '' }))
+    .sort((a, b) => (b.priority - a.priority) || (b.eventDate.localeCompare(a.eventDate)))
+    .slice(0, 3);
+
+  db.run(`INSERT INTO news_editions (save_id, season_id, matchweek) VALUES (?, ?, ?);`, [saveId, seasonId || null, matchweek || null]);
+  const editionIdRes = db.exec('SELECT last_insert_rowid();');
+  const editionId = editionIdRes[0].values[0][0];
+
+  const assignStmt = db.prepare(`UPDATE news_items SET edition_id = ? WHERE id = ?;`);
+  try {
+    ranked.forEach(({ id }) => assignStmt.run([editionId, id]));
+  } finally {
+    assignStmt.free();
+  }
+  saveDatabaseToDisk();
+}
+
+// The single most recent edition for the News tab — the carousel of (up
+// to) 3 stories plus whether it's been viewed yet (drives the News tab's
+// flashing indicator in index.html, cleared via markNewsEditionRead).
+function getLatestNewsEdition(saveId = activeSaveId) {
+  if (!db || !saveId) return null;
+  const editionRes = db.exec(`SELECT id, matchweek, is_read, created_at FROM news_editions WHERE save_id = ${saveId} ORDER BY id DESC LIMIT 1;`);
+  if (editionRes.length === 0 || editionRes[0].values.length === 0) return null;
+  const [id, matchweek, isRead, createdAt] = editionRes[0].values[0];
+
+  const itemsRes = db.exec(`
+    SELECT n.news_type, n.headline, n.body, n.player_id, p.name, n.team_name, n.event_date
     FROM news_items n
     LEFT JOIN players p ON p.player_id = n.player_id
-    WHERE n.save_id = ${saveId}
-    ORDER BY n.event_date DESC, n.id DESC
-    LIMIT ${parseInt(limit, 10) || 30};
+    WHERE n.edition_id = ${id}
+    ORDER BY n.event_date DESC, n.id DESC;
   `);
-  if (res.length === 0) return [];
-  return res[0].values.map(row => ({
+  const items = itemsRes.length > 0 ? itemsRes[0].values.map(row => ({
     news_type: row[0], headline: row[1], body: row[2],
-    player_id: row[3], player_name: row[4], team_name: row[5],
-    event_date: row[6], created_at: row[7]
-  }));
+    player_id: row[3], player_name: row[4], team_name: row[5], event_date: row[6]
+  })) : [];
+
+  return { edition: { id, matchweek, is_read: !!isRead, created_at: createdAt }, items };
+}
+
+function markNewsEditionRead(editionId) {
+  if (!db || !editionId) return { success: false };
+  db.run(`UPDATE news_editions SET is_read = 1 WHERE id = ?;`, [editionId]);
+  saveDatabaseToDisk();
+  return { success: true };
 }
 
 // Hat-trick/brace detection for a fixture that just completed — only
@@ -5063,7 +5139,8 @@ ipcMain.handle('dismiss-may-reminder', (_event, saveId, seasonId) => dismissMayR
 ipcMain.handle('get-season-overview-preview', (_event, saveId) => getSeasonOverviewPreview(saveId));
 ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => exportSeasonOverviewPdf(suggestedFileName));
 ipcMain.handle('get-match-events', (_event, seasonId, matchDate, competition, opponent) => getMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent));
-ipcMain.handle('get-news-items', (_event, saveId, limit) => getNewsItems(saveId || activeSaveId, limit));
+ipcMain.handle('get-latest-news-edition', (_event, saveId) => getLatestNewsEdition(saveId || activeSaveId));
+ipcMain.handle('mark-news-edition-read', (_event, editionId) => markNewsEditionRead(editionId));
 ipcMain.handle('get-opponent-roster-for-match', (_event, seasonId, opponentTeamName) => getOpponentRosterForMatch(seasonId || currentSeasonId, opponentTeamName));
 ipcMain.handle('save-match-events', (_event, seasonId, matchDate, competition, opponent, events) => saveMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent, events));
 

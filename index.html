@@ -86,17 +86,29 @@
 
     /* Calendar tab — one card per fixture, same visual language as the
        Home dashboard's match card (see buildFixtureCardBodyHtml). */
-    /* Home dashboard News feed cards (see renderHomeNewsFeed) — styled
-       like a small news clipping/tweet: a square generic image (or
-       emoji fallback) on the left, headline + date on the right. */
-    .news-feed-list { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
-    .news-card { display: flex; align-items: flex-start; gap: 10px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 12px; text-align: left; }
-    .news-card-image { width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px; overflow: hidden; background: var(--card-bg); display: flex; align-items: center; justify-content: center; }
-    .news-card-image img { width: 100%; height: 100%; object-fit: cover; }
-    .news-card-emoji { width: 100%; height: 100%; align-items: center; justify-content: center; font-size: 18px; }
-    .news-card-body { flex: 1; min-width: 0; }
-    .news-card-headline { font-size: 14px; font-weight: 600; line-height: 1.35; }
-    .news-card-date { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+    /* Home dashboard News feed — one full-bleed story fills the whole
+       card (see renderNewsStory), styled like a tweet/story: a generic
+       image (or a big emoji over a gradient fallback, until real
+       artwork exists for that news type) with the headline overlaid at
+       the bottom. Dot indicators above pick between an edition's up to
+       3 stories, Instagram-story style. */
+    .news-story-dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 10px; }
+    .news-story-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-color); cursor: pointer; transition: background 0.15s, transform 0.15s; }
+    .news-story-dot.active { background: var(--accent-color); transform: scale(1.3); }
+    .news-story { position: relative; height: 320px; border-radius: 12px; overflow: hidden; background: linear-gradient(160deg, var(--card-bg), var(--bg-color)); }
+    .news-story-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .news-story-emoji-fallback { position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 84px; }
+    .news-story-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 36px 18px 16px; background: linear-gradient(to top, rgba(0,0,0,0.88), rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%); }
+    .news-story-headline { color: #fff; font-size: 18px; font-weight: 700; line-height: 1.35; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+    .news-story-date { color: rgba(255,255,255,0.75); font-size: 12px; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+    /* News tab flash — an unread edition (see setNewsTabUnread) pulses
+       the button until the user actually opens News and views it. */
+    @keyframes news-tab-flash {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 99, 99, 0.55); }
+      50% { box-shadow: 0 0 0 6px rgba(255, 99, 99, 0); }
+    }
+    .home-toggle-btn.has-unread { background: #d13b3b; color: #fff; border-color: #d13b3b; animation: news-tab-flash 1.4s ease-in-out infinite; }
 
     .calendar-fixture-list { display: flex; flex-direction: column; gap: 10px; }
     /* Two-column completed/upcoming split (replaces the old single-column
@@ -6798,14 +6810,15 @@
 
     // ------------------------------------------------------------------
     // Home dashboard News feed (the match card's 3rd tab, see
-    // setHomeMatchCardView) — auto-generated headlines from main.js'
-    // news detectors (hat-tricks, MOTM, injuries, transfers, race-leader
-    // changes, etc. — see news_items in schema.sql). Rendered as small
-    // news-clipping/tweet-style cards: a generic image per news type on
-    // the left (falling back to a plain emoji badge until real generated
-    // artwork exists for that type — same onerror-swap pattern already
-    // used for club/competition logos elsewhere in this app), headline
-    // text, and the in-game date.
+    // setHomeMatchCardView) — a curated "edition" of up to 3 stories
+    // published once per matchweek (see curateNewsEditionIfNeeded in
+    // main.js), not a running list. Rendered as one full-bleed story at
+    // a time — a generic image per news type filling the whole card
+    // (falling back to a big centered emoji + gradient until real
+    // generated artwork exists for that type, same onerror-swap pattern
+    // already used for club/competition logos elsewhere in this app)
+    // with the headline overlaid at the bottom like a tweet/story card —
+    // with dot indicators up top to flip between this edition's stories.
     // ------------------------------------------------------------------
     const NEWS_TYPE_META = {
       hat_trick: { emoji: '🎩' },
@@ -6831,47 +6844,94 @@
       return `assets/news/${newsType}.png`;
     }
 
-    function newsCardHtml(item) {
-      const meta = NEWS_TYPE_META[item.news_type] || { emoji: '📰' };
-      const dateLabel = item.event_date ? formatDateMMDDYYYY(item.event_date) : '';
-      // Every headline from main.js's news detectors leads with exactly
-      // one emoji (the same one this card's badge already shows) — strip
-      // it here so the card doesn't show it twice.
-      const headlineText = item.headline.replace(/^\S+\s+/, '');
-      return `
-        <div class="news-card">
-          <div class="news-card-image">
-            <img src="${getNewsImageUrl(item.news_type)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-            <div class="news-card-emoji" style="display:none;">${meta.emoji}</div>
-          </div>
-          <div class="news-card-body">
-            <div class="news-card-headline">${headlineText}</div>
-            ${dateLabel ? `<div class="news-card-date">${dateLabel}</div>` : ''}
-          </div>
-        </div>
-      `;
-    }
+    // The latest edition fetched by renderHomeNewsFeed ({ edition, items
+    // }, or null) plus which of its stories is currently on screen —
+    // module-level so the dot click handlers (wired fresh on every
+    // renderNewsStory call) can flip between stories without re-fetching.
+    let homeNewsEdition = null;
+    let homeNewsStoryIndex = 0;
 
     function renderHomeNewsFeed() {
       const container = document.getElementById('home-upcoming-match-body');
       if (!container) return;
       container.innerHTML = `<div class="empty-state" style="padding: 12px;">Loading…</div>`;
-      if (!window.api || !window.api.getNewsItems) {
+      if (!window.api || !window.api.getLatestNewsEdition) {
         container.innerHTML = `<div class="empty-state" style="padding: 12px;">News isn't available yet.</div>`;
         return;
       }
-      window.api.getNewsItems(null, 12).then(items => {
+      window.api.getLatestNewsEdition(null).then(result => {
         // The card may have switched away from News (or re-rendered
         // again) before this resolved — bail rather than clobber
         // whatever's showing now.
         if (homeMatchCardMode !== 'news') return;
         const el = document.getElementById('home-upcoming-match-body');
         if (!el) return;
-        if (!items || items.length === 0) {
-          el.innerHTML = `<div class="empty-state" style="padding: 12px;">No news yet — check back after your next sync.</div>`;
+        homeNewsEdition = result;
+        if (!result || !result.items || result.items.length === 0) {
+          el.innerHTML = `<div class="empty-state" style="padding: 12px;">No news yet — check back after this week's match.</div>`;
           return;
         }
-        el.innerHTML = `<div class="news-feed-list">${items.map(newsCardHtml).join('')}</div>`;
+        homeNewsStoryIndex = 0;
+        renderNewsStory();
+        // Viewing the edition is what clears its unread state — not just
+        // it existing — so the tab keeps flashing until the user actually
+        // looks, then stays quiet until the NEXT matchweek's edition.
+        if (!result.edition.is_read) {
+          window.api.markNewsEditionRead(result.edition.id);
+          setNewsTabUnread(false);
+        }
+      });
+    }
+
+    function renderNewsStory() {
+      const el = document.getElementById('home-upcoming-match-body');
+      if (!el || !homeNewsEdition || !homeNewsEdition.items.length) return;
+      const items = homeNewsEdition.items;
+      const idx = Math.max(0, Math.min(homeNewsStoryIndex, items.length - 1));
+      const item = items[idx];
+      const meta = NEWS_TYPE_META[item.news_type] || { emoji: '📰' };
+      const dateLabel = item.event_date ? formatDateMMDDYYYY(item.event_date) : '';
+      // Every headline from main.js's news detectors leads with exactly
+      // one emoji (the same one this story's fallback badge already
+      // shows) — strip it here so it doesn't show twice.
+      const headlineText = item.headline.replace(/^\S+\s+/, '');
+
+      const dotsHtml = items.map((_, i) => `<span class="news-story-dot${i === idx ? ' active' : ''}" data-idx="${i}"></span>`).join('');
+
+      el.innerHTML = `
+        <div class="news-story-dots">${dotsHtml}</div>
+        <div class="news-story">
+          <img class="news-story-img" src="${getNewsImageUrl(item.news_type)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+          <div class="news-story-emoji-fallback" style="display:none;">${meta.emoji}</div>
+          <div class="news-story-overlay">
+            <div class="news-story-headline">${headlineText}</div>
+            ${dateLabel ? `<div class="news-story-date">${dateLabel}</div>` : ''}
+          </div>
+        </div>
+      `;
+      el.querySelectorAll('.news-story-dot').forEach(dot => {
+        dot.onclick = (ev) => {
+          ev.stopPropagation();
+          homeNewsStoryIndex = parseInt(dot.dataset.idx, 10);
+          renderNewsStory();
+        };
+      });
+    }
+
+    // Toggles the News tab's flashing/highlighted state (see .has-unread
+    // in the CSS) — called on every dashboard render (see
+    // renderHomeDashboard) so a new edition gets noticed even while the
+    // user's looking at Upcoming/Last Result, not just when they happen
+    // to click into News.
+    function setNewsTabUnread(isUnread) {
+      const btn = document.getElementById('home-match-card-news-btn');
+      if (btn) btn.classList.toggle('has-unread', isUnread);
+    }
+
+    function refreshNewsUnreadIndicator() {
+      if (!window.api || !window.api.getLatestNewsEdition) return;
+      window.api.getLatestNewsEdition(null).then(result => {
+        setNewsTabUnread(!!(result && result.edition && !result.edition.is_read));
       });
     }
 
@@ -10473,6 +10533,7 @@
       renderSquadAgeProfile();
       renderInjuryReport();
       renderUpcomingMatchWidget();
+      refreshNewsUnreadIndicator();
       renderLeagueTableWidget();
       renderCaptainWidget();
       renderTeamRecordWidgetHome();
