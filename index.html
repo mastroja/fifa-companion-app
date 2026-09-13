@@ -86,6 +86,18 @@
 
     /* Calendar tab — one card per fixture, same visual language as the
        Home dashboard's match card (see buildFixtureCardBodyHtml). */
+    /* Home dashboard News feed cards (see renderHomeNewsFeed) — styled
+       like a small news clipping/tweet: a square generic image (or
+       emoji fallback) on the left, headline + date on the right. */
+    .news-feed-list { display: flex; flex-direction: column; gap: 10px; max-height: 360px; overflow-y: auto; padding-right: 4px; }
+    .news-card { display: flex; align-items: flex-start; gap: 10px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 10px; padding: 10px 12px; text-align: left; }
+    .news-card-image { width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px; overflow: hidden; background: var(--card-bg); display: flex; align-items: center; justify-content: center; }
+    .news-card-image img { width: 100%; height: 100%; object-fit: cover; }
+    .news-card-emoji { width: 100%; height: 100%; align-items: center; justify-content: center; font-size: 18px; }
+    .news-card-body { flex: 1; min-width: 0; }
+    .news-card-headline { font-size: 14px; font-weight: 600; line-height: 1.35; }
+    .news-card-date { font-size: 11px; color: var(--text-dim); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+
     .calendar-fixture-list { display: flex; flex-direction: column; gap: 10px; }
     /* Two-column completed/upcoming split (replaces the old single-column
        list + All/Upcoming/Completed dropdown) — each column is narrower
@@ -1053,8 +1065,9 @@
         <h3 style="position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center;">
           <span id="home-match-card-title">Upcoming Match</span>
           <div class="home-toggle" id="home-match-card-toggle" style="display: none;">
-            <button class="home-toggle-btn active" id="home-match-card-upcoming-btn" onclick="event.stopPropagation(); setHomeMatchCardView(false)">Upcoming</button>
-            <button class="home-toggle-btn" id="home-match-card-last-btn" onclick="event.stopPropagation(); setHomeMatchCardView(true)">Last Result</button>
+            <button class="home-toggle-btn active" id="home-match-card-upcoming-btn" onclick="event.stopPropagation(); setHomeMatchCardView('upcoming')">Upcoming</button>
+            <button class="home-toggle-btn" id="home-match-card-last-btn" onclick="event.stopPropagation(); setHomeMatchCardView('last')">Last Result</button>
+            <button class="home-toggle-btn" id="home-match-card-news-btn" onclick="event.stopPropagation(); setHomeMatchCardView('news')">News</button>
           </div>
         </h3>
         <div id="home-upcoming-match-body" style="position: relative; z-index: 1;"></div>
@@ -6586,15 +6599,16 @@
       }).join('');
     }
 
-    // Set by the card's header tabs — switches between the next fixture
-    // and the most recently played result on the same Home dashboard
-    // card, without triggering the card's own whole-surface
-    // onclick="switchTab('calendar')" (stopped via event.stopPropagation()
-    // on each tab button, same pattern as toggleLeagueTableExpanded).
-    let homeMatchCardShowingLast = false;
+    // Set by the card's header tabs — switches between the next fixture,
+    // the most recently played result, and the News feed, all on the
+    // same Home dashboard card, without triggering the card's own
+    // whole-surface onclick="switchTab('calendar')" (stopped via
+    // event.stopPropagation() on each tab button, same pattern as
+    // toggleLeagueTableExpanded).
+    let homeMatchCardMode = 'upcoming'; // 'upcoming' | 'last' | 'news'
 
-    function setHomeMatchCardView(showLast) {
-      homeMatchCardShowingLast = showLast;
+    function setHomeMatchCardView(mode) {
+      homeMatchCardMode = mode;
       renderUpcomingMatchWidget();
     }
 
@@ -6713,18 +6727,33 @@
 
       const watermarkEl = document.getElementById('home-upcoming-match-watermark');
 
-      // Only worth offering the toggle once there's actually something on
-      // both sides to flip between.
-      const showLast = homeMatchCardShowingLast && !!lastPlayed;
+      // Falls back to Upcoming if Last Result was selected but nothing's
+      // been played yet — News has no such data dependency, so it's
+      // always available once selected.
+      const mode = (homeMatchCardMode === 'last' && !lastPlayed) ? 'upcoming' : homeMatchCardMode;
+      const showLast = mode === 'last';
 
       const titleEl = document.getElementById('home-match-card-title');
-      if (titleEl) titleEl.textContent = showLast ? 'Last Result' : 'Upcoming Match';
+      if (titleEl) titleEl.textContent = mode === 'news' ? 'News' : (showLast ? 'Last Result' : 'Upcoming Match');
 
       const toggleGroup = document.getElementById('home-match-card-toggle');
       if (toggleGroup) {
-        toggleGroup.style.display = (upcoming && lastPlayed) ? 'flex' : 'none';
-        document.getElementById('home-match-card-upcoming-btn').classList.toggle('active', !showLast);
-        document.getElementById('home-match-card-last-btn').classList.toggle('active', showLast);
+        // Always offer the toggle now that News is always a real option,
+        // regardless of whether there's an upcoming fixture or a result
+        // yet — only the Last Result button itself hides when there's
+        // truly nothing played yet.
+        toggleGroup.style.display = 'flex';
+        document.getElementById('home-match-card-upcoming-btn').classList.toggle('active', mode === 'upcoming');
+        const lastBtn = document.getElementById('home-match-card-last-btn');
+        lastBtn.classList.toggle('active', mode === 'last');
+        lastBtn.style.display = lastPlayed ? '' : 'none';
+        document.getElementById('home-match-card-news-btn').classList.toggle('active', mode === 'news');
+      }
+
+      if (mode === 'news') {
+        if (watermarkEl) watermarkEl.style.backgroundImage = '';
+        renderHomeNewsFeed();
+        return;
       }
 
       const match = showLast ? lastPlayed : upcoming;
@@ -6765,6 +6794,85 @@
           `;
         });
       }
+    }
+
+    // ------------------------------------------------------------------
+    // Home dashboard News feed (the match card's 3rd tab, see
+    // setHomeMatchCardView) — auto-generated headlines from main.js'
+    // news detectors (hat-tricks, MOTM, injuries, transfers, race-leader
+    // changes, etc. — see news_items in schema.sql). Rendered as small
+    // news-clipping/tweet-style cards: a generic image per news type on
+    // the left (falling back to a plain emoji badge until real generated
+    // artwork exists for that type — same onerror-swap pattern already
+    // used for club/competition logos elsewhere in this app), headline
+    // text, and the in-game date.
+    // ------------------------------------------------------------------
+    const NEWS_TYPE_META = {
+      hat_trick: { emoji: '🎩' },
+      brace: { emoji: '⚽' },
+      motm: { emoji: '⭐' },
+      player_of_month: { emoji: '🌟' },
+      injury: { emoji: '🚑' },
+      injury_recovery: { emoji: '✅' },
+      competition_win: { emoji: '🏆' },
+      race_lead_change: { emoji: '🏁' },
+      transfer: { emoji: '💰' },
+      win_streak: { emoji: '🔥' },
+      unbeaten_streak: { emoji: '🛡️' },
+      milestone: { emoji: '🎖️' },
+      contract_signed: { emoji: '✍️' },
+      new_captain: { emoji: '🎖️' },
+      youth_promotion: { emoji: '🌱' }
+    };
+
+    // Drop real artwork at assets/news/<news_type>.png (matching the keys
+    // in NEWS_TYPE_META above) to replace the emoji fallback for that type.
+    function getNewsImageUrl(newsType) {
+      return `assets/news/${newsType}.png`;
+    }
+
+    function newsCardHtml(item) {
+      const meta = NEWS_TYPE_META[item.news_type] || { emoji: '📰' };
+      const dateLabel = item.event_date ? formatDateMMDDYYYY(item.event_date) : '';
+      // Every headline from main.js's news detectors leads with exactly
+      // one emoji (the same one this card's badge already shows) — strip
+      // it here so the card doesn't show it twice.
+      const headlineText = item.headline.replace(/^\S+\s+/, '');
+      return `
+        <div class="news-card">
+          <div class="news-card-image">
+            <img src="${getNewsImageUrl(item.news_type)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+            <div class="news-card-emoji" style="display:none;">${meta.emoji}</div>
+          </div>
+          <div class="news-card-body">
+            <div class="news-card-headline">${headlineText}</div>
+            ${dateLabel ? `<div class="news-card-date">${dateLabel}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderHomeNewsFeed() {
+      const container = document.getElementById('home-upcoming-match-body');
+      if (!container) return;
+      container.innerHTML = `<div class="empty-state" style="padding: 12px;">Loading…</div>`;
+      if (!window.api || !window.api.getNewsItems) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">News isn't available yet.</div>`;
+        return;
+      }
+      window.api.getNewsItems(null, 12).then(items => {
+        // The card may have switched away from News (or re-rendered
+        // again) before this resolved — bail rather than clobber
+        // whatever's showing now.
+        if (homeMatchCardMode !== 'news') return;
+        const el = document.getElementById('home-upcoming-match-body');
+        if (!el) return;
+        if (!items || items.length === 0) {
+          el.innerHTML = `<div class="empty-state" style="padding: 12px;">No news yet — check back after your next sync.</div>`;
+          return;
+        }
+        el.innerHTML = `<div class="news-feed-list">${items.map(newsCardHtml).join('')}</div>`;
+      });
     }
 
     // [{ rank, team_name, played, wins, draws, losses, goals_for, goals_against, points }],
