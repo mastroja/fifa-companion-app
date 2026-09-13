@@ -108,4 +108,4 @@ log("10. PlayerCaptureStart() returned successfully — if the game is still run
 log("    Check the default output directory mentioned in Live Editor's docs, and report back what you find (or don't find).")
 
 io.close(file)
-LOGGER:LogInfo("EA FC Companion: PlayerCapture diagnostic complete, see " .. out_path)
+LOGGER:LogInfo("FIFA Analytics: PlayerCapture diagnostic complete, see " .. out_path)

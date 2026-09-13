@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('api', {
   getAllTimeSquad: () => ipcRenderer.invoke('get-all-time-squad'),
   getPastPlayers: () => ipcRenderer.invoke('get-past-players'),
   getPlayerHistory: (playerId) => ipcRenderer.invoke('get-player-history', playerId),
-  triggerRefresh: () => ipcRenderer.invoke('trigger-refresh'),
+  triggerRefresh: (isManual) => ipcRenderer.invoke('trigger-refresh', isManual),
   getCareerTotals: () => ipcRenderer.invoke('get-career-totals'),
   getManagerPPG: () => ipcRenderer.invoke('get-manager-ppg'),
   getTeamRecordSeasons: () => ipcRenderer.invoke('get-team-record-seasons'),
@@ -59,6 +59,9 @@ contextBridge.exposeInMainWorld('api', {
   exportSeasonOverviewPdf: (suggestedFileName) => ipcRenderer.invoke('export-season-overview-pdf', suggestedFileName),
   getSeasonAlerts: (saveId) => ipcRenderer.invoke('get-season-alerts', saveId),
   dismissMayReminder: (saveId, seasonId) => ipcRenderer.invoke('dismiss-may-reminder', saveId, seasonId),
+  getMatchEvents: (seasonId, matchDate, competition, opponent) => ipcRenderer.invoke('get-match-events', seasonId, matchDate, competition, opponent),
+  getOpponentRosterForMatch: (seasonId, opponentTeamName) => ipcRenderer.invoke('get-opponent-roster-for-match', seasonId, opponentTeamName),
+  saveMatchEvents: (seasonId, matchDate, competition, opponent, events) => ipcRenderer.invoke('save-match-events', seasonId, matchDate, competition, opponent, events),
 
   connectedCareerStatus: () => ipcRenderer.invoke('connected-career-status'),
   connectedCareerJoin: (code, owner) => ipcRenderer.invoke('connected-career-join', code, owner),
