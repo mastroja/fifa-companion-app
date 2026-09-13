@@ -24,3 +24,10 @@ Add more any time; nothing else needs to change. A type with no folder
 | `contract_signed/` | Contract renewal | needed |
 | `new_captain/` | New club captain | ✅ populated |
 | `youth_promotion/` | Youth academy promotion | ✅ populated |
+| `red_card/` | Player sent off | needed (folder exists, empty) |
+| `yellow_card_milestone/` | Every 5th yellow card of the season (suspension risk) | ✅ populated |
+| `notable_goal/` | Generic single-goal highlight — only used to round an edition out to 3 stories when there isn't enough real news that matchweek | ✅ populated |
+| `rivalry_battle/` | Generic "intense battle" filler for a close match (decided by a goal or less) | ✅ populated |
+| `post_match_reaction/` | Generic post-match player reaction/quote filler | ✅ populated |
+
+`notable_goal`/`rivalry_battle`/`post_match_reaction` are the three "generic" types — real match/scorer/scoreline, but not tied to a specific detected achievement. They're ranked lowest in `NEWS_TYPE_PRIORITY` (main.js) so they only ever fill in when the week's real news doesn't already fill all 3 story slots.

@@ -691,6 +691,7 @@ function importCalendarMatches(calendarPayload) {
       if (db.getRowsModified() > 0 && activeSaveId) {
         detectMatchGoalNews(activeSaveId, currentSeasonId, match.date || '', match.competition || '', match.opponent || '');
         detectStreakNews(activeSaveId, currentSeasonId);
+        recordGenericMatchNews(activeSaveId, currentSeasonId, match.date || '', match.competition || '', match.opponent || '', userScore, opponentScore, result);
 
         // "Once a matchweek" news curation — only a completed PRIMARY
         // LEAGUE fixture counts as a matchweek boundary (cup rounds
@@ -1109,15 +1110,27 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
   const opponentPrevByPlayer = new Map();
   if (liveFixture && (liveFixture.opponent || ourClubName)) {
     const teamNames = [liveFixture.opponent, ourClubName].filter(Boolean).map(n => `'${n.replace(/'/g, "''")}'`).join(',');
-    const prevRes = db.exec(`SELECT player_id, goals, assists, motm FROM season_league_stats WHERE season_id = ${seasonId} AND team_name IN (${teamNames});`);
+    const prevRes = db.exec(`SELECT player_id, goals, assists, motm, red_cards FROM season_league_stats WHERE season_id = ${seasonId} AND team_name IN (${teamNames});`);
     if (prevRes.length > 0) {
-      prevRes[0].values.forEach(([playerId, goals, assists, motm]) => {
-        opponentPrevByPlayer.set(playerId, { goals: goals || 0, assists: assists || 0, motm: motm || 0 });
+      prevRes[0].values.forEach(([playerId, goals, assists, motm, redCards]) => {
+        opponentPrevByPlayer.set(playerId, { goals: goals || 0, assists: assists || 0, motm: motm || 0, redCards: redCards || 0 });
       });
     }
   }
   const opponentGoalDeltas = [];
   const opponentAssistDeltas = [];
+
+  // Previous season yellow-card tallies for our OWN squad specifically,
+  // read fresh every sync (NOT gated to a live-fixture window like the
+  // goal/MOTM/red-card diffing above) — the accumulation threshold below
+  // is about the season running total, not which match a booking
+  // happened in, so it has to be checked on every league-stats sync
+  // regardless of whether today's fixture is currently live.
+  const ourPrevYellowByPlayer = new Map();
+  if (ourClubName) {
+    const prevYellowRes = db.exec(`SELECT player_id, yellow_cards FROM season_league_stats WHERE season_id = ${seasonId} AND team_name = '${ourClubName.replace(/'/g, "''")}';`);
+    if (prevYellowRes.length > 0) prevYellowRes[0].values.forEach(([pid, yc]) => ourPrevYellowByPlayer.set(pid, yc || 0));
+  }
 
   // Partial upsert (name/position_id/dob only) so an opponent scorer has
   // a `players` row to join against in match_events — same pattern
@@ -1182,9 +1195,9 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
       // goals/assists, a player can only earn one MOTM per match, so
       // any positive delta is exactly one award, not a count to sum.
       if (liveFixture && activeSaveId && (p.team_name === liveFixture.opponent || (ourClubName && p.team_name === ourClubName))) {
-        const previousMotm = opponentPrevByPlayer.get(p.player_id);
-        if (previousMotm || !seasonHasPriorMatches) {
-          const prevMotm = previousMotm ? previousMotm.motm : 0;
+        const previousStats = opponentPrevByPlayer.get(p.player_id);
+        if (previousStats || !seasonHasPriorMatches) {
+          const prevMotm = previousStats ? previousStats.motm : 0;
           if ((p.motm || 0) > prevMotm) {
             const eventDate = liveFixture.date || syncInGameDate;
             recordNewsItem(activeSaveId, {
@@ -1194,6 +1207,37 @@ function persistLeagueStats(seasonId, leagueStatsPayload) {
             });
             checkPlayerOfMonth(activeSaveId, seasonId, p.player_id, p.name, eventDate);
           }
+
+          // Red card news — same either-side live-fixture window, same
+          // "a player can only get one red per match" single-award logic.
+          const prevRedCards = previousStats ? previousStats.redCards : 0;
+          if ((p.red_cards || 0) > prevRedCards) {
+            const eventDate = liveFixture.date || syncInGameDate;
+            const isOpponent = p.team_name === liveFixture.opponent;
+            const headline = isOpponent
+              ? `🟥 ${p.name || 'Unknown'} (${liveFixture.opponent}) was sent off against your side!`
+              : `😱 ${p.name || 'Unknown'} was sent off — down to 10 men against ${liveFixture.opponent}.`;
+            recordNewsItem(activeSaveId, {
+              seasonId, newsType: 'red_card', playerId: p.player_id, teamName: p.team_name, eventDate, headline,
+              dedupeKey: `red_card:${seasonId}:${eventDate}:${liveFixture.competition || ''}:${liveFixture.opponent || ''}:${p.player_id}`
+            });
+          }
+        }
+      }
+
+      // Yellow-card accumulation (season total crossing a new multiple
+      // of 5 — the classic "one match ban" threshold) — our own squad
+      // only, and only once ourPrevYellowByPlayer actually has a prior
+      // value for this player (an unknown baseline, e.g. the very first
+      // sync this save has ever seen them, isn't a "crossing").
+      if (activeSaveId && ourClubName && p.team_name === ourClubName && ourPrevYellowByPlayer.has(p.player_id)) {
+        const crossed = crossedMultipleOf(ourPrevYellowByPlayer.get(p.player_id), p.yellow_cards || 0, 5);
+        if (crossed) {
+          recordNewsItem(activeSaveId, {
+            seasonId, newsType: 'yellow_card_milestone', playerId: p.player_id, teamName: p.team_name, eventDate: syncInGameDate,
+            headline: `🟨 ${p.name || 'Unknown'} has picked up their ${crossed}th yellow card of the season — suspension risk.`,
+            dedupeKey: `yellow_card_milestone:${p.player_id}:${seasonId}:${crossed}`
+          });
         }
       }
 
@@ -2297,6 +2341,7 @@ function recordNewsItem(saveId, { seasonId, newsType, headline, body, playerId, 
 const NEWS_TYPE_PRIORITY = {
   competition_win: 100,
   hat_trick: 90,
+  red_card: 85,
   race_lead_change: 80,
   player_of_month: 75,
   motm: 70,
@@ -2307,9 +2352,17 @@ const NEWS_TYPE_PRIORITY = {
   unbeaten_streak: 48,
   brace: 45,
   milestone: 40,
+  yellow_card_milestone: 38,
   contract_signed: 35,
   injury_recovery: 25,
-  injury: 20
+  injury: 20,
+  // Generic filler stories (see recordGenericMatchNews) — grounded in a
+  // real just-completed match rather than invented from nothing, but
+  // ranked below every actual detected event so they only ever fill an
+  // edition out to 3 stories when there isn't enough real news that week.
+  notable_goal: 8,
+  rivalry_battle: 6,
+  post_match_reaction: 5
 };
 
 // Groups whatever news_items are still pending (edition_id IS NULL) into
@@ -2450,6 +2503,82 @@ function detectStreakNews(saveId, seasonId) {
   }
 }
 
+// "Generic" filler stories — grounded in the match that just completed
+// (a real scorer, a real scoreline, a real opponent) rather than
+// invented from nothing, but deliberately NOT tied to a specific
+// detected achievement the way hat_trick/motm/etc. are. Ranked lowest
+// in NEWS_TYPE_PRIORITY so curateNewsEditionIfNeeded only ever reaches
+// for these to round an edition out to 3 stories when there isn't
+// enough real news that week — see the user's own framing: "generic
+// stories if there isn't something big to update."
+function recordGenericMatchNews(saveId, seasonId, matchDate, competition, opponent, userScore, opponentScore, result) {
+  if (!db || !saveId || !seasonId) return;
+  const safeOpponent = String(opponent || '').replace(/'/g, "''");
+  const safeCompetition = String(competition || '').replace(/'/g, "''");
+  const safeMatchDate = String(matchDate).replace(/'/g, "''");
+
+  // notable_goal — a random one of OUR scorers from this match (own
+  // goals and opponent goals excluded, same as the hat-trick/brace
+  // grouping), phrased against the real final score. Only fires when we
+  // actually scored — no goal, no story, rather than reaching for a
+  // scoreless placeholder.
+  const scorerRes = db.exec(`
+    SELECT e.player_id, p.name FROM match_events e
+    LEFT JOIN players p ON p.player_id = e.player_id
+    WHERE e.season_id = ${seasonId} AND e.match_date = '${safeMatchDate}'
+      AND e.competition = '${safeCompetition}' AND e.opponent = '${safeOpponent}'
+      AND e.is_opponent_goal = 0 AND e.is_own_goal = 0;
+  `);
+  const scorers = scorerRes.length > 0 ? scorerRes[0].values : [];
+  if (scorers.length > 0) {
+    const [scorerId, scorerName] = scorers[Math.floor(Math.random() * scorers.length)];
+    const resultPhrase = result === 'W' ? `a ${userScore}-${opponentScore} win over ${opponent}`
+      : result === 'D' ? `a ${userScore}-${opponentScore} draw with ${opponent}`
+      : `the ${userScore}-${opponentScore} defeat to ${opponent}`;
+    recordNewsItem(saveId, {
+      seasonId, newsType: 'notable_goal', playerId: scorerId, teamName: opponent, eventDate: matchDate,
+      headline: `⚽ ${scorerName || 'Unknown'} scores in ${resultPhrase}.`,
+      dedupeKey: `notable_goal:${seasonId}:${safeMatchDate}:${safeCompetition}:${safeOpponent}`
+    });
+  }
+
+  // rivalry_battle — any match decided by a goal or less (including a
+  // draw) reads plausibly as "a battle" regardless of which side we're
+  // on. ourClubName may be null on a very early sync; falls back to a
+  // generic subject rather than skipping the story entirely.
+  if (Math.abs(userScore - opponentScore) <= 1) {
+    const ourClubName = getCurrentClubName(seasonId) || 'Your side';
+    recordNewsItem(saveId, {
+      seasonId, newsType: 'rivalry_battle', teamName: opponent, eventDate: matchDate,
+      headline: `⚔️ Intense battle between ${ourClubName} and ${opponent} ends ${userScore}-${opponentScore}.`,
+      dedupeKey: `rivalry_battle:${seasonId}:${safeMatchDate}:${safeCompetition}:${safeOpponent}`
+    });
+  }
+
+  // post_match_reaction — a fabricated but plausible quote, tone matched
+  // to the real result, attributed to a random player actually on the
+  // current squad. The only one of the three that isn't grounded in a
+  // specific real data point beyond "who plays for us and what the
+  // score was" — deliberately the lowest-priority news type of all.
+  const squadRes = db.exec(`
+    SELECT p.player_id, p.name FROM players p
+    JOIN player_season_stats s ON s.player_id = p.player_id
+    WHERE s.season_id = ${seasonId};
+  `);
+  const squad = squadRes.length > 0 ? squadRes[0].values : [];
+  if (squad.length > 0) {
+    const [playerId, playerName] = squad[Math.floor(Math.random() * squad.length)];
+    const reaction = result === 'W' ? `praises the squad's spirit after the win over ${opponent}`
+      : result === 'D' ? `says there's still work to do after the draw with ${opponent}`
+      : `admits performances need to improve after the defeat to ${opponent}`;
+    recordNewsItem(saveId, {
+      seasonId, newsType: 'post_match_reaction', playerId, teamName: opponent, eventDate: matchDate,
+      headline: `🗣️ ${playerName || 'Unknown'} ${reaction}.`,
+      dedupeKey: `post_match_reaction:${seasonId}:${safeMatchDate}:${safeCompetition}:${safeOpponent}`
+    });
+  }
+}
+
 // Player of the Month — per the workaround documented in
 // TODO_v1.7.0-features.md: 2+ MOTM awards attributed to the same
 // in-game month is treated as Player of the Month. Counts this app's
@@ -2476,6 +2605,19 @@ function checkPlayerOfMonth(saveId, seasonId, playerId, playerName, eventDate) {
   }
 }
 
+// Shared by checkSeasonMilestones and the yellow-card accumulation check
+// below — returns the threshold just crossed (e.g. 10, 20, 30 for
+// step=10) if newVal moved into a new multiple of `step` since prevVal,
+// or null if nothing was crossed. null prevVal/undefined both treated as
+// "nothing to cross from" by the caller, not as an implicit 0 — see each
+// call site's own comment for why.
+function crossedMultipleOf(prevVal, newVal, step) {
+  if (newVal < step || newVal === prevVal) return null;
+  const prevMilestone = Math.floor(prevVal / step);
+  const newMilestone = Math.floor(newVal / step);
+  return newMilestone > prevMilestone ? newMilestone * step : null;
+}
+
 // Season-level round-number milestones (every 10 goals/assists/
 // appearances) — deliberately season totals, not full-career, since a
 // true career total needs a separate all-time aggregate query this
@@ -2493,16 +2635,12 @@ function checkSeasonMilestones(saveId, seasonId, playerId, playerName, previous,
     { key: 'appearances', label: 'appearances', emoji: '👕' }
   ];
   checks.forEach(({ key, label, emoji }) => {
-    const prevVal = previous[key] || 0;
-    const newVal = current[key] || 0;
-    if (newVal < 10 || newVal === prevVal) return;
-    const prevMilestone = Math.floor(prevVal / 10);
-    const newMilestone = Math.floor(newVal / 10);
-    if (newMilestone > prevMilestone) {
+    const crossed = crossedMultipleOf(previous[key] || 0, current[key] || 0, 10);
+    if (crossed) {
       recordNewsItem(saveId, {
         seasonId, newsType: 'milestone', playerId, eventDate,
-        headline: `${emoji} ${playerName || 'Unknown'} has reached ${newMilestone * 10} season ${label}!`,
-        dedupeKey: `milestone:${playerId}:${seasonId}:${key}:${newMilestone * 10}`
+        headline: `${emoji} ${playerName || 'Unknown'} has reached ${crossed} season ${label}!`,
+        dedupeKey: `milestone:${playerId}:${seasonId}:${key}:${crossed}`
       });
     }
   });
