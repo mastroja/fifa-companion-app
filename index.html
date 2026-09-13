@@ -87,6 +87,24 @@
     /* Calendar tab — one card per fixture, same visual language as the
        Home dashboard's match card (see buildFixtureCardBodyHtml). */
     .calendar-fixture-list { display: flex; flex-direction: column; gap: 10px; }
+    /* Two-column completed/upcoming split (replaces the old single-column
+       list + All/Upcoming/Completed dropdown) — each column is narrower
+       than the old full-width list, which fits the fixture card content
+       much better since the cards were never designed to stretch that wide. */
+    .calendar-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+    @media (max-width: 900px) {
+      .calendar-columns { grid-template-columns: 1fr; }
+    }
+    .calendar-column-header {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--border-color);
+    }
+    .calendar-column-completed .calendar-column-header { color: var(--text-color); border-bottom-color: var(--accent-color); }
+    .calendar-column-upcoming .calendar-column-header { color: var(--text-dim); border-bottom-color: var(--border-color); }
     .calendar-fixture-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px 20px; position: relative; overflow: hidden; }
     .calendar-fixture-card.is-completed { cursor: pointer; }
     .calendar-fixture-card.is-completed:hover { border-color: var(--accent-color); }
@@ -1334,26 +1352,36 @@
     </div>
 
     <div class="filter-container">
-      <select id="calendar-filter" onchange="filterAndRenderCalendar()">
-        <option value="all">All Fixtures & Results</option>
-        <option value="upcoming">Upcoming Fixtures</option>
-        <option value="completed">Completed Results</option>
-      </select>
-      <input 
-        type="text" 
-        id="calendar-search" 
-        class="search-input" 
-        placeholder="Search opponent or competition..." 
+      <input
+        type="text"
+        id="calendar-search"
+        class="search-input"
+        placeholder="Search opponent or competition..."
         oninput="filterAndRenderCalendar()"
       />
     </div>
 
-    <!-- One card per fixture, same visual style as the Home dashboard's
-         match card (see buildFixtureCardBodyHtml) — a completed fixture's
-         card is clickable to expand its goal-scorer/assister breakdown
-         inline (see toggleCalendarCardExpand), not a popup. -->
-    <div id="calendar-list" class="calendar-fixture-list">
-      <div class="empty-state">No calendar data loaded.</div>
+    <!-- Two side-by-side sections instead of the old single list +
+         Upcoming/Completed/All dropdown: completed results on the left,
+         upcoming fixtures on the right, so both are visible at once
+         without switching a filter. Each card is the same
+         buildFixtureCardBodyHtml style as before (see filterAndRenderCalendar)
+         — a completed fixture's card is still clickable to expand its
+         goal-scorer/assister breakdown inline (see toggleCalendarCardExpand),
+         not a popup. -->
+    <div class="calendar-columns">
+      <div class="calendar-column calendar-column-completed">
+        <h3 class="calendar-column-header">✅ Completed Results</h3>
+        <div id="calendar-list-completed" class="calendar-fixture-list">
+          <div class="empty-state">No calendar data loaded.</div>
+        </div>
+      </div>
+      <div class="calendar-column calendar-column-upcoming">
+        <h3 class="calendar-column-header">📅 Upcoming Fixtures</h3>
+        <div id="calendar-list-upcoming" class="calendar-fixture-list">
+          <div class="empty-state">No calendar data loaded.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1736,46 +1764,16 @@
       });
     }
 
-    function filterAndRenderCalendar() {
-      const filterValue = document.getElementById('calendar-filter').value;
-      const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
-      const container = document.getElementById('calendar-list');
+    // Renders one column's card list into `container`, with expand-panel
+    // ids namespaced by `side` ('completed'/'upcoming') so the two columns
+    // never collide now that both render at once instead of one filtered list.
+    function renderCalendarColumn(container, matches, side) {
       container.innerHTML = '';
-
-      let filtered = currentCalendar.filter(match => {
-        const isCompleted = match.played || match.score !== undefined;
-        if (filterValue === 'upcoming' && isCompleted) return false;
-        if (filterValue === 'completed' && !isCompleted) return false;
-
-        if (searchQuery) {
-          const opponent = (match.opponent || '').toLowerCase();
-          const comp = (match.competition || '').toLowerCase();
-          return opponent.includes(searchQuery) || comp.includes(searchQuery);
-        }
-        return true;
-      });
-
-      // Most recent RESULT on top, soonest UPCOMING fixture on top — not a
-      // single ascending/descending sort, since that needs two different
-      // directions for the played-vs-not halves of the list. Results
-      // block (newest first) always comes before the upcoming block
-      // (soonest first), so scrolling down reads as "what just happened"
-      // → "what's coming up next".
-      const isDone = m => m.played || m.score !== undefined;
-      filtered.sort((a, b) => {
-        const aDone = isDone(a), bDone = isDone(b);
-        if (aDone !== bDone) return aDone ? -1 : 1;
-        const dateA = parseInt(a.date, 10) || 0;
-        const dateB = parseInt(b.date, 10) || 0;
-        return aDone ? dateB - dateA : dateA - dateB;
-      });
-
-      if (filtered.length === 0) {
+      if (matches.length === 0) {
         container.innerHTML = `<div class="empty-state">No fixtures match your criteria.</div>`;
         return;
       }
-
-      filtered.forEach((match, idx) => {
+      matches.forEach((match, idx) => {
         const isCompleted = match.played && match.score;
         const logoUrl = getCompetitionLogoUrl(match.competition);
         const card = document.createElement('div');
@@ -1783,14 +1781,36 @@
         card.innerHTML = (logoUrl ? `<div class="upcoming-match-watermark" style="background-image: url('${logoUrl}');"></div>` : '') +
           `<div class="calendar-fixture-card-content">` +
           buildFixtureCardBodyHtml(match) +
-          (isCompleted ? `<div id="calendar-card-expand-${idx}" class="calendar-fixture-expand" style="display: none;"></div>` : '') +
+          (isCompleted ? `<div id="calendar-card-expand-${side}-${idx}" class="calendar-fixture-expand" style="display: none;"></div>` : '') +
           `</div>`;
         if (isCompleted) {
           card.title = 'Click for goal scorers';
-          card.onclick = () => toggleCalendarCardExpand(idx, match);
+          card.onclick = () => toggleCalendarCardExpand(`${side}-${idx}`, match);
         }
         container.appendChild(card);
       });
+    }
+
+    function filterAndRenderCalendar() {
+      const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
+      const completedContainer = document.getElementById('calendar-list-completed');
+      const upcomingContainer = document.getElementById('calendar-list-upcoming');
+
+      const isDone = m => m.played || m.score !== undefined;
+      let filtered = currentCalendar.filter(match => {
+        if (!searchQuery) return true;
+        const opponent = (match.opponent || '').toLowerCase();
+        const comp = (match.competition || '').toLowerCase();
+        return opponent.includes(searchQuery) || comp.includes(searchQuery);
+      });
+
+      const completed = filtered.filter(isDone)
+        .sort((a, b) => (parseInt(b.date, 10) || 0) - (parseInt(a.date, 10) || 0)); // newest result first
+      const upcoming = filtered.filter(m => !isDone(m))
+        .sort((a, b) => (parseInt(a.date, 10) || 0) - (parseInt(b.date, 10) || 0)); // soonest fixture first
+
+      renderCalendarColumn(completedContainer, completed, 'completed');
+      renderCalendarColumn(upcomingContainer, upcoming, 'upcoming');
     }
 
     // Lazily fetches match_events the first time a card is expanded, then
