@@ -692,6 +692,7 @@ function importCalendarMatches(calendarPayload) {
         detectMatchGoalNews(activeSaveId, currentSeasonId, match.date || '', match.competition || '', match.opponent || '');
         detectStreakNews(activeSaveId, currentSeasonId);
         recordGenericMatchNews(activeSaveId, currentSeasonId, match.date || '', match.competition || '', match.opponent || '', userScore, opponentScore, result);
+        recordMatchAnticipationNews(activeSaveId, currentSeasonId, calendarPayload);
 
         // "Once a matchweek" news curation — only a completed PRIMARY
         // LEAGUE fixture counts as a matchweek boundary (cup rounds
@@ -2356,11 +2357,13 @@ const NEWS_TYPE_PRIORITY = {
   contract_signed: 35,
   injury_recovery: 25,
   injury: 20,
-  // Generic filler stories (see recordGenericMatchNews) — grounded in a
-  // real just-completed match rather than invented from nothing, but
-  // ranked below every actual detected event so they only ever fill an
-  // edition out to 3 stories when there isn't enough real news that week.
+  // Generic filler stories (see recordGenericMatchNews/
+  // recordMatchAnticipationNews) — grounded in a real match rather than
+  // invented from nothing, but ranked below every actual detected event
+  // so they only ever fill an edition out to 3 stories when there isn't
+  // enough real news that week.
   notable_goal: 8,
+  match_anticipation: 7,
   rivalry_battle: 6,
   post_match_reaction: 5
 };
@@ -2577,6 +2580,58 @@ function recordGenericMatchNews(saveId, seasonId, matchDate, competition, oppone
       dedupeKey: `post_match_reaction:${seasonId}:${safeMatchDate}:${safeCompetition}:${safeOpponent}`
     });
   }
+}
+
+function ordinalSuffixServer(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+// Another generic filler (see recordGenericMatchNews for the pattern and
+// NEWS_TYPE_PRIORITY ranking) — but forward-looking rather than about a
+// match that just finished: fires for the next upcoming PRIMARY LEAGUE
+// fixture when the opponent is genuinely close to us in the real table
+// (within 3 places, computed the same way the client sorts standings —
+// points, then goal difference, then goals for), framed as fans
+// anticipating a big six-pointer. Skips silently if the gap is wider
+// than that — a mid-table team hosting the runaway leaders isn't a
+// "close" match, so no story rather than a misleading one. Cup draws
+// are excluded since strength-of-opponent doesn't map to a league table
+// position for them.
+function recordMatchAnticipationNews(saveId, seasonId, calendarPayload) {
+  if (!db || !saveId || !seasonId || !calendarPayload || !Array.isArray(calendarPayload.calendar)) return;
+
+  const upcoming = calendarPayload.calendar
+    .filter(m => !m.played && findPyramidTierServer(m.competition))
+    .sort((a, b) => parseInt(a.date, 10) - parseInt(b.date, 10))[0];
+  if (!upcoming || !upcoming.opponent) return;
+
+  const ourClubName = getCurrentClubName(seasonId);
+  if (!ourClubName) return;
+
+  const standingsRes = db.exec(`SELECT team_name, points, goals_for, goals_against FROM season_standings WHERE season_id = ${seasonId};`);
+  const rows = standingsRes.length > 0 ? standingsRes[0].values : [];
+  if (rows.length === 0) return;
+
+  const ranked = rows
+    .map(([team_name, points, gf, ga]) => ({ team_name, points: points || 0, gd: (gf || 0) - (ga || 0), gf: gf || 0 }))
+    .sort((a, b) => (b.points - a.points) || (b.gd - a.gd) || (b.gf - a.gf));
+
+  const ourIndex = ranked.findIndex(r => r.team_name === ourClubName);
+  const oppIndex = ranked.findIndex(r => r.team_name === upcoming.opponent);
+  if (ourIndex === -1 || oppIndex === -1 || Math.abs(ourIndex - oppIndex) > 3) return;
+
+  recordNewsItem(saveId, {
+    seasonId, newsType: 'match_anticipation', teamName: upcoming.opponent, eventDate: upcoming.date,
+    headline: `👥 Fans buzzing ahead of a huge ${upcoming.competition} clash — ${ourClubName} (${ordinalSuffixServer(ourIndex + 1)}) vs ${upcoming.opponent} (${ordinalSuffixServer(oppIndex + 1)}).`,
+    dedupeKey: `match_anticipation:${seasonId}:${upcoming.date}:${upcoming.competition}:${upcoming.opponent}`
+  });
 }
 
 // Player of the Month — per the workaround documented in

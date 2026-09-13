@@ -29,5 +29,6 @@ Add more any time; nothing else needs to change. A type with no folder
 | `notable_goal/` | Generic single-goal highlight — only used to round an edition out to 3 stories when there isn't enough real news that matchweek | ✅ populated |
 | `rivalry_battle/` | Generic "intense battle" filler for a close match (decided by a goal or less) | ✅ populated |
 | `post_match_reaction/` | Generic post-match player reaction/quote filler | ✅ populated |
+| `match_anticipation/` | Generic "big match coming up" filler — fires for the next upcoming league fixture when the opponent is within 3 places of us in the real table | ✅ populated |
 
-`notable_goal`/`rivalry_battle`/`post_match_reaction` are the three "generic" types — real match/scorer/scoreline, but not tied to a specific detected achievement. They're ranked lowest in `NEWS_TYPE_PRIORITY` (main.js) so they only ever fill in when the week's real news doesn't already fill all 3 story slots.
+`notable_goal`/`rivalry_battle`/`post_match_reaction`/`match_anticipation` are the four "generic" types — real match/scorer/scoreline/table position, but not tied to a specific detected achievement. They're ranked lowest in `NEWS_TYPE_PRIORITY` (main.js) so they only ever fill in when the week's real news doesn't already fill all 3 story slots.
