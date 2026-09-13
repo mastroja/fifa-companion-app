@@ -14,13 +14,13 @@ Add more any time; nothing else needs to change. A type with no folder
 | `motm/` | Man of the Match | ✅ populated |
 | `player_of_month/` | Player of the Month | ✅ populated |
 | `injury/` | New injury | ✅ populated |
-| `injury_recovery/` | Back from injury | needed |
-| `competition_win/` | Won a competition | needed |
+| `injury_recovery/` | Back from injury | ✅ populated |
+| `competition_win/` | Won a competition | ✅ populated |
 | `race_lead_change/` | Golden Boot / Playmaker / Golden Glove / POTY race lead change | ✅ populated |
 | `transfer/` | Notable transfer | ✅ populated |
-| `win_streak/` | Win streak | needed |
+| `win_streak/` | Win streak | ✅ populated |
 | `unbeaten_streak/` | Unbeaten streak | needed |
 | `milestone/` | Season stat milestone | needed |
 | `contract_signed/` | Contract renewal | needed |
-| `new_captain/` | New club captain | needed |
-| `youth_promotion/` | Youth academy promotion | needed |
+| `new_captain/` | New club captain | ✅ populated |
+| `youth_promotion/` | Youth academy promotion | ✅ populated |
