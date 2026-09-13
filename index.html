@@ -6838,10 +6838,24 @@
       youth_promotion: { emoji: '🌱' }
     };
 
-    // Drop real artwork at assets/news/<news_type>.png (matching the keys
-    // in NEWS_TYPE_META above) to replace the emoji fallback for that type.
-    function getNewsImageUrl(newsType) {
-      return `assets/news/${newsType}.png`;
+    // Drop real artwork into assets/news/<news_type>/ (one folder per
+    // key in NEWS_TYPE_META above, e.g. assets/news/hat_trick/) to
+    // replace the emoji fallback for that type — every file already in
+    // that folder is a candidate, picked at random each time a story of
+    // that type is shown, so repeated events don't all show the exact
+    // same picture. Drop more in any time; nothing else has to change.
+    // Resolves to null (caller falls back to the emoji) if that type has
+    // no folder yet, or the folder's empty.
+    async function getRandomNewsImageUrl(newsType) {
+      if (!window.api || !window.api.listNewsImages) return null;
+      try {
+        const files = await window.api.listNewsImages(newsType);
+        if (!files || files.length === 0) return null;
+        const pick = files[Math.floor(Math.random() * files.length)];
+        return `assets/news/${newsType}/${pick}`;
+      } catch (e) {
+        return null;
+      }
     }
 
     // The latest edition fetched by renderHomeNewsFeed ({ edition, items
@@ -6883,7 +6897,7 @@
       });
     }
 
-    function renderNewsStory() {
+    async function renderNewsStory() {
       const el = document.getElementById('home-upcoming-match-body');
       if (!el || !homeNewsEdition || !homeNewsEdition.items.length) return;
       const items = homeNewsEdition.items;
@@ -6896,13 +6910,19 @@
       // shows) — strip it here so it doesn't show twice.
       const headlineText = item.headline.replace(/^\S+\s+/, '');
 
+      const imageUrl = await getRandomNewsImageUrl(item.news_type);
+      // The user may have flipped to a different dot (or left News
+      // entirely) while that lookup was in flight — bail rather than
+      // clobber whatever's on screen now with a stale story's image.
+      if (homeMatchCardMode !== 'news' || homeNewsStoryIndex !== idx) return;
+
       const dotsHtml = items.map((_, i) => `<span class="news-story-dot${i === idx ? ' active' : ''}" data-idx="${i}"></span>`).join('');
 
       el.innerHTML = `
         <div class="news-story-dots">${dotsHtml}</div>
         <div class="news-story">
-          <img class="news-story-img" src="${getNewsImageUrl(item.news_type)}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-          <div class="news-story-emoji-fallback" style="display:none;">${meta.emoji}</div>
+          ${imageUrl ? `<img class="news-story-img" src="${imageUrl}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
+          <div class="news-story-emoji-fallback" style="display:${imageUrl ? 'none' : 'flex'};">${meta.emoji}</div>
           <div class="news-story-overlay">
             <div class="news-story-headline">${headlineText}</div>
             ${dateLabel ? `<div class="news-story-date">${dateLabel}</div>` : ''}

@@ -1,25 +1,26 @@
 # News feed images
 
-Drop generic artwork here to replace the plain emoji badges the News tab
-falls back to (see `NEWS_TYPE_META`/`getNewsImageUrl` in `index.html`).
-One PNG per news type, named exactly as below — anything not present here
-just keeps showing its emoji fallback, so these can be added a few at a
-time.
+One folder per news type, named exactly as below (matching the keys in
+`NEWS_TYPE_META` in `index.html`). Drop as many images as you want into
+a type's folder — the News tab picks one at random each time a story of
+that type is shown, so repeated events don't all show the same picture.
+Add more any time; nothing else needs to change. A type with no folder
+(or an empty one) just falls back to a plain emoji badge.
 
-| File | News type |
-| --- | --- |
-| `hat_trick.png` | Hat-trick |
-| `brace.png` | Brace (2 goals) |
-| `motm.png` | Man of the Match |
-| `player_of_month.png` | Player of the Month |
-| `injury.png` | New injury |
-| `injury_recovery.png` | Back from injury |
-| `competition_win.png` | Won a competition |
-| `race_lead_change.png` | Golden Boot / Playmaker / Golden Glove / POTY race lead change |
-| `transfer.png` | Notable transfer |
-| `win_streak.png` | Win streak |
-| `unbeaten_streak.png` | Unbeaten streak |
-| `milestone.png` | Season stat milestone |
-| `contract_signed.png` | Contract renewal |
-| `new_captain.png` | New club captain |
-| `youth_promotion.png` | Youth academy promotion |
+| Folder | News type | Status |
+| --- | --- | --- |
+| `hat_trick/` | Hat-trick | ✅ populated |
+| `brace/` | Brace (2 goals) | ✅ populated |
+| `motm/` | Man of the Match | ✅ populated |
+| `player_of_month/` | Player of the Month | ✅ populated |
+| `injury/` | New injury | ✅ populated |
+| `injury_recovery/` | Back from injury | needed |
+| `competition_win/` | Won a competition | needed |
+| `race_lead_change/` | Golden Boot / Playmaker / Golden Glove / POTY race lead change | ✅ populated |
+| `transfer/` | Notable transfer | ✅ populated |
+| `win_streak/` | Win streak | needed |
+| `unbeaten_streak/` | Unbeaten streak | needed |
+| `milestone/` | Season stat milestone | needed |
+| `contract_signed/` | Contract renewal | needed |
+| `new_captain/` | New club captain | needed |
+| `youth_promotion/` | Youth academy promotion | needed |

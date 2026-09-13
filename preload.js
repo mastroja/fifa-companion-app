@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('api', {
   saveMatchEvents: (seasonId, matchDate, competition, opponent, events) => ipcRenderer.invoke('save-match-events', seasonId, matchDate, competition, opponent, events),
   getLatestNewsEdition: (saveId) => ipcRenderer.invoke('get-latest-news-edition', saveId),
   markNewsEditionRead: (editionId) => ipcRenderer.invoke('mark-news-edition-read', editionId),
+  listNewsImages: (newsType) => ipcRenderer.invoke('list-news-images', newsType),
 
   connectedCareerStatus: () => ipcRenderer.invoke('connected-career-status'),
   connectedCareerJoin: (code, owner) => ipcRenderer.invoke('connected-career-join', code, owner),

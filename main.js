@@ -2240,6 +2240,25 @@ function persistTransferFees(saveId, transferPayload) {
 // — rather than re-deriving anything or polling separately.
 // ------------------------------------------------------------------
 
+// Filenames (not full paths) of whatever images exist for one news type,
+// so the renderer can pick one at random each time that type of story is
+// shown (see getRandomNewsImageUrl in index.html) — real image variety
+// instead of one fixed picture repeating for every hat-trick, say. Reads
+// the actual folder on disk (assets/news/<news_type>/) rather than a
+// hardcoded manifest, so dropping in more images later (same structure,
+// per the user's plan) just works with no code change. Missing folder
+// (a type with no artwork yet) is expected, not an error — the caller
+// falls back to the plain emoji badge.
+function listNewsImages(newsType) {
+  if (!newsType || !/^[a-z_]+$/.test(newsType)) return [];
+  const dir = path.join(__dirname, 'assets', 'news', newsType);
+  try {
+    return fs.readdirSync(dir).filter(f => /\.(png|jpe?g|webp|gif)$/i.test(f));
+  } catch (e) {
+    return [];
+  }
+}
+
 // Our own club's current name for a season, read fresh from
 // player_season_stats — unlike season_league_stats, that table only
 // ever holds OUR squad's rows, so any row's club_name IS our club's
@@ -5141,6 +5160,7 @@ ipcMain.handle('export-season-overview-pdf', (_event, suggestedFileName) => expo
 ipcMain.handle('get-match-events', (_event, seasonId, matchDate, competition, opponent) => getMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent));
 ipcMain.handle('get-latest-news-edition', (_event, saveId) => getLatestNewsEdition(saveId || activeSaveId));
 ipcMain.handle('mark-news-edition-read', (_event, editionId) => markNewsEditionRead(editionId));
+ipcMain.handle('list-news-images', (_event, newsType) => listNewsImages(newsType));
 ipcMain.handle('get-opponent-roster-for-match', (_event, seasonId, opponentTeamName) => getOpponentRosterForMatch(seasonId || currentSeasonId, opponentTeamName));
 ipcMain.handle('save-match-events', (_event, seasonId, matchDate, competition, opponent, events) => saveMatchEvents(seasonId || currentSeasonId, matchDate, competition, opponent, events));
 
