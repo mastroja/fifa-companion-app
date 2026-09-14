@@ -649,3 +649,73 @@ CREATE TABLE IF NOT EXISTS world_league_awards (
     FOREIGN KEY(save_id) REFERENCES saves(id),
     UNIQUE(save_id, league_name, season_label)
 );
+
+-- One "issue" of the News feed — up to 3 curated stories published
+-- together once per matchweek (see curateNewsEditionIfNeeded in
+-- main.js, triggered whenever a primary-league fixture completes).
+-- is_read drives the News tab's flashing/highlighted state in
+-- index.html: unread the moment it's created, cleared the first time
+-- the user actually opens the News tab and views it.
+CREATE TABLE IF NOT EXISTS news_editions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    season_id INTEGER,
+    matchweek INTEGER,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    FOREIGN KEY(season_id) REFERENCES seasons(id)
+);
+
+-- Home dashboard News feed — auto-generated headlines rather than a
+-- separate source of truth. Each detector (see recordNewsItem call
+-- sites in main.js) runs right next to the existing sync logic that
+-- already has the data it needs (goal/assist diffing, injury episode
+-- transitions, league-wide leaderboards, etc.) rather than re-deriving
+-- anything. dedupe_key is what makes this safe to call every single
+-- sync without spamming duplicates — auto-refresh fires every 60s, and
+-- most syncs see no new qualifying event at all; ON CONFLICT DO NOTHING
+-- means only a genuinely new underlying event ever produces a new row.
+-- news_type drives which generic image the News tab shows for a row
+-- (see NEWS_TYPE_META in index.html) — plain text for now, real
+-- generated artwork to follow per type.
+--
+-- edition_id is NULL the moment a row is detected/recorded — it only
+-- gets assigned once curateNewsEditionIfNeeded picks it as one of a
+-- matchweek's (up to) 3 stories, so an item can sit "pending" across
+-- several syncs before it's ever actually surfaced (or superseded by
+-- something more newsworthy and picked up in a later matchweek instead).
+CREATE TABLE IF NOT EXISTS news_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    save_id INTEGER NOT NULL,
+    season_id INTEGER,
+    edition_id INTEGER,
+    news_type TEXT NOT NULL,
+    headline TEXT NOT NULL,
+    body TEXT,
+    player_id INTEGER,
+    team_name TEXT,
+    event_date TEXT,          -- in-game date the news is ABOUT, for sorting/month-bucketing — not wall-clock time
+    dedupe_key TEXT NOT NULL, -- e.g. 'hat_trick:20270815:premier league:arsenal:12345' — see recordNewsItem
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(save_id) REFERENCES saves(id),
+    FOREIGN KEY(season_id) REFERENCES seasons(id),
+    FOREIGN KEY(player_id) REFERENCES players(player_id),
+    FOREIGN KEY(edition_id) REFERENCES news_editions(id),
+    UNIQUE(save_id, dedupe_key)
+);
+
+-- Live "who's currently ahead" pointer per league-wide race category,
+-- overwritten every league-stats sync purely so a CHANGE in leader can
+-- be turned into a news item (see checkRaceLeaderChanges in main.js).
+-- Distinct from player_awards, which only records the real season-END
+-- winner — this is just scratch state for detecting an overtake as it
+-- happens, not an award in its own right.
+CREATE TABLE IF NOT EXISTS news_race_leaders (
+    season_id INTEGER NOT NULL,
+    category TEXT NOT NULL,   -- 'golden_boot' | 'playmaker' | 'golden_glove' | 'poty'
+    player_id INTEGER NOT NULL,
+    stat_value INTEGER NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (season_id, category)
+);

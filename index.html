@@ -86,7 +86,49 @@
 
     /* Calendar tab — one card per fixture, same visual language as the
        Home dashboard's match card (see buildFixtureCardBodyHtml). */
+    /* Home dashboard News feed — one full-bleed story fills the whole
+       card (see renderNewsStory), styled like a tweet/story: a generic
+       image (or a big emoji over a gradient fallback, until real
+       artwork exists for that news type) with the headline overlaid at
+       the bottom. Dot indicators above pick between an edition's up to
+       3 stories, Instagram-story style. */
+    .news-story-dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 10px; }
+    .news-story-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-color); cursor: pointer; transition: background 0.15s, transform 0.15s; }
+    .news-story-dot.active { background: var(--accent-color); transform: scale(1.3); }
+    .news-story { position: relative; height: 320px; border-radius: 12px; overflow: hidden; background: linear-gradient(160deg, var(--card-bg), var(--bg-color)); }
+    .news-story-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .news-story-emoji-fallback { position: absolute; inset: 0; align-items: center; justify-content: center; font-size: 84px; }
+    .news-story-overlay { position: absolute; left: 0; right: 0; bottom: 0; padding: 36px 18px 16px; background: linear-gradient(to top, rgba(0,0,0,0.88), rgba(0,0,0,0.55) 55%, rgba(0,0,0,0) 100%); }
+    .news-story-headline { color: #fff; font-size: 18px; font-weight: 700; line-height: 1.35; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+    .news-story-date { color: rgba(255,255,255,0.75); font-size: 12px; margin-top: 6px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+    /* News tab flash — an unread edition (see setNewsTabUnread) pulses
+       the button until the user actually opens News and views it. */
+    @keyframes news-tab-flash {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 99, 99, 0.55); }
+      50% { box-shadow: 0 0 0 6px rgba(255, 99, 99, 0); }
+    }
+    .home-toggle-btn.has-unread { background: #d13b3b; color: #fff; border-color: #d13b3b; animation: news-tab-flash 1.4s ease-in-out infinite; }
+
     .calendar-fixture-list { display: flex; flex-direction: column; gap: 10px; }
+    /* Two-column completed/upcoming split (replaces the old single-column
+       list + All/Upcoming/Completed dropdown) — each column is narrower
+       than the old full-width list, which fits the fixture card content
+       much better since the cards were never designed to stretch that wide. */
+    .calendar-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+    @media (max-width: 900px) {
+      .calendar-columns { grid-template-columns: 1fr; }
+    }
+    .calendar-column-header {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--border-color);
+    }
+    .calendar-column-completed .calendar-column-header { color: var(--text-color); border-bottom-color: var(--accent-color); }
+    .calendar-column-upcoming .calendar-column-header { color: var(--text-dim); border-bottom-color: var(--border-color); }
     .calendar-fixture-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px 20px; position: relative; overflow: hidden; }
     .calendar-fixture-card.is-completed { cursor: pointer; }
     .calendar-fixture-card.is-completed:hover { border-color: var(--accent-color); }
@@ -672,6 +714,11 @@
     .profile-sections-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .profile-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
     .profile-card h3 { font-size: 16px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-color); display: flex; justify-content: space-between; align-items: center; }
+    /* League Table header banner (see renderLeagueTableWidget/
+       getCompetitionBannerUrl) — sized to sit comfortably inside the
+       h3's normal text-line height regardless of a banner's own native
+       aspect ratio (they vary per league). */
+    #home-league-table-title img { display: block; max-height: 32px; max-width: 100%; width: auto; object-fit: contain; }
     .attr-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
     .attr-item span { color: var(--text-dim); }
     .attr-item strong { float: right; }
@@ -1035,14 +1082,15 @@
         <h3 style="position: relative; z-index: 1; display: flex; justify-content: space-between; align-items: center;">
           <span id="home-match-card-title">Upcoming Match</span>
           <div class="home-toggle" id="home-match-card-toggle" style="display: none;">
-            <button class="home-toggle-btn active" id="home-match-card-upcoming-btn" onclick="event.stopPropagation(); setHomeMatchCardView(false)">Upcoming</button>
-            <button class="home-toggle-btn" id="home-match-card-last-btn" onclick="event.stopPropagation(); setHomeMatchCardView(true)">Last Result</button>
+            <button class="home-toggle-btn active" id="home-match-card-upcoming-btn" onclick="event.stopPropagation(); setHomeMatchCardView('upcoming')">Upcoming</button>
+            <button class="home-toggle-btn" id="home-match-card-last-btn" onclick="event.stopPropagation(); setHomeMatchCardView('last')">Last Result</button>
+            <button class="home-toggle-btn" id="home-match-card-news-btn" onclick="event.stopPropagation(); setHomeMatchCardView('news')">News</button>
           </div>
         </h3>
         <div id="home-upcoming-match-body" style="position: relative; z-index: 1;"></div>
       </div>
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
-        <h3><span>League Table</span></h3>
+        <h3><span id="home-league-table-title">League Table</span></h3>
         <div id="home-league-table-body"></div>
       </div>
     </div>
@@ -1334,26 +1382,36 @@
     </div>
 
     <div class="filter-container">
-      <select id="calendar-filter" onchange="filterAndRenderCalendar()">
-        <option value="all">All Fixtures & Results</option>
-        <option value="upcoming">Upcoming Fixtures</option>
-        <option value="completed">Completed Results</option>
-      </select>
-      <input 
-        type="text" 
-        id="calendar-search" 
-        class="search-input" 
-        placeholder="Search opponent or competition..." 
+      <input
+        type="text"
+        id="calendar-search"
+        class="search-input"
+        placeholder="Search opponent or competition..."
         oninput="filterAndRenderCalendar()"
       />
     </div>
 
-    <!-- One card per fixture, same visual style as the Home dashboard's
-         match card (see buildFixtureCardBodyHtml) — a completed fixture's
-         card is clickable to expand its goal-scorer/assister breakdown
-         inline (see toggleCalendarCardExpand), not a popup. -->
-    <div id="calendar-list" class="calendar-fixture-list">
-      <div class="empty-state">No calendar data loaded.</div>
+    <!-- Two side-by-side sections instead of the old single list +
+         Upcoming/Completed/All dropdown: completed results on the left,
+         upcoming fixtures on the right, so both are visible at once
+         without switching a filter. Each card is the same
+         buildFixtureCardBodyHtml style as before (see filterAndRenderCalendar)
+         — a completed fixture's card is still clickable to expand its
+         goal-scorer/assister breakdown inline (see toggleCalendarCardExpand),
+         not a popup. -->
+    <div class="calendar-columns">
+      <div class="calendar-column calendar-column-completed">
+        <h3 class="calendar-column-header">✅ Completed Results</h3>
+        <div id="calendar-list-completed" class="calendar-fixture-list">
+          <div class="empty-state">No calendar data loaded.</div>
+        </div>
+      </div>
+      <div class="calendar-column calendar-column-upcoming">
+        <h3 class="calendar-column-header">📅 Upcoming Fixtures</h3>
+        <div id="calendar-list-upcoming" class="calendar-fixture-list">
+          <div class="empty-state">No calendar data loaded.</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1736,46 +1794,16 @@
       });
     }
 
-    function filterAndRenderCalendar() {
-      const filterValue = document.getElementById('calendar-filter').value;
-      const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
-      const container = document.getElementById('calendar-list');
+    // Renders one column's card list into `container`, with expand-panel
+    // ids namespaced by `side` ('completed'/'upcoming') so the two columns
+    // never collide now that both render at once instead of one filtered list.
+    function renderCalendarColumn(container, matches, side) {
       container.innerHTML = '';
-
-      let filtered = currentCalendar.filter(match => {
-        const isCompleted = match.played || match.score !== undefined;
-        if (filterValue === 'upcoming' && isCompleted) return false;
-        if (filterValue === 'completed' && !isCompleted) return false;
-
-        if (searchQuery) {
-          const opponent = (match.opponent || '').toLowerCase();
-          const comp = (match.competition || '').toLowerCase();
-          return opponent.includes(searchQuery) || comp.includes(searchQuery);
-        }
-        return true;
-      });
-
-      // Most recent RESULT on top, soonest UPCOMING fixture on top — not a
-      // single ascending/descending sort, since that needs two different
-      // directions for the played-vs-not halves of the list. Results
-      // block (newest first) always comes before the upcoming block
-      // (soonest first), so scrolling down reads as "what just happened"
-      // → "what's coming up next".
-      const isDone = m => m.played || m.score !== undefined;
-      filtered.sort((a, b) => {
-        const aDone = isDone(a), bDone = isDone(b);
-        if (aDone !== bDone) return aDone ? -1 : 1;
-        const dateA = parseInt(a.date, 10) || 0;
-        const dateB = parseInt(b.date, 10) || 0;
-        return aDone ? dateB - dateA : dateA - dateB;
-      });
-
-      if (filtered.length === 0) {
+      if (matches.length === 0) {
         container.innerHTML = `<div class="empty-state">No fixtures match your criteria.</div>`;
         return;
       }
-
-      filtered.forEach((match, idx) => {
+      matches.forEach((match, idx) => {
         const isCompleted = match.played && match.score;
         const logoUrl = getCompetitionLogoUrl(match.competition);
         const card = document.createElement('div');
@@ -1783,14 +1811,36 @@
         card.innerHTML = (logoUrl ? `<div class="upcoming-match-watermark" style="background-image: url('${logoUrl}');"></div>` : '') +
           `<div class="calendar-fixture-card-content">` +
           buildFixtureCardBodyHtml(match) +
-          (isCompleted ? `<div id="calendar-card-expand-${idx}" class="calendar-fixture-expand" style="display: none;"></div>` : '') +
+          (isCompleted ? `<div id="calendar-card-expand-${side}-${idx}" class="calendar-fixture-expand" style="display: none;"></div>` : '') +
           `</div>`;
         if (isCompleted) {
           card.title = 'Click for goal scorers';
-          card.onclick = () => toggleCalendarCardExpand(idx, match);
+          card.onclick = () => toggleCalendarCardExpand(`${side}-${idx}`, match);
         }
         container.appendChild(card);
       });
+    }
+
+    function filterAndRenderCalendar() {
+      const searchQuery = document.getElementById('calendar-search').value.toLowerCase().trim();
+      const completedContainer = document.getElementById('calendar-list-completed');
+      const upcomingContainer = document.getElementById('calendar-list-upcoming');
+
+      const isDone = m => m.played || m.score !== undefined;
+      let filtered = currentCalendar.filter(match => {
+        if (!searchQuery) return true;
+        const opponent = (match.opponent || '').toLowerCase();
+        const comp = (match.competition || '').toLowerCase();
+        return opponent.includes(searchQuery) || comp.includes(searchQuery);
+      });
+
+      const completed = filtered.filter(isDone)
+        .sort((a, b) => (parseInt(b.date, 10) || 0) - (parseInt(a.date, 10) || 0)); // newest result first
+      const upcoming = filtered.filter(m => !isDone(m))
+        .sort((a, b) => (parseInt(a.date, 10) || 0) - (parseInt(b.date, 10) || 0)); // soonest fixture first
+
+      renderCalendarColumn(completedContainer, completed, 'completed');
+      renderCalendarColumn(upcomingContainer, upcoming, 'upcoming');
     }
 
     // Lazily fetches match_events the first time a card is expanded, then
@@ -2503,6 +2553,25 @@
       if (!compName) return null;
       const lower = String(compName).toLowerCase();
       const entry = COMPETITION_LOGO_MAP.find(e => lower.includes(e.match));
+      return entry ? `assets/competition-icons/${entry.file}` : null;
+    }
+
+    // Wide banner variant — only exists for the 4 domestic pyramid tiers
+    // (no cup has one), used to replace the plain "League Table" text on
+    // the Home dashboard with the actual league's branding (see
+    // renderLeagueTableWidget). Same substring-match convention as
+    // COMPETITION_LOGO_MAP/LEAGUE_THEMES above.
+    const COMPETITION_BANNER_MAP = [
+      { match: 'premier league', file: 'premierleague-banner.png' },
+      { match: 'championship', file: 'efl-championship-banner.png' },
+      { match: 'league one', file: 'efl-leagueone-banner.png' },
+      { match: 'league two', file: 'efl-leaguetwo-banner.png' }
+    ];
+
+    function getCompetitionBannerUrl(compName) {
+      if (!compName) return null;
+      const lower = String(compName).toLowerCase();
+      const entry = COMPETITION_BANNER_MAP.find(e => lower.includes(e.match));
       return entry ? `assets/competition-icons/${entry.file}` : null;
     }
 
@@ -6566,15 +6635,16 @@
       }).join('');
     }
 
-    // Set by the card's header tabs — switches between the next fixture
-    // and the most recently played result on the same Home dashboard
-    // card, without triggering the card's own whole-surface
-    // onclick="switchTab('calendar')" (stopped via event.stopPropagation()
-    // on each tab button, same pattern as toggleLeagueTableExpanded).
-    let homeMatchCardShowingLast = false;
+    // Set by the card's header tabs — switches between the next fixture,
+    // the most recently played result, and the News feed, all on the
+    // same Home dashboard card, without triggering the card's own
+    // whole-surface onclick="switchTab('calendar')" (stopped via
+    // event.stopPropagation() on each tab button, same pattern as
+    // toggleLeagueTableExpanded).
+    let homeMatchCardMode = 'upcoming'; // 'upcoming' | 'last' | 'news'
 
-    function setHomeMatchCardView(showLast) {
-      homeMatchCardShowingLast = showLast;
+    function setHomeMatchCardView(mode) {
+      homeMatchCardMode = mode;
       renderUpcomingMatchWidget();
     }
 
@@ -6693,18 +6763,33 @@
 
       const watermarkEl = document.getElementById('home-upcoming-match-watermark');
 
-      // Only worth offering the toggle once there's actually something on
-      // both sides to flip between.
-      const showLast = homeMatchCardShowingLast && !!lastPlayed;
+      // Falls back to Upcoming if Last Result was selected but nothing's
+      // been played yet — News has no such data dependency, so it's
+      // always available once selected.
+      const mode = (homeMatchCardMode === 'last' && !lastPlayed) ? 'upcoming' : homeMatchCardMode;
+      const showLast = mode === 'last';
 
       const titleEl = document.getElementById('home-match-card-title');
-      if (titleEl) titleEl.textContent = showLast ? 'Last Result' : 'Upcoming Match';
+      if (titleEl) titleEl.textContent = mode === 'news' ? 'News' : (showLast ? 'Last Result' : 'Upcoming Match');
 
       const toggleGroup = document.getElementById('home-match-card-toggle');
       if (toggleGroup) {
-        toggleGroup.style.display = (upcoming && lastPlayed) ? 'flex' : 'none';
-        document.getElementById('home-match-card-upcoming-btn').classList.toggle('active', !showLast);
-        document.getElementById('home-match-card-last-btn').classList.toggle('active', showLast);
+        // Always offer the toggle now that News is always a real option,
+        // regardless of whether there's an upcoming fixture or a result
+        // yet — only the Last Result button itself hides when there's
+        // truly nothing played yet.
+        toggleGroup.style.display = 'flex';
+        document.getElementById('home-match-card-upcoming-btn').classList.toggle('active', mode === 'upcoming');
+        const lastBtn = document.getElementById('home-match-card-last-btn');
+        lastBtn.classList.toggle('active', mode === 'last');
+        lastBtn.style.display = lastPlayed ? '' : 'none';
+        document.getElementById('home-match-card-news-btn').classList.toggle('active', mode === 'news');
+      }
+
+      if (mode === 'news') {
+        if (watermarkEl) watermarkEl.style.backgroundImage = '';
+        renderHomeNewsFeed();
+        return;
       }
 
       const match = showLast ? lastPlayed : upcoming;
@@ -6745,6 +6830,159 @@
           `;
         });
       }
+    }
+
+    // ------------------------------------------------------------------
+    // Home dashboard News feed (the match card's 3rd tab, see
+    // setHomeMatchCardView) — a curated "edition" of up to 3 stories
+    // published once per matchweek (see curateNewsEditionIfNeeded in
+    // main.js), not a running list. Rendered as one full-bleed story at
+    // a time — a generic image per news type filling the whole card
+    // (falling back to a big centered emoji + gradient until real
+    // generated artwork exists for that type, same onerror-swap pattern
+    // already used for club/competition logos elsewhere in this app)
+    // with the headline overlaid at the bottom like a tweet/story card —
+    // with dot indicators up top to flip between this edition's stories.
+    // ------------------------------------------------------------------
+    const NEWS_TYPE_META = {
+      hat_trick: { emoji: '🎩' },
+      brace: { emoji: '⚽' },
+      motm: { emoji: '⭐' },
+      player_of_month: { emoji: '🌟' },
+      injury: { emoji: '🚑' },
+      injury_recovery: { emoji: '✅' },
+      competition_win: { emoji: '🏆' },
+      race_lead_change: { emoji: '🏁' },
+      transfer: { emoji: '💰' },
+      win_streak: { emoji: '🔥' },
+      unbeaten_streak: { emoji: '🛡️' },
+      milestone: { emoji: '🎖️' },
+      contract_signed: { emoji: '✍️' },
+      new_captain: { emoji: '🎖️' },
+      youth_promotion: { emoji: '🌱' },
+      red_card: { emoji: '🟥' },
+      yellow_card_milestone: { emoji: '🟨' },
+      notable_goal: { emoji: '⚽' },
+      rivalry_battle: { emoji: '⚔️' },
+      post_match_reaction: { emoji: '🗣️' },
+      match_anticipation: { emoji: '👥' }
+    };
+
+    // Drop real artwork into assets/news/<news_type>/ (one folder per
+    // key in NEWS_TYPE_META above, e.g. assets/news/hat_trick/) to
+    // replace the emoji fallback for that type — every file already in
+    // that folder is a candidate, picked at random each time a story of
+    // that type is shown, so repeated events don't all show the exact
+    // same picture. Drop more in any time; nothing else has to change.
+    // Resolves to null (caller falls back to the emoji) if that type has
+    // no folder yet, or the folder's empty.
+    async function getRandomNewsImageUrl(newsType) {
+      if (!window.api || !window.api.listNewsImages) return null;
+      try {
+        const files = await window.api.listNewsImages(newsType);
+        if (!files || files.length === 0) return null;
+        const pick = files[Math.floor(Math.random() * files.length)];
+        return `assets/news/${newsType}/${pick}`;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // The latest edition fetched by renderHomeNewsFeed ({ edition, items
+    // }, or null) plus which of its stories is currently on screen —
+    // module-level so the dot click handlers (wired fresh on every
+    // renderNewsStory call) can flip between stories without re-fetching.
+    let homeNewsEdition = null;
+    let homeNewsStoryIndex = 0;
+
+    function renderHomeNewsFeed() {
+      const container = document.getElementById('home-upcoming-match-body');
+      if (!container) return;
+      container.innerHTML = `<div class="empty-state" style="padding: 12px;">Loading…</div>`;
+      if (!window.api || !window.api.getLatestNewsEdition) {
+        container.innerHTML = `<div class="empty-state" style="padding: 12px;">News isn't available yet.</div>`;
+        return;
+      }
+      window.api.getLatestNewsEdition(null).then(result => {
+        // The card may have switched away from News (or re-rendered
+        // again) before this resolved — bail rather than clobber
+        // whatever's showing now.
+        if (homeMatchCardMode !== 'news') return;
+        const el = document.getElementById('home-upcoming-match-body');
+        if (!el) return;
+        homeNewsEdition = result;
+        if (!result || !result.items || result.items.length === 0) {
+          el.innerHTML = `<div class="empty-state" style="padding: 12px;">No news yet — check back after this week's match.</div>`;
+          return;
+        }
+        homeNewsStoryIndex = 0;
+        renderNewsStory();
+        // Viewing the edition is what clears its unread state — not just
+        // it existing — so the tab keeps flashing until the user actually
+        // looks, then stays quiet until the NEXT matchweek's edition.
+        if (!result.edition.is_read) {
+          window.api.markNewsEditionRead(result.edition.id);
+          setNewsTabUnread(false);
+        }
+      });
+    }
+
+    async function renderNewsStory() {
+      const el = document.getElementById('home-upcoming-match-body');
+      if (!el || !homeNewsEdition || !homeNewsEdition.items.length) return;
+      const items = homeNewsEdition.items;
+      const idx = Math.max(0, Math.min(homeNewsStoryIndex, items.length - 1));
+      const item = items[idx];
+      const meta = NEWS_TYPE_META[item.news_type] || { emoji: '📰' };
+      const dateLabel = item.event_date ? formatDateMMDDYYYY(item.event_date) : '';
+      // Every headline from main.js's news detectors leads with exactly
+      // one emoji (the same one this story's fallback badge already
+      // shows) — strip it here so it doesn't show twice.
+      const headlineText = item.headline.replace(/^\S+\s+/, '');
+
+      const imageUrl = await getRandomNewsImageUrl(item.news_type);
+      // The user may have flipped to a different dot (or left News
+      // entirely) while that lookup was in flight — bail rather than
+      // clobber whatever's on screen now with a stale story's image.
+      if (homeMatchCardMode !== 'news' || homeNewsStoryIndex !== idx) return;
+
+      const dotsHtml = items.map((_, i) => `<span class="news-story-dot${i === idx ? ' active' : ''}" data-idx="${i}"></span>`).join('');
+
+      el.innerHTML = `
+        <div class="news-story-dots">${dotsHtml}</div>
+        <div class="news-story">
+          ${imageUrl ? `<img class="news-story-img" src="${imageUrl}" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />` : ''}
+          <div class="news-story-emoji-fallback" style="display:${imageUrl ? 'none' : 'flex'};">${meta.emoji}</div>
+          <div class="news-story-overlay">
+            <div class="news-story-headline">${headlineText}</div>
+            ${dateLabel ? `<div class="news-story-date">${dateLabel}</div>` : ''}
+          </div>
+        </div>
+      `;
+      el.querySelectorAll('.news-story-dot').forEach(dot => {
+        dot.onclick = (ev) => {
+          ev.stopPropagation();
+          homeNewsStoryIndex = parseInt(dot.dataset.idx, 10);
+          renderNewsStory();
+        };
+      });
+    }
+
+    // Toggles the News tab's flashing/highlighted state (see .has-unread
+    // in the CSS) — called on every dashboard render (see
+    // renderHomeDashboard) so a new edition gets noticed even while the
+    // user's looking at Upcoming/Last Result, not just when they happen
+    // to click into News.
+    function setNewsTabUnread(isUnread) {
+      const btn = document.getElementById('home-match-card-news-btn');
+      if (btn) btn.classList.toggle('has-unread', isUnread);
+    }
+
+    function refreshNewsUnreadIndicator() {
+      if (!window.api || !window.api.getLatestNewsEdition) return;
+      window.api.getLatestNewsEdition(null).then(result => {
+        setNewsTabUnread(!!(result && result.edition && !result.edition.is_read));
+      });
     }
 
     // [{ rank, team_name, played, wins, draws, losses, goals_for, goals_against, points }],
@@ -6819,6 +7057,18 @@
     function renderLeagueTableWidget() {
       const container = document.getElementById('home-league-table-body');
       if (!container) return;
+
+      const titleEl = document.getElementById('home-league-table-title');
+      if (titleEl) {
+        const bannerUrl = getCompetitionBannerUrl(getPrimaryLeagueName());
+        // Falls back to the plain "League Table" text for a competition
+        // with no banner (no calendar data loaded yet, or the primary
+        // competition heuristic lands on a cup) — same onerror-swap
+        // pattern used elsewhere in this app for missing artwork.
+        titleEl.innerHTML = bannerUrl
+          ? `<img src="${bannerUrl}" alt="League Table" onerror="this.parentElement.textContent='League Table';" />`
+          : 'League Table';
+      }
 
       if (!leagueStandings || leagueStandings.length === 0) {
         container.innerHTML = `<div class="empty-state" style="padding: 12px;">Standings not available yet — Live Editor doesn't export league position data.</div>`;
@@ -10345,6 +10595,7 @@
       renderSquadAgeProfile();
       renderInjuryReport();
       renderUpcomingMatchWidget();
+      refreshNewsUnreadIndicator();
       renderLeagueTableWidget();
       renderCaptainWidget();
       renderTeamRecordWidgetHome();
