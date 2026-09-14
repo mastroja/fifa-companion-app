@@ -20,11 +20,11 @@ Add more any time; nothing else needs to change. A type with no folder
 | `transfer/` | Notable transfer | ✅ populated |
 | `win_streak/` | Win streak | ✅ populated |
 | `unbeaten_streak/` | Unbeaten streak | needed |
-| `milestone/` | Season stat milestone | needed |
+| `milestone/` | Season stat milestone (goals/assists/apps/clean sheets share this one folder) | ✅ populated (assists so far) |
 | `contract_signed/` | Contract renewal | needed |
 | `new_captain/` | New club captain | ✅ populated |
 | `youth_promotion/` | Youth academy promotion | ✅ populated |
-| `red_card/` | Player sent off | needed (folder exists, empty) |
+| `red_card/` | Player sent off | ✅ populated |
 | `yellow_card_milestone/` | Every 5th yellow card of the season (suspension risk) | ✅ populated |
 | `notable_goal/` | Generic single-goal highlight — only used to round an edition out to 3 stories when there isn't enough real news that matchweek | ✅ populated |
 | `rivalry_battle/` | Generic "intense battle" filler for a close match (decided by a goal or less) | ✅ populated |
