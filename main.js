@@ -2412,7 +2412,14 @@ const NEWS_TYPE_PRIORITY = {
   notable_goal: 8,
   match_anticipation: 7,
   rivalry_battle: 6,
-  post_match_reaction: 5
+  post_match_reaction: 5,
+  // A marquee fee ELSEWHERE in the league (see checkNotableTransfer) —
+  // deliberately below even the generic match filler above, since it's
+  // wider-football-world trivia rather than anything about the user's
+  // own club. Kept separate from 'transfer' (which is reserved for deals
+  // that actually involve our club, and stays high-priority) so it stops
+  // crowding out the user's own match/goal stories most weeks.
+  league_transfer: 3
 };
 
 // Groups whatever news_items are still pending (edition_id IS NULL) into
@@ -2843,10 +2850,22 @@ function checkNotableTransfer(saveId, transfer, ourClubName) {
     ? `🔁 ${playerName}: ${transfer.from_team || '?'} ➜ ${transfer.to_team || '?'} ${feeText}.`
     : `💰 Big money move: ${playerName} to ${transfer.to_team || '?'} ${feeText}.`;
 
+  // Split into two news types by whether the deal involves OUR club — a
+  // transfer we're actually party to is genuinely major news (kept at
+  // 'transfer's high NEWS_TYPE_PRIORITY), but a marquee fee ANYWHERE else
+  // in the league is comparatively trivia. The "top 5 fees ever recorded"
+  // bar above is weak early in a save (barely any fee history yet, so
+  // almost anything qualifies), so without this split those unrelated
+  // AI-AI deals were riding 'transfer's high priority and crowding out
+  // the user's own match-result/goal stories most weeks — see the user's
+  // "mostly seeing transfer news" feedback. 'league_transfer' sits down
+  // with the generic filler types so it only shows up when there isn't
+  // much else going on, instead of dominating.
+  const newsType = involvesUs ? 'transfer' : 'league_transfer';
   recordNewsItem(saveId, {
-    newsType: 'transfer', headline, playerId: transfer.player_id,
+    newsType, headline, playerId: transfer.player_id,
     teamName: transfer.to_team, eventDate: transfer.date,
-    dedupeKey: `transfer:${transfer.player_id}:${transfer.from_team_id || 0}:${transfer.to_team_id || 0}:${transfer.date || ''}`
+    dedupeKey: `${newsType}:${transfer.player_id}:${transfer.from_team_id || 0}:${transfer.to_team_id || 0}:${transfer.date || ''}`
   });
 }
 
