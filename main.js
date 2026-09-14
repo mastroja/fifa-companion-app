@@ -6,6 +6,31 @@ const initSqlJs = require('sql.js');
 const { execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// export_all.lua opens each export file with "w+" (truncate, then write),
+// and the chokidar watcher below polls file mtimes every 500ms — so
+// there's a real window where a poll tick catches a file mid-write
+// (empty or truncated JSON) right after Live Editor's F10 run starts.
+// Before this, that produced a JSON.parse exception that was caught and
+// logged with no retry, silently dropping that entire sync (per-game
+// event tracking included) until the user happened to press refresh
+// again and win the timing race. Retrying a few times with a short
+// pause absorbs that race instead of requiring repeated manual refreshes.
+async function readJsonFileWithRetry(filePath, attempts = 5, delayMs = 150) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      return { raw, data: JSON.parse(raw) };
+    } catch (err) {
+      lastErr = err;
+      await sleep(delayMs);
+    }
+  }
+  throw lastErr;
+}
+
 let mainWindow = null;
 let db = null;
 const dbPath = path.join(app.getPath('userData'), 'companion.sqlite');
@@ -2369,6 +2394,7 @@ const NEWS_TYPE_PRIORITY = {
   motm: 70,
   transfer: 65,
   new_captain: 60,
+  free_agent_signing: 58,
   youth_promotion: 55,
   win_streak: 50,
   unbeaten_streak: 48,
@@ -2386,7 +2412,14 @@ const NEWS_TYPE_PRIORITY = {
   notable_goal: 8,
   match_anticipation: 7,
   rivalry_battle: 6,
-  post_match_reaction: 5
+  post_match_reaction: 5,
+  // A marquee fee ELSEWHERE in the league (see checkNotableTransfer) —
+  // deliberately below even the generic match filler above, since it's
+  // wider-football-world trivia rather than anything about the user's
+  // own club. Kept separate from 'transfer' (which is reserved for deals
+  // that actually involve our club, and stays high-priority) so it stops
+  // crowding out the user's own match/goal stories most weeks.
+  league_transfer: 3
 };
 
 // Groups whatever news_items are still pending (edition_id IS NULL) into
@@ -2773,11 +2806,21 @@ function checkRaceLeaderChanges(saveId, seasonId, leaguePlayers, ourClubName, ev
     announceIfChanged(category, label, emoji, top.player_id, top.name, top.team_name, top[key], key === 'clean_sheets' ? 'clean sheets' : key);
   });
 
-  const poty = computeSeasonPotyWinner(leaguePlayers);
-  if (poty) {
-    const potyPlayer = leaguePlayers.find(p => p.player_id === poty.player_id);
-    announceIfChanged('poty', 'Player of the Year race', '🏅', poty.player_id,
-      potyPlayer ? potyPlayer.name : 'Unknown', potyPlayer ? potyPlayer.team_name : null, Math.round(poty.score), 'pts');
+  // Player of the Year race news is gated to the business end of the
+  // season (April-June) per the user's ask — early on, small sample
+  // sizes make computeSeasonPotyWinner's leader flip nearly every
+  // matchweek, which at this news type's high priority was crowding out
+  // other stories all season instead of reading as a real end-of-season
+  // award race. eventDate is normalized to digits-only YYYYMMDD (see
+  // normalizeDateForCompare), so chars 4-5 are the month.
+  const potyMonth = normalizeDateForCompare(eventDate).slice(4, 6);
+  if (['04', '05', '06'].includes(potyMonth)) {
+    const poty = computeSeasonPotyWinner(leaguePlayers);
+    if (poty) {
+      const potyPlayer = leaguePlayers.find(p => p.player_id === poty.player_id);
+      announceIfChanged('poty', 'Player of the Year race', '🏅', poty.player_id,
+        potyPlayer ? potyPlayer.name : 'Unknown', potyPlayer ? potyPlayer.team_name : null, Math.round(poty.score), 'pts');
+    }
   }
 }
 
@@ -2807,10 +2850,22 @@ function checkNotableTransfer(saveId, transfer, ourClubName) {
     ? `🔁 ${playerName}: ${transfer.from_team || '?'} ➜ ${transfer.to_team || '?'} ${feeText}.`
     : `💰 Big money move: ${playerName} to ${transfer.to_team || '?'} ${feeText}.`;
 
+  // Split into two news types by whether the deal involves OUR club — a
+  // transfer we're actually party to is genuinely major news (kept at
+  // 'transfer's high NEWS_TYPE_PRIORITY), but a marquee fee ANYWHERE else
+  // in the league is comparatively trivia. The "top 5 fees ever recorded"
+  // bar above is weak early in a save (barely any fee history yet, so
+  // almost anything qualifies), so without this split those unrelated
+  // AI-AI deals were riding 'transfer's high priority and crowding out
+  // the user's own match-result/goal stories most weeks — see the user's
+  // "mostly seeing transfer news" feedback. 'league_transfer' sits down
+  // with the generic filler types so it only shows up when there isn't
+  // much else going on, instead of dominating.
+  const newsType = involvesUs ? 'transfer' : 'league_transfer';
   recordNewsItem(saveId, {
-    newsType: 'transfer', headline, playerId: transfer.player_id,
+    newsType, headline, playerId: transfer.player_id,
     teamName: transfer.to_team, eventDate: transfer.date,
-    dedupeKey: `transfer:${transfer.player_id}:${transfer.from_team_id || 0}:${transfer.to_team_id || 0}:${transfer.date || ''}`
+    dedupeKey: `${newsType}:${transfer.player_id}:${transfer.from_team_id || 0}:${transfer.to_team_id || 0}:${transfer.date || ''}`
   });
 }
 
@@ -3634,6 +3689,21 @@ function importFifaData(jsonPayload) {
     if (seniorRes.length > 0) seniorRes[0].values.forEach(([pid]) => everHadSeniorRow.add(pid));
   }
 
+  // Whether this SAVE has ever completed a squad sync before, across any
+  // season — read once, before this sync's own INSERTs land, same reason
+  // seasonHasPriorMatches/everHadSeniorRow are computed up front rather
+  // than re-checked per player (this transaction's own writes would
+  // otherwise start showing up mid-loop and corrupt the read). Needed by
+  // the free-agent-signing detection below: on a save's very first-ever
+  // squad sync, EVERY player looks "brand new" (no row, no senior
+  // history) purely because the app just started watching, not because
+  // they actually just signed — that first sync must be excluded
+  // entirely rather than misreported as a club's whole roster all
+  // joining as free agents on day one.
+  const saveHasPriorSquadSync = activeSaveId
+    ? db.exec(`SELECT 1 FROM player_season_stats WHERE season_id IN (SELECT id FROM seasons WHERE save_id = ${activeSaveId}) LIMIT 1;`).length > 0
+    : false;
+
   const goalDeltas = []; // [{player_id, count}], populated in the forEach below
   const assistDeltas = []; // [{player_id, count}]
 
@@ -3851,6 +3921,37 @@ function importFifaData(jsonPayload) {
           headline: pickRandomHeadline(YOUTH_PROMOTION_HEADLINES, p.name),
           dedupeKey: `youth_promotion:${p.player_id}`
         });
+      }
+
+      // Free-agent signings — otherwise invisible to this app entirely.
+      // export_all.lua's transfer-negotiation memory walk (get_transfer_
+      // data) only records a deal when BOTH a buying AND a selling club
+      // are present (every get_succeeded_* helper requires selling_team
+      // > 0); a free agent has no selling club, so that negotiation is
+      // structurally excluded before it ever reaches the transfers
+      // export. The league-wide stats export has the same gap from the
+      // other direction — it only lists players already linked to a
+      // league team, so a free agent leaves no trace there either before
+      // signing. Per feedback-live-editor-data-safety, reading yet more
+      // Live Editor memory/DB state to plug this isn't worth the crash
+      // risk, so this infers it the same safe way youth promotions are
+      // detected above: from squad-roster diffs this app already has.
+      // A player brand new to our squad (no row yet this season, never
+      // had one in an earlier season either), who isn't a youth academy
+      // graduate and has no transfer_fees record at all, has no other
+      // explanation left — every other way onto the squad already leaves
+      // one of those traces. Gated on saveHasPriorSquadSync so a save's
+      // very first sync (where the WHOLE existing roster looks "brand
+      // new") doesn't get misreported as a mass free-agent signing spree.
+      if (activeSaveId && saveHasPriorSquadSync && !previous && !everHadSeniorRow.has(p.player_id) && !academyGraduateIds.has(p.player_id)) {
+        const hasTransferRecord = db.exec(`SELECT 1 FROM transfer_fees WHERE save_id = ${activeSaveId} AND player_id = ${p.player_id} LIMIT 1;`).length > 0;
+        if (!hasTransferRecord) {
+          recordNewsItem(activeSaveId, {
+            seasonId: currentSeasonId, newsType: 'free_agent_signing', playerId: p.player_id, eventDate: syncInGameDate,
+            headline: `🆓 ${p.name || 'Unknown'} has signed for the club as a free agent.`,
+            dedupeKey: `free_agent_signing:${p.player_id}`
+          });
+        }
       }
 
       playerStmt.run([
@@ -5458,14 +5559,13 @@ app.whenReady().then(async () => {
     interval: 500
   });
 
-  watcher.on('all', (event, filePath) => {
+  watcher.on('all', async (event, filePath) => {
     if (event !== 'add' && event !== 'change') return;
 
     if (filePath.includes('ea_fc_calendar_export.json')) {
       if (fs.existsSync(calendarExportPath)) {
         try {
-          const rawCalendar = fs.readFileSync(calendarExportPath, 'utf-8');
-          const calendarPayload = JSON.parse(rawCalendar);
+          const { raw: rawCalendar, data: calendarPayload } = await readJsonFileWithRetry(calendarExportPath);
           latestCalendarPayload = calendarPayload;
 
           // resolveActiveSave returns false when this sync had a blank
@@ -5494,8 +5594,7 @@ app.whenReady().then(async () => {
 
     if (filePath.includes('ea_fc_squad_export.json') && fs.existsSync(squadExportPath)) {
       try {
-        const rawData = fs.readFileSync(squadExportPath, 'utf-8');
-        const jsonPayload = JSON.parse(rawData);
+        const { data: jsonPayload } = await readJsonFileWithRetry(squadExportPath);
 
         importFifaData(jsonPayload);
         const squadData = getSquadFromDB();
@@ -5510,8 +5609,8 @@ app.whenReady().then(async () => {
 
     if (filePath.includes('ea_fc_transfers_export.json') && fs.existsSync(transferExportPath)) {
       try {
-        const rawTransfers = fs.readFileSync(transferExportPath, 'utf-8');
-        const transferPayload = correctTransferFlags(JSON.parse(rawTransfers));
+        const { data: rawTransferData } = await readJsonFileWithRetry(transferExportPath);
+        const transferPayload = correctTransferFlags(rawTransferData);
         persistTransferFees(activeSaveId, transferPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -5524,8 +5623,8 @@ app.whenReady().then(async () => {
 
     if (filePath.includes('ea_fc_youth_export.json') && fs.existsSync(youthExportPath)) {
       try {
-        const rawYouth = fs.readFileSync(youthExportPath, 'utf-8');
-        importYouthAcademy(JSON.parse(rawYouth));
+        const { data: youthPayload } = await readJsonFileWithRetry(youthExportPath);
+        importYouthAcademy(youthPayload);
 
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('youth-updated', { save_id: activeSaveId, data: getYouthAcademy() });
@@ -5542,8 +5641,7 @@ app.whenReady().then(async () => {
     // (no snapshot for this file yet), only whatever was last live.
     if (filePath.includes('ea_fc_league_stats_export.json') && fs.existsSync(leagueStatsExportPath)) {
       try {
-        const rawLeagueStats = fs.readFileSync(leagueStatsExportPath, 'utf-8');
-        const leagueStatsPayload = JSON.parse(rawLeagueStats);
+        const { data: leagueStatsPayload } = await readJsonFileWithRetry(leagueStatsExportPath);
         latestLeagueStatsPayload = leagueStatsPayload;
         persistLeagueStats(resolveLeagueStatsSeasonId(leagueStatsPayload), leagueStatsPayload);
 
