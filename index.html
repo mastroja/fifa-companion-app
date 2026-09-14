@@ -714,6 +714,11 @@
     .profile-sections-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .profile-card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
     .profile-card h3 { font-size: 16px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; color: var(--text-color); display: flex; justify-content: space-between; align-items: center; }
+    /* League Table header banner (see renderLeagueTableWidget/
+       getCompetitionBannerUrl) — sized to sit comfortably inside the
+       h3's normal text-line height regardless of a banner's own native
+       aspect ratio (they vary per league). */
+    #home-league-table-title img { display: block; max-height: 32px; max-width: 100%; width: auto; object-fit: contain; }
     .attr-list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
     .attr-item span { color: var(--text-dim); }
     .attr-item strong { float: right; }
@@ -1085,7 +1090,7 @@
         <div id="home-upcoming-match-body" style="position: relative; z-index: 1;"></div>
       </div>
       <div class="profile-card home-widget" style="cursor: pointer;" onclick="switchTab('calendar')">
-        <h3><span>League Table</span></h3>
+        <h3><span id="home-league-table-title">League Table</span></h3>
         <div id="home-league-table-body"></div>
       </div>
     </div>
@@ -2548,6 +2553,25 @@
       if (!compName) return null;
       const lower = String(compName).toLowerCase();
       const entry = COMPETITION_LOGO_MAP.find(e => lower.includes(e.match));
+      return entry ? `assets/competition-icons/${entry.file}` : null;
+    }
+
+    // Wide banner variant — only exists for the 4 domestic pyramid tiers
+    // (no cup has one), used to replace the plain "League Table" text on
+    // the Home dashboard with the actual league's branding (see
+    // renderLeagueTableWidget). Same substring-match convention as
+    // COMPETITION_LOGO_MAP/LEAGUE_THEMES above.
+    const COMPETITION_BANNER_MAP = [
+      { match: 'premier league', file: 'premierleague-banner.png' },
+      { match: 'championship', file: 'efl-championship-banner.png' },
+      { match: 'league one', file: 'efl-leagueone-banner.png' },
+      { match: 'league two', file: 'efl-leaguetwo-banner.png' }
+    ];
+
+    function getCompetitionBannerUrl(compName) {
+      if (!compName) return null;
+      const lower = String(compName).toLowerCase();
+      const entry = COMPETITION_BANNER_MAP.find(e => lower.includes(e.match));
       return entry ? `assets/competition-icons/${entry.file}` : null;
     }
 
@@ -7033,6 +7057,18 @@
     function renderLeagueTableWidget() {
       const container = document.getElementById('home-league-table-body');
       if (!container) return;
+
+      const titleEl = document.getElementById('home-league-table-title');
+      if (titleEl) {
+        const bannerUrl = getCompetitionBannerUrl(getPrimaryLeagueName());
+        // Falls back to the plain "League Table" text for a competition
+        // with no banner (no calendar data loaded yet, or the primary
+        // competition heuristic lands on a cup) — same onerror-swap
+        // pattern used elsewhere in this app for missing artwork.
+        titleEl.innerHTML = bannerUrl
+          ? `<img src="${bannerUrl}" alt="League Table" onerror="this.parentElement.textContent='League Table';" />`
+          : 'League Table';
+      }
 
       if (!leagueStandings || leagueStandings.length === 0) {
         container.innerHTML = `<div class="empty-state" style="padding: 12px;">Standings not available yet — Live Editor doesn't export league position data.</div>`;
