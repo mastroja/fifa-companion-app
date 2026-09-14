@@ -6494,7 +6494,22 @@
       requestAnimationFrame(() => {
         const oneCopyWidth = track.scrollWidth / 2;
         const pxPerSecond = 55;
-        track.style.animationDuration = `${Math.max(15, oneCopyWidth / pxPerSecond)}s`;
+        const duration = Math.max(15, oneCopyWidth / pxPerSecond);
+        // Just reassigning animationDuration on an already-running
+        // infinite CSS animation doesn't restart it — the browser keeps
+        // the animation's real elapsed clock ticking from whenever it
+        // first started and reapplies that elapsed time modulo the NEW
+        // duration, which snaps the ticker to a new position instead of
+        // smoothly continuing. Since this runs on every data refresh,
+        // and auto-refresh fires every 60s vs. a one-off manual click,
+        // the repeated snapping reads as the ticker "speeding up" over
+        // time with auto-refresh and settling back down after a manual
+        // one. Force a clean restart (drop the animation, reflow, reapply)
+        // so every render's loop begins at position 0 at the correct speed.
+        track.style.animation = 'none';
+        void track.offsetWidth;
+        track.style.animation = '';
+        track.style.animationDuration = `${duration}s`;
       });
     }
 
@@ -6854,6 +6869,7 @@
       competition_win: { emoji: '🏆' },
       race_lead_change: { emoji: '🏁' },
       transfer: { emoji: '💰' },
+      free_agent_signing: { emoji: '🆓' },
       win_streak: { emoji: '🔥' },
       unbeaten_streak: { emoji: '🛡️' },
       milestone: { emoji: '🎖️' },
