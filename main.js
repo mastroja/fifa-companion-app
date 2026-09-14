@@ -2335,6 +2335,27 @@ function recordNewsItem(saveId, { seasonId, newsType, headline, body, playerId, 
       eventDate ? normalizeDateForCompare(eventDate) : null, dedupeKey]);
 }
 
+// Picks a random headline template and fills in {name} — same spirit as
+// the random image picker on the frontend, so a news type that fires
+// often (like youth_promotion) doesn't read as the exact same sentence
+// every single time.
+function pickRandomHeadline(templates, name) {
+  const template = templates[Math.floor(Math.random() * templates.length)];
+  return template.replace(/\{name\}/g, name || 'Unknown');
+}
+
+// "Wonder kid" headline variants for a youth academy promotion — see the
+// potential >= 85 gate at the call site below. Written to read like
+// different scouts/commentators describing the same kind of moment,
+// not just a template with the name swapped in.
+const YOUTH_PROMOTION_HEADLINES = [
+  '🌱 Wonder kid alert! {name} has been promoted straight from the academy to the first team.',
+  '🌱 {name}, tipped as a future star, has stepped up from the academy to the senior squad.',
+  "🌱 The academy's brightest prospect, {name}, has been promoted to the first team.",
+  '🌱 Keep an eye on {name} — a genuine wonderkid, just promoted from the academy.',
+  "🌱 {name} has made the leap from academy to first team, and scouts reckon this one's special."
+];
+
 // Rough "how newsworthy is this" ordering used to pick a matchweek's (up
 // to) 3 stories out of whatever's pending (see curateNewsEditionIfNeeded)
 // — higher sorts first. Ties (including any news_type not listed here)
@@ -3818,10 +3839,16 @@ function importFifaData(jsonPayload) {
       // never had a player_season_stats (senior squad) row before THIS
       // season. Fires exactly once, the sync that first sees them on the
       // senior roster — from then on everHadSeniorRow would include them.
-      if (activeSaveId && !previous && academyGraduateIds.has(p.player_id) && !everHadSeniorRow.has(p.player_id)) {
+      //
+      // Gated to potential >= 85 — a routine academy promotion happens
+      // constantly (most graduates never amount to much) and isn't real
+      // news; only a genuine "wonderkid" prospect is worth a story, per
+      // the user's ask. Headline picked from YOUTH_PROMOTION_HEADLINES so
+      // it doesn't read identically every time this fires.
+      if (activeSaveId && !previous && (p.potential || 0) >= 85 && academyGraduateIds.has(p.player_id) && !everHadSeniorRow.has(p.player_id)) {
         recordNewsItem(activeSaveId, {
           seasonId: currentSeasonId, newsType: 'youth_promotion', playerId: p.player_id, eventDate: syncInGameDate,
-          headline: `🌱 ${p.name || 'Unknown'} has been promoted to the first team!`,
+          headline: pickRandomHeadline(YOUTH_PROMOTION_HEADLINES, p.name),
           dedupeKey: `youth_promotion:${p.player_id}`
         });
       }
