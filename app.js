@@ -2236,7 +2236,7 @@ let currentCalendar = [];
     let cachedPlaystyleRules = null;
 
     function buildPlaystyleRuleBarText(bar) {
-      const parts = [bar.overallText, bar.attrsText, bar.milestoneText].filter(Boolean);
+      const parts = [bar.overallText, bar.skillMovesText, bar.attrsText, bar.milestoneText].filter(Boolean);
       return parts.length > 0 ? parts.join(', ') : '—';
     }
 

@@ -2862,6 +2862,15 @@ const PLAYSTYLE_MILESTONE_RULES = [
   { name: 'Low Driven Shot', groups: ['ATT', 'MID'], base: { attrs: { shot_power: 72, finishing: 68 }, milestone: { stat: 'goals', min: 50 } }, plus: { overall: 84, attrs: { shot_power: 88, finishing: 85 }, milestone: { stat: 'goals', min: 125 } } },
   { name: 'Power Shot', groups: ['ATT', 'MID'], base: { attrs: { shot_power: 75, long_shots: 70 }, milestone: { stat: 'goals', min: 60 } }, plus: { overall: 85, attrs: { shot_power: 90, long_shots: 87 }, milestone: { stat: 'goals', min: 150 } } },
   { name: 'Precision Header', groups: ['ATT', 'MID', 'DEF'], base: { attrs: { heading_accuracy: 72, jumping: 68 } }, plus: { overall: 84, attrs: { heading_accuracy: 88, jumping: 85 } } },
+  // Game Changer — the one style gated on skill_moves (a player.skill_moves
+  // star rating 1-5, not an attributes_json field) rather than pure
+  // attributes, per the user's ask (2026-09-15): a genuine "moment of
+  // magic" playmaker needs the dribbling repertoire (skill moves) as well
+  // as the technique (curve/ball control) to pull it off, not just raw
+  // attribute numbers. No milestone — there's no clean stat proxy for
+  // "created a moment of magic" the way goals/assists/clean sheets work
+  // for other styles.
+  { name: 'Game Changer', groups: ['ATT', 'MID'], base: { skillMoves: 4, attrs: { curve: 70, ball_control: 70 } }, plus: { overall: 84, skillMoves: 5, attrs: { curve: 80, ball_control: 80 } } },
   // Passing — milestone on career assists
   { name: 'Incisive Pass', groups: ['MID', 'ATT'], base: { attrs: { vision: 72, short_passing: 70 }, milestone: { stat: 'assists', min: 40 } }, plus: { overall: 85, attrs: { vision: 88, short_passing: 86 }, milestone: { stat: 'assists', min: 100 } } },
   { name: 'Inventive', groups: ['MID', 'ATT'], base: { attrs: { dribbling: 72, vision: 70 }, milestone: { stat: 'assists', min: 40 } }, plus: { overall: 85, attrs: { dribbling: 88, vision: 86 }, milestone: { stat: 'assists', min: 100 } } },
@@ -2943,12 +2952,9 @@ function countActivePlaystyleSuggestions(playerId) {
 // Which PLAYSTYLE_MILESTONE_RULES entry belongs to which of index.html's
 // PLAYSTYLE_CATALOG categories, purely for grouping getPlaystyleRulesFor
 // Display's output — duplicated here rather than shared across the
-// Electron boundary, same reasoning as POSITION_GROUP_BY_ID. Omits
-// 'Game Changer' (the one catalog style with no rule at all — there's no
-// attribute it obviously maps to) since a category entry with zero rules
-// would just be a confusing empty section in the breakdown dialog.
+// Electron boundary, same reasoning as POSITION_GROUP_BY_ID.
 const PLAYSTYLE_DISPLAY_CATALOG = {
-  Scoring: ['Acrobatic', 'Chip Shot', 'Dead Ball', 'Finesse Shot', 'Low Driven Shot', 'Power Shot', 'Precision Header'],
+  Scoring: ['Acrobatic', 'Chip Shot', 'Dead Ball', 'Finesse Shot', 'Game Changer', 'Low Driven Shot', 'Power Shot', 'Precision Header'],
   Passing: ['Incisive Pass', 'Inventive', 'Long Ball Pass', 'Pinged Pass', 'Tiki Taka', 'Whipped Pass'],
   'Ball Control': ['First Touch', 'Press Proven', 'Rapid', 'Technical', 'Trickster'],
   Defending: ['Aerial Fortress', 'Anticipate', 'Block', 'Intercept', 'Jockey', 'Slide Tackle'],
@@ -2977,6 +2983,7 @@ const PLAYSTYLE_MILESTONE_LABELS = { goals: 'career goals', assists: 'career ass
 function formatPlaystyleBar(bar) {
   return {
     overallText: bar.overall ? `${bar.overall}+ OVR` : null,
+    skillMovesText: bar.skillMoves ? `${bar.skillMoves}★ Skill Moves` : null,
     attrsText: Object.entries(bar.attrs).map(([key, min]) => `${PLAYSTYLE_ATTRIBUTE_LABELS[key] || key} ${min}+`).join(', '),
     milestoneText: bar.milestone ? `${bar.milestone.min}+ ${PLAYSTYLE_MILESTONE_LABELS[bar.milestone.stat] || bar.milestone.stat}` : null
   };
@@ -3024,13 +3031,17 @@ function getCareerStatTotals(playerId) {
   return { goals, assists, clean_sheets };
 }
 
-// Does `attrs`/`overall`/`careerStats` clear every part of `bar`
-// ({ overall?, attrs, milestone? })? `overall` and `milestone` are only
-// checked when the bar actually specifies them — see the "no base
-// overall floor" comment on PLAYSTYLE_MILESTONE_RULES above.
-function meetsPlaystyleBar(overall, attrs, careerStats, bar) {
+// Does `attrs`/`overall`/`careerStats`/`skillMoves` clear every part of
+// `bar` ({ overall?, attrs, milestone?, skillMoves? })? `overall`,
+// `milestone`, and `skillMoves` are only checked when the bar actually
+// specifies them — see the "no base overall floor" comment on
+// PLAYSTYLE_MILESTONE_RULES above. `skillMoves` is Game Changer's own
+// special case (a player.skill_moves star rating 1-5, not part of the
+// attributes_json blob attrs is drawn from).
+function meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, bar) {
   if (bar.overall && (overall || 0) < bar.overall) return false;
   if (bar.milestone && (careerStats[bar.milestone.stat] || 0) < bar.milestone.min) return false;
+  if (bar.skillMoves && Number(skillMoves || 0) < bar.skillMoves) return false;
   return Object.entries(bar.attrs).every(([key, min]) => Number((attrs || {})[key]) >= min);
 }
 
@@ -3054,7 +3065,7 @@ function meetsPlaystyleBar(overall, attrs, careerStats, bar) {
 // attributes (unlike checkSeasonMilestones) — eligibility is a level
 // check, not a delta, and a missed sync shouldn't cost a player their
 // shot at a suggestion they qualify for.
-function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, positionId, overall, attrs, eventDate) {
+function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, positionId, overall, attrs, eventDate, skillMoves) {
   if (!db || !saveId || !playerId) return;
   const group = POSITION_GROUP_BY_ID[Number(positionId)];
   if (!group) return;
@@ -3069,8 +3080,8 @@ function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, posit
     if (!careerStats) careerStats = getCareerStatTotals(playerId);
 
     let tier = null;
-    if (meetsPlaystyleBar(overall, attrs, careerStats, rule.plus)) tier = 'plus';
-    else if (meetsPlaystyleBar(overall, attrs, careerStats, rule.base)) tier = 'base';
+    if (meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, rule.plus)) tier = 'plus';
+    else if (meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, rule.base)) tier = 'base';
     if (tier) candidates.push({ name: rule.name, tier });
   });
   if (candidates.length === 0) return;
@@ -4253,7 +4264,7 @@ function importFifaData(jsonPayload) {
           { goals: p.goals || 0, assists: p.assists || 0, appearances: p.appearances || 0 }, syncInGameDate);
 
         checkPlaystyleEligibility(activeSaveId, currentSeasonId, p.player_id, p.name,
-          p.position_id, p.overall, p.attributes, syncInGameDate);
+          p.position_id, p.overall, p.attributes, syncInGameDate, p.skill_moves);
       }
 
       // Youth academy promotion — this player has a youth_academy_snapshot
