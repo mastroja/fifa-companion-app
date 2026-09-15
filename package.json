@@ -28,6 +28,7 @@
       "main.js",
       "preload.js",
       "index.html",
+      "app.js",
       "schema.sql",
       "assets/**/*",
       "connected_career/**/*"
