@@ -2039,6 +2039,58 @@ function setManualPlayStyles(playerId, styles) {
   return { success: true };
 }
 
+// How long a checkPlaystyleEligibility win keeps showing up in the Home
+// dashboard's development-alert banner AND as a "NEW" tag on the
+// player's profile (see getPlaystyleSuggestions below) — shared with
+// index.html's own copy of this constant (duplicated rather than shared
+// across the Electron boundary, same reasoning as POSITION_GROUP_BY_ID).
+// Purely a real-world time window off detected_at, not tied to any
+// user acknowledgment — since the style is auto-recorded the instant
+// it's won (see checkPlaystyleEligibility), there's no "resolve" step
+// left to gate on.
+const PLAYSTYLE_NEW_FLAG_DAYS = 14;
+
+// Squad-wide list of RECENTLY auto-added PlayStyles, for the Home
+// dashboard's development-alert banner (see renderPlaystyleAlerts in
+// index.html) — a reminder to go set each one manually in Live Editor,
+// since the win only ever gets recorded here, never in the live save.
+// Unlike getPlaystyleSuggestions (one player's profile), this scans
+// every CURRENTLY SIGNED player so a suggestion for someone since sold/
+// released doesn't keep nagging. playstyle_suggestions itself isn't
+// save-scoped (see schema.sql), so the squad-membership filter has to
+// happen here rather than in the table. Time-limited to
+// PLAYSTYLE_NEW_FLAG_DAYS, same window as the profile's "NEW" tag — once
+// a win is old enough to stop being flagged "new" it also stops nagging
+// on the dashboard, on the assumption that's been plenty of time to
+// notice and apply it.
+function getPendingPlaystyleAlerts() {
+  if (!db || !currentSeasonId) return [];
+  const squadIds = getSquadFromDB(currentSeasonId).map(p => p.player_id);
+  if (squadIds.length === 0) return [];
+  const res = db.exec(`
+    SELECT ps.player_id, p.name, ps.playstyle_name, ps.tier
+    FROM playstyle_suggestions ps
+    JOIN players p ON p.player_id = ps.player_id
+    WHERE ps.status = 'added' AND ps.detected_at >= datetime('now', '-${PLAYSTYLE_NEW_FLAG_DAYS} days')
+      AND ps.player_id IN (${squadIds.join(',')})
+    ORDER BY ps.detected_at ASC;
+  `);
+  if (res.length === 0) return [];
+  return res[0].values.map(([playerId, name, styleName, tier]) => ({ playerId, name, styleName, plus: tier === 'plus' }));
+}
+
+// Every won PlayStyle for one player (see playstyle_suggestions in
+// schema.sql / checkPlaystyleEligibility above), with when it was
+// detected — the player profile cross-references this against its
+// recorded PlayStyles (player_manual_playstyles) to decide which ones
+// are recent enough to tag "NEW" (see PLAYSTYLE_NEW_FLAG_DAYS).
+function getPlaystyleSuggestions(playerId) {
+  if (!db || !playerId) return [];
+  const res = db.exec(`SELECT playstyle_name, tier, detected_at FROM playstyle_suggestions WHERE player_id = ${playerId} AND status = 'added' ORDER BY detected_at ASC;`);
+  if (res.length === 0) return [];
+  return res[0].values.map(([name, tier, detectedAt]) => ({ name, plus: tier === 'plus', detectedAt }));
+}
+
 // "Untouchable" tag for Youth Squad Career Mode's Overall Cap Watch box —
 // see untouchable_players in schema.sql for why this exists and is
 // save-scoped.
@@ -2400,6 +2452,7 @@ const NEWS_TYPE_PRIORITY = {
   unbeaten_streak: 48,
   brace: 45,
   milestone: 40,
+  playstyle_eligible: 40,
   yellow_card_milestone: 38,
   contract_signed: 35,
   injury_recovery: 25,
@@ -2752,6 +2805,313 @@ function checkSeasonMilestones(saveId, seasonId, playerId, playerName, previous,
         dedupeKey: `milestone:${playerId}:${seasonId}:${key}:${crossed}`
       });
     }
+  });
+}
+
+// Position-id -> broad group, for gating which PlayStyles a player's
+// position even makes sense for (see PLAYSTYLE_MILESTONE_RULES below).
+// Matches index.html's POSITION_MAP groupings exactly; duplicated here
+// rather than shared since main.js (the Electron main process) has no
+// access to that client-side script — same reasoning as
+// POTY_CLEAN_SHEET_ELIGIBLE_MAX_POSITION_ID above.
+const POSITION_GROUP_BY_ID = {
+  0: 'GK',
+  1: 'DEF', 2: 'DEF', 3: 'DEF', 4: 'DEF', 5: 'DEF', 6: 'DEF', 7: 'DEF', 8: 'DEF',
+  9: 'MID', 10: 'MID', 11: 'MID', 12: 'MID', 13: 'MID', 14: 'MID', 15: 'MID', 16: 'MID', 17: 'MID', 18: 'MID', 19: 'MID',
+  20: 'ATT', 21: 'ATT', 22: 'ATT', 23: 'ATT', 24: 'ATT', 25: 'ATT', 26: 'ATT', 27: 'ATT'
+};
+
+// The rule behind "players should gain new PlayStyles as they develop,
+// not just upgrade an existing one to PlayStyle+" (the game itself never
+// does this — see checkPlaystyleEligibility below for how this gets
+// used). Each entry names a real PlayStyle from index.html's
+// PLAYSTYLE_CATALOG, which position groups it's plausible for, and a
+// `base`/`plus` bar it takes to be suggested for it. Per the user's ask
+// (2026-09-14):
+// - `base` has NO overall floor — only attributes (and, where listed, a
+//   career stat `milestone`) matter for the standard style. `plus`
+//   DOES keep an overall floor, on top of a strictly higher attribute
+//   (and milestone, where present) bar — PlayStyle+ is meant to mark out
+//   a genuine standout, not just "slightly better attributes."
+// - `milestone: { stat, min }` is an ADDITIONAL required condition on
+//   top of the attribute bar, checked against career-cumulative totals
+//   (getCareerStatTotals — summed across every tracked season, not just
+//   the current one) — only applied where a style has an obvious
+//   real-world stat proxy (scoring styles -> goals, playmaking styles ->
+//   assists, defensive/GK styles -> clean sheets). Styles with no clean
+//   proxy (Dead Ball, Precision Header, the Ball Control category, the
+//   Physical category, Long Ball Pass) are attribute-only.
+// These thresholds are a reasonable starting point the user can freely
+// retune (there's no EA data source for "the real unlock condition" —
+// PlayStyles aren't actually gained this way in the live game at all),
+// not a mined/confirmed fact about the game. Milestone minimums were
+// rescaled upward 2026-09-14 after the user pointed out a mediocre
+// (65 overall) striker can score 30 league goals in a single SEASON —
+// the original 5-8 goal/assist/clean-sheet minimums were clearing on the
+// player's very first productive season, not after the sustained,
+// multi-season track record a milestone is supposed to represent.
+// Current minimums (30-60 base, 75-150 plus) assume roughly 15-20
+// productive stat contributions per good season, so base takes ~2-3
+// strong seasons and plus takes ~6-8 — a real career body of work.
+const PLAYSTYLE_MILESTONE_RULES = [
+  // Scoring — milestone on career goals
+  { name: 'Acrobatic', groups: ['ATT', 'MID'], base: { attrs: { balance: 70, volleys: 68 }, milestone: { stat: 'goals', min: 40 } }, plus: { overall: 85, attrs: { balance: 88, volleys: 85 }, milestone: { stat: 'goals', min: 100 } } },
+  { name: 'Chip Shot', groups: ['ATT', 'MID'], base: { attrs: { finishing: 70, vision: 65 }, milestone: { stat: 'goals', min: 50 } }, plus: { overall: 84, attrs: { finishing: 87, vision: 82 }, milestone: { stat: 'goals', min: 125 } } },
+  { name: 'Dead Ball', groups: ['ATT', 'MID'], base: { attrs: { fk_accuracy: 72 } }, plus: { overall: 84, attrs: { fk_accuracy: 90 } } },
+  { name: 'Finesse Shot', groups: ['ATT', 'MID'], base: { attrs: { finishing: 72, curve: 70 }, milestone: { stat: 'goals', min: 60 } }, plus: { overall: 85, attrs: { finishing: 88, curve: 86 }, milestone: { stat: 'goals', min: 150 } } },
+  { name: 'Low Driven Shot', groups: ['ATT', 'MID'], base: { attrs: { shot_power: 72, finishing: 68 }, milestone: { stat: 'goals', min: 50 } }, plus: { overall: 84, attrs: { shot_power: 88, finishing: 85 }, milestone: { stat: 'goals', min: 125 } } },
+  { name: 'Power Shot', groups: ['ATT', 'MID'], base: { attrs: { shot_power: 75, long_shots: 70 }, milestone: { stat: 'goals', min: 60 } }, plus: { overall: 85, attrs: { shot_power: 90, long_shots: 87 }, milestone: { stat: 'goals', min: 150 } } },
+  { name: 'Precision Header', groups: ['ATT', 'MID', 'DEF'], base: { attrs: { heading_accuracy: 72, jumping: 68 } }, plus: { overall: 84, attrs: { heading_accuracy: 88, jumping: 85 } } },
+  // Game Changer — the one style gated on skill_moves (a player.skill_moves
+  // star rating 1-5, not an attributes_json field) rather than pure
+  // attributes, per the user's ask (2026-09-15): a genuine "moment of
+  // magic" playmaker needs the dribbling repertoire (skill moves) as well
+  // as the technique (curve/ball control) to pull it off, not just raw
+  // attribute numbers. No milestone — there's no clean stat proxy for
+  // "created a moment of magic" the way goals/assists/clean sheets work
+  // for other styles.
+  { name: 'Game Changer', groups: ['ATT', 'MID'], base: { skillMoves: 4, attrs: { curve: 70, ball_control: 70 } }, plus: { overall: 84, skillMoves: 5, attrs: { curve: 80, ball_control: 80 } } },
+  // Passing — milestone on career assists
+  { name: 'Incisive Pass', groups: ['MID', 'ATT'], base: { attrs: { vision: 72, short_passing: 70 }, milestone: { stat: 'assists', min: 40 } }, plus: { overall: 85, attrs: { vision: 88, short_passing: 86 }, milestone: { stat: 'assists', min: 100 } } },
+  { name: 'Inventive', groups: ['MID', 'ATT'], base: { attrs: { dribbling: 72, vision: 70 }, milestone: { stat: 'assists', min: 40 } }, plus: { overall: 85, attrs: { dribbling: 88, vision: 86 }, milestone: { stat: 'assists', min: 100 } } },
+  { name: 'Long Ball Pass', groups: ['MID', 'DEF'], base: { attrs: { long_passing: 72 } }, plus: { overall: 84, attrs: { long_passing: 90 } } },
+  { name: 'Pinged Pass', groups: ['MID', 'DEF'], base: { attrs: { short_passing: 75, vision: 68 }, milestone: { stat: 'assists', min: 30 } }, plus: { overall: 85, attrs: { short_passing: 90, vision: 85 }, milestone: { stat: 'assists', min: 75 } } },
+  { name: 'Tiki Taka', groups: ['MID'], base: { attrs: { short_passing: 75, ball_control: 75 }, milestone: { stat: 'assists', min: 30 } }, plus: { overall: 87, attrs: { short_passing: 90, ball_control: 90 }, milestone: { stat: 'assists', min: 75 } } },
+  { name: 'Whipped Pass', groups: ['MID', 'DEF', 'ATT'], base: { attrs: { crossing: 72 }, milestone: { stat: 'assists', min: 30 } }, plus: { overall: 84, attrs: { crossing: 90 }, milestone: { stat: 'assists', min: 75 } } },
+  // Ball Control — no clean stat proxy, attribute-only
+  { name: 'First Touch', groups: ['ATT', 'MID'], base: { attrs: { ball_control: 73, agility: 68 } }, plus: { overall: 85, attrs: { ball_control: 89, agility: 85 } } },
+  { name: 'Press Proven', groups: ['MID', 'DEF', 'ATT'], base: { attrs: { stamina: 72, aggression: 68 } }, plus: { overall: 83, attrs: { stamina: 88, aggression: 85 } } },
+  { name: 'Rapid', groups: ['ATT', 'MID', 'DEF'], base: { attrs: { acceleration: 75, sprint_speed: 75 } }, plus: { overall: 84, attrs: { acceleration: 92, sprint_speed: 92 } } },
+  { name: 'Technical', groups: ['ATT', 'MID'], base: { attrs: { ball_control: 75, dribbling: 75 } }, plus: { overall: 86, attrs: { ball_control: 90, dribbling: 90 } } },
+  { name: 'Trickster', groups: ['ATT', 'MID'], base: { attrs: { dribbling: 75, agility: 72 } }, plus: { overall: 85, attrs: { dribbling: 90, agility: 88 } } },
+  // Defending — milestone on career clean sheets
+  { name: 'Aerial Fortress', groups: ['DEF'], base: { attrs: { heading_accuracy: 70, jumping: 72, strength: 72 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 85, attrs: { heading_accuracy: 87, jumping: 88, strength: 88 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Anticipate', groups: ['DEF', 'MID'], base: { attrs: { interceptions: 72, marking: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 85, attrs: { interceptions: 88, marking: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Block', groups: ['DEF'], base: { attrs: { standing_tackle: 72, strength: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { standing_tackle: 88, strength: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Intercept', groups: ['DEF', 'MID'], base: { attrs: { interceptions: 75 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 85, attrs: { interceptions: 91 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Jockey', groups: ['DEF'], base: { attrs: { standing_tackle: 70, agility: 68 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { standing_tackle: 86, agility: 85 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Slide Tackle', groups: ['DEF'], base: { attrs: { sliding_tackle: 72 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { sliding_tackle: 90 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  // Physical — no clean stat proxy, attribute-only
+  { name: 'Bruiser', groups: ['DEF', 'MID', 'ATT'], base: { attrs: { strength: 75 } }, plus: { overall: 84, attrs: { strength: 92 } } },
+  { name: 'Enforcer', groups: ['DEF', 'MID'], base: { attrs: { aggression: 72, strength: 72 } }, plus: { overall: 84, attrs: { aggression: 88, strength: 88 } } },
+  { name: 'Long Throw', groups: ['DEF', 'MID'], base: { attrs: { strength: 70 } }, plus: { overall: 82, attrs: { strength: 88 } } },
+  { name: 'Quick Step', groups: ['ATT', 'MID', 'DEF'], base: { attrs: { acceleration: 78 } }, plus: { overall: 84, attrs: { acceleration: 94 } } },
+  { name: 'Relentless', groups: ['MID', 'DEF', 'ATT'], base: { attrs: { stamina: 75 } }, plus: { overall: 84, attrs: { stamina: 92 } } },
+  // Goalkeeping — milestone on career clean sheets
+  { name: 'Cross Claimer', groups: ['GK'], base: { attrs: { gk_positioning: 72, handling: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { gk_positioning: 88, handling: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Deflector', groups: ['GK'], base: { attrs: { reflexes: 72, handling: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { reflexes: 88, handling: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Far Reach', groups: ['GK'], base: { attrs: { diving: 72, gk_positioning: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { diving: 88, gk_positioning: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Far Throw', groups: ['GK'], base: { attrs: { kicking: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 82, attrs: { kicking: 88 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Footwork', groups: ['GK'], base: { attrs: { kicking: 72, handling: 70 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 84, attrs: { kicking: 88, handling: 86 }, milestone: { stat: 'clean_sheets', min: 100 } } },
+  { name: 'Rush Out', groups: ['GK'], base: { attrs: { gk_positioning: 75, reflexes: 72 }, milestone: { stat: 'clean_sheets', min: 40 } }, plus: { overall: 85, attrs: { gk_positioning: 90, reflexes: 88 }, milestone: { stat: 'clean_sheets', min: 100 } } }
+];
+
+// Base odds a player who clears a rule's bar actually gets suggested for
+// it, for their VERY FIRST style — see computePlaystyleAwardChance below
+// for how this decays as a player accumulates more. Per the user's ask:
+// without this, nearly every player good enough to clear a bar WOULD
+// clear it (that's what the bar is calibrated to), so almost the whole
+// squad would end up suggested for a handful of styles each — nothing
+// like how sparingly PlayStyles are actually spread across real players.
+const PLAYSTYLE_AWARD_CHANCE = 0.5;
+
+// How much PLAYSTYLE_AWARD_CHANCE shrinks per style a player already has
+// — see computePlaystyleAwardChance. Replaced a flat hard cap
+// (PLAYSTYLE_MAX_PER_PLAYER = 4) on 2026-09-14 per the user's ask: a hard
+// wall at 4 meant a truly exceptional player could never be recognized
+// for a 5th or 6th genuine talent no matter how deserving, which felt
+// too artificial. This keeps the ceiling SOFT instead — more styles stay
+// technically possible forever, just increasingly unlikely each time —
+// so an 8-style outlier can still happen in a long career, it's just
+// very rare, rather than flatly impossible past an arbitrary number.
+const PLAYSTYLE_AWARD_DECAY = 0.65;
+
+// The actual odds used for one roll, given how many PlayStyles (see
+// countActivePlaystyleSuggestions) this player already has. Exponential
+// rather than a flat per-style
+// subtraction so it keeps getting harder without ever hitting a floor
+// and going flat — at the DECAY above, roughly: 1st style ~50%, 2nd
+// ~33%, 3rd ~21%, 4th ~14%, 5th ~9%, 6th ~6%, 7th ~4%, 8th ~2.4%. No hard
+// ceiling: the position-group + attribute/milestone bars and the
+// finite 34-style catalog are what ultimately bound how many any one
+// player could ever even be a candidate for.
+function computePlaystyleAwardChance(activeCount) {
+  return PLAYSTYLE_AWARD_CHANCE * Math.pow(PLAYSTYLE_AWARD_DECAY, activeCount);
+}
+
+// How many PlayStyles already count toward computePlaystyleAwardChance's
+// decay — every 'added' row (a won roll, auto-merged into
+// player_manual_playstyles) counts as "this player already has this
+// style"; 'missed' (lost the roll) doesn't, since it represents no
+// accumulated style at all.
+function countActivePlaystyleSuggestions(playerId) {
+  const res = db.exec(`SELECT COUNT(*) FROM playstyle_suggestions WHERE player_id = ${playerId} AND status = 'added';`);
+  return (res.length > 0 && res[0].values.length > 0) ? res[0].values[0][0] : 0;
+}
+
+// Which PLAYSTYLE_MILESTONE_RULES entry belongs to which of index.html's
+// PLAYSTYLE_CATALOG categories, purely for grouping getPlaystyleRulesFor
+// Display's output — duplicated here rather than shared across the
+// Electron boundary, same reasoning as POSITION_GROUP_BY_ID.
+const PLAYSTYLE_DISPLAY_CATALOG = {
+  Scoring: ['Acrobatic', 'Chip Shot', 'Dead Ball', 'Finesse Shot', 'Game Changer', 'Low Driven Shot', 'Power Shot', 'Precision Header'],
+  Passing: ['Incisive Pass', 'Inventive', 'Long Ball Pass', 'Pinged Pass', 'Tiki Taka', 'Whipped Pass'],
+  'Ball Control': ['First Touch', 'Press Proven', 'Rapid', 'Technical', 'Trickster'],
+  Defending: ['Aerial Fortress', 'Anticipate', 'Block', 'Intercept', 'Jockey', 'Slide Tackle'],
+  Physical: ['Bruiser', 'Enforcer', 'Long Throw', 'Quick Step', 'Relentless'],
+  Goalkeeping: ['Cross Claimer', 'Deflector', 'Far Reach', 'Far Throw', 'Footwork', 'Rush Out']
+};
+
+// Human-readable labels for the attribute/milestone keys used across
+// PLAYSTYLE_MILESTONE_RULES — only for getPlaystyleRulesForDisplay's
+// output, never used to key anything.
+const PLAYSTYLE_ATTRIBUTE_LABELS = {
+  finishing: 'Finishing', curve: 'Curve', fk_accuracy: 'FK Accuracy', shot_power: 'Shot Power',
+  long_shots: 'Long Shots', heading_accuracy: 'Heading', jumping: 'Jumping', balance: 'Balance',
+  volleys: 'Volleys', vision: 'Vision', short_passing: 'Short Passing', dribbling: 'Dribbling',
+  long_passing: 'Long Passing', crossing: 'Crossing', ball_control: 'Ball Control', agility: 'Agility',
+  stamina: 'Stamina', aggression: 'Aggression', acceleration: 'Acceleration', sprint_speed: 'Sprint Speed',
+  strength: 'Strength', interceptions: 'Interceptions', marking: 'Marking', standing_tackle: 'Standing Tackle',
+  sliding_tackle: 'Sliding Tackle', gk_positioning: 'GK Positioning', handling: 'Handling', reflexes: 'Reflexes',
+  diving: 'Diving', kicking: 'Kicking'
+};
+const PLAYSTYLE_MILESTONE_LABELS = { goals: 'career goals', assists: 'career assists', clean_sheets: 'career clean sheets' };
+
+// Turns one rule's base/plus bar into the plain-language pieces the
+// breakdown dialog renders (see getPlaystyleRulesForDisplay) — no HTML,
+// that's index.html's job.
+function formatPlaystyleBar(bar) {
+  return {
+    overallText: bar.overall ? `${bar.overall}+ OVR` : null,
+    skillMovesText: bar.skillMoves ? `${bar.skillMoves}★ Skill Moves` : null,
+    attrsText: Object.entries(bar.attrs).map(([key, min]) => `${PLAYSTYLE_ATTRIBUTE_LABELS[key] || key} ${min}+`).join(', '),
+    milestoneText: bar.milestone ? `${bar.milestone.min}+ ${PLAYSTYLE_MILESTONE_LABELS[bar.milestone.stat] || bar.milestone.stat}` : null
+  };
+}
+
+// Read-only breakdown of the whole PlayStyle-development system, for the
+// player profile's "How is this earned?" button (see index.html) — the
+// same PLAYSTYLE_MILESTONE_RULES/PLAYSTYLE_AWARD_CHANCE/
+// PLAYSTYLE_AWARD_DECAY/PLAYSTYLE_NEW_FLAG_DAYS actually used by
+// checkPlaystyleEligibility, reshaped for display, so the dialog can
+// never drift out of sync with the real rules the way a hand-maintained
+// copy in index.html eventually would.
+function getPlaystyleRulesForDisplay() {
+  const ruleByName = Object.fromEntries(PLAYSTYLE_MILESTONE_RULES.map(r => [r.name, r]));
+  const categories = Object.entries(PLAYSTYLE_DISPLAY_CATALOG).map(([category, names]) => ({
+    category,
+    rules: names.filter(name => ruleByName[name]).map(name => {
+      const rule = ruleByName[name];
+      return {
+        name,
+        positions: rule.groups,
+        base: formatPlaystyleBar(rule.base),
+        plus: formatPlaystyleBar(rule.plus)
+      };
+    })
+  }));
+  return {
+    awardChancePercent: Math.round(PLAYSTYLE_AWARD_CHANCE * 100),
+    awardDecay: PLAYSTYLE_AWARD_DECAY,
+    newFlagDays: PLAYSTYLE_NEW_FLAG_DAYS,
+    categories
+  };
+}
+
+// Career-cumulative totals for one player, summed across every season
+// this app has ever recorded for them (not just the current one) — the
+// milestone half of PLAYSTYLE_MILESTONE_RULES checks against this, on
+// the theory that a style is something a player builds a reputation for
+// over their career, not something that resets every August alongside
+// season_start_overall.
+function getCareerStatTotals(playerId) {
+  const res = db.exec(`SELECT COALESCE(SUM(goals),0), COALESCE(SUM(assists),0), COALESCE(SUM(clean_sheets),0) FROM player_season_stats WHERE player_id = ${playerId};`);
+  if (res.length === 0 || res[0].values.length === 0) return { goals: 0, assists: 0, clean_sheets: 0 };
+  const [goals, assists, clean_sheets] = res[0].values[0];
+  return { goals, assists, clean_sheets };
+}
+
+// Does `attrs`/`overall`/`careerStats`/`skillMoves` clear every part of
+// `bar` ({ overall?, attrs, milestone?, skillMoves? })? `overall`,
+// `milestone`, and `skillMoves` are only checked when the bar actually
+// specifies them — see the "no base overall floor" comment on
+// PLAYSTYLE_MILESTONE_RULES above. `skillMoves` is Game Changer's own
+// special case (a player.skill_moves star rating 1-5, not part of the
+// attributes_json blob attrs is drawn from).
+function meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, bar) {
+  if (bar.overall && (overall || 0) < bar.overall) return false;
+  if (bar.milestone && (careerStats[bar.milestone.stat] || 0) < bar.milestone.min) return false;
+  if (bar.skillMoves && Number(skillMoves || 0) < bar.skillMoves) return false;
+  return Object.entries(bar.attrs).every(([key, min]) => Number((attrs || {})[key]) >= min);
+}
+
+// Checks one player's current overall/position/attributes/career stats
+// against PLAYSTYLE_MILESTONE_RULES and, at most, resolves ONE newly-
+// eligible style per call — deliberately does NOT roll every rule the
+// player happens to clear in the same sync. Concretely: collects every
+// rule whose bar is newly met (cleared AND no playstyle_suggestions row
+// yet — that row is what prevents ever re-considering the same pair
+// again, win, lose, or simply not picked this time), picks ONE at
+// random, and rolls computePlaystyleAwardChance (using how many styles
+// this player already has) for that one. Everything else newly eligible
+// this sync is left untouched (no row) so it's still a live candidate on
+// a later sync — this is what spreads a well-rounded player's
+// accumulation out over a career instead of cashing in every qualifying
+// style at once, and it's what makes "already has several" actually mean
+// something for the decay in computePlaystyleAwardChance (rolling
+// several bars independently in one shot would bypass it). See the
+// schema.sql comment on playstyle_suggestions for the 'missed' status
+// this can produce. Deliberately NOT diffed against the previous sync's
+// attributes (unlike checkSeasonMilestones) — eligibility is a level
+// check, not a delta, and a missed sync shouldn't cost a player their
+// shot at a suggestion they qualify for.
+function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, positionId, overall, attrs, eventDate, skillMoves) {
+  if (!db || !saveId || !playerId) return;
+  const group = POSITION_GROUP_BY_ID[Number(positionId)];
+  if (!group) return;
+
+  const alreadyConsideredRes = db.exec(`SELECT playstyle_name FROM playstyle_suggestions WHERE player_id = ${playerId};`);
+  const alreadyConsidered = new Set(alreadyConsideredRes.length > 0 ? alreadyConsideredRes[0].values.map(r => r[0]) : []);
+
+  let careerStats = null; // computed lazily, only if some rule actually needs it
+  const candidates = [];
+  PLAYSTYLE_MILESTONE_RULES.forEach(rule => {
+    if (!rule.groups.includes(group) || alreadyConsidered.has(rule.name)) return;
+    if (!careerStats) careerStats = getCareerStatTotals(playerId);
+
+    let tier = null;
+    if (meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, rule.plus)) tier = 'plus';
+    else if (meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, rule.base)) tier = 'base';
+    if (tier) candidates.push({ name: rule.name, tier });
+  });
+  if (candidates.length === 0) return;
+
+  const picked = candidates[Math.floor(Math.random() * candidates.length)];
+  const won = Math.random() < computePlaystyleAwardChance(countActivePlaystyleSuggestions(playerId));
+  db.run(`
+    INSERT INTO playstyle_suggestions (player_id, playstyle_name, tier, status)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(player_id, playstyle_name) DO NOTHING;
+  `, [playerId, picked.name, picked.tier, won ? 'added' : 'missed']);
+  if (!won) return; // rolled and lost — row above just prevents ever reconsidering this pair
+
+  // Won the roll — recorded straight into player_manual_playstyles (same
+  // table the "+ PlayStyle" picker writes) rather than waiting on a
+  // manual Add click, per the user's ask (2026-09-14). The player's
+  // profile flags it "NEW" for a while off this same row's detected_at
+  // (see PLAYSTYLE_NEW_FLAG_DAYS in index.html) — removing it early is
+  // still possible any time via the existing picker, same as any other
+  // recorded PlayStyle.
+  const currentManual = getManualPlayStyles(playerId);
+  if (!currentManual.some(ps => ps.name === picked.name)) {
+    currentManual.push({ name: picked.name, plus: picked.tier === 'plus' });
+    setManualPlayStyles(playerId, currentManual);
+  }
+
+  recordNewsItem(saveId, {
+    seasonId, newsType: 'playstyle_eligible', playerId, eventDate,
+    headline: `🧬 ${playerName || 'Unknown'}'s development has earned them ${picked.tier === 'plus' ? 'PlayStyle+' : 'a new PlayStyle'}: ${picked.name}!`,
+    dedupeKey: `playstyle_eligible:${playerId}:${picked.name}`
   });
 }
 
@@ -3902,6 +4262,9 @@ function importFifaData(jsonPayload) {
       if (activeSaveId) {
         checkSeasonMilestones(activeSaveId, currentSeasonId, p.player_id, p.name, previous,
           { goals: p.goals || 0, assists: p.assists || 0, appearances: p.appearances || 0 }, syncInGameDate);
+
+        checkPlaystyleEligibility(activeSaveId, currentSeasonId, p.player_id, p.name,
+          p.position_id, p.overall, p.attributes, syncInGameDate, p.skill_moves);
       }
 
       // Youth academy promotion — this player has a youth_academy_snapshot
@@ -5465,6 +5828,9 @@ ipcMain.handle('set-captaincy-start-year', (_event, saveId, role, playerId, star
 ipcMain.handle('mark-academy-graduate', (_event, playerId, saveId) => markAcademyGraduate(playerId, saveId));
 ipcMain.handle('get-manual-play-styles', (_event, playerId) => getManualPlayStyles(playerId));
 ipcMain.handle('set-manual-play-styles', (_event, playerId, styles) => setManualPlayStyles(playerId, styles));
+ipcMain.handle('get-playstyle-suggestions', (_event, playerId) => getPlaystyleSuggestions(playerId));
+ipcMain.handle('get-pending-playstyle-alerts', () => getPendingPlaystyleAlerts());
+ipcMain.handle('get-playstyle-rules', () => getPlaystyleRulesForDisplay());
 ipcMain.handle('get-headshot-bucket-options', () => getHeadshotBucketOptions());
 ipcMain.handle('get-headshot-files-for-bucket', (_event, ageDir, ethnicityDir) => getHeadshotFilesForBucket(ageDir, ethnicityDir));
 ipcMain.handle('get-player-headshot-bucket', (_event, playerId) => getPlayerHeadshotBucket(playerId));
