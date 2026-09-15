@@ -319,6 +319,18 @@ async function initDatabase() {
     // column already exists, safe to ignore
   }
 
+  // Which season a PlayStyle roll happened in — added to enforce "at most
+  // one NEW PlayStyle win per player per season" (see
+  // PLAYSTYLE_MAX_WINS_PER_SEASON / checkPlaystyleEligibility), per the
+  // user's feedback (2026-09-15) that players were racking up 2-3
+  // PlayStyles in a single day of syncing — same ignore-already-exists
+  // migration pattern as above.
+  try {
+    db.run(`ALTER TABLE playstyle_suggestions ADD COLUMN season_id INTEGER;`);
+  } catch (e) {
+    // column already exists, safe to ignore
+  }
+
   seedWorldLeagueAwards();
 
   saveDatabaseToDisk();
@@ -526,8 +538,23 @@ function getWorldLeagueAwardsForSeason(seasonLabel, saveId = activeSaveId) {
 
 function saveDatabaseToDisk() {
   if (!db) return;
-  const data = db.export();
-  fs.writeFileSync(dbPath, Buffer.from(data));
+  try {
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+  } catch (err) {
+    // A transient Windows file lock (antivirus/OneDrive/backup software
+    // briefly holding companion.sqlite open) can make this throw even
+    // though the in-memory DB itself is fine. Swallow it rather than let
+    // it bubble up — this fires from inside importFifaData/
+    // importCalendarMatches AFTER their own transaction already
+    // committed, so an uncaught throw here was reaching their outer
+    // catch and crashing on `ROLLBACK;` with a confusing "no transaction
+    // is active" error that masked this real one (2026-09-15). Nothing
+    // is actually lost: db.export() always dumps the FULL current state,
+    // not just this call's delta, so the next successful save (moments
+    // later, next sync) persists everything anyway.
+    console.error('[DB] Failed to write database to disk (will retry on next save):', err);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -746,6 +773,29 @@ function importCalendarMatches(calendarPayload) {
 // know which format either field happens to be in.
 function normalizeDateForCompare(dateStr) {
   return String(dateStr || '').replace(/[^0-9]/g, '');
+}
+
+// In-game whole-day gap between two dates, for recency gates like
+// checkNotableTransfer's "last 2 weeks" filter. Accepts either the
+// negotiation manager's "MM-DD-YYYY" (transfer_fees.deal_date) or the
+// export payloads' "YYYY-MM-DD" (current_date) — told apart by which
+// side the 4-digit year lands on. Returns null (never treated as "in
+// range") rather than throwing on anything unparseable, since a blank/
+// malformed deal_date is a known, expected case (see convertFifaDate's
+// pcall guard in export_all.lua).
+function daysBetweenGameDates(dateStrA, dateStrB) {
+  function parse(dateStr) {
+    const s = String(dateStr || '').trim();
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/); // YYYY-MM-DD
+    if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    m = s.match(/^(\d{2})-(\d{2})-(\d{4})$/); // MM-DD-YYYY
+    if (m) return Date.UTC(+m[3], +m[1] - 1, +m[2]);
+    return null;
+  }
+  const a = parse(dateStrA);
+  const b = parse(dateStrB);
+  if (a === null || b === null) return null;
+  return Math.abs(a - b) / 86400000;
 }
 
 // Finds today's fixture in a calendar payload, for match_events' live-
@@ -2025,16 +2075,35 @@ function getManualPlayStyles(playerId) {
   }
 }
 
-// Replaces the whole set in one go (the picker always submits the full
-// current selection, not a delta).
-function setManualPlayStyles(playerId, styles) {
-  if (!db || !playerId) return { success: false };
+// The actual write, with no disk save — split out so checkPlaystyleEligibility
+// (called mid-transaction, from inside importFifaData's per-player squad-sync
+// loop) can record a won PlayStyle without triggering saveDatabaseToDisk itself.
+// db.export() (which saveDatabaseToDisk calls) silently finalizes every
+// currently-open prepared statement AND ends the current transaction as a
+// side effect — calling it here while importFifaData's playerStmt/statsStmt
+// were still open mid-loop was invalidating them, surfacing as "Statement
+// closed" (then "cannot commit - no transaction is active") and killing the
+// whole squad sync the moment a player won a PlayStyle roll (2026-09-15).
+// The transaction's own saveDatabaseToDisk() call, once it reaches COMMIT,
+// persists this write along with everything else — nothing is lost by not
+// saving here too.
+function setManualPlayStylesInDb(playerId, styles) {
+  if (!db || !playerId) return false;
   const json = JSON.stringify(Array.isArray(styles) ? styles : []);
   db.run(`
     INSERT INTO player_manual_playstyles (player_id, playstyles_json, updated_at)
     VALUES (?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(player_id) DO UPDATE SET playstyles_json = excluded.playstyles_json, updated_at = CURRENT_TIMESTAMP;
   `, [playerId, json]);
+  return true;
+}
+
+// Replaces the whole set in one go (the picker always submits the full
+// current selection, not a delta) — the IPC-facing entry point, which
+// (unlike checkPlaystyleEligibility) is never called mid-transaction, so
+// saving straight to disk here is safe.
+function setManualPlayStyles(playerId, styles) {
+  if (!setManualPlayStylesInDb(playerId, styles)) return { success: false };
   saveDatabaseToDisk();
   return { success: true };
 }
@@ -2439,18 +2508,28 @@ const YOUTH_PROMOTION_HEADLINES = [
 // fall back to most recent first.
 const NEWS_TYPE_PRIORITY = {
   competition_win: 100,
+  ballon_dor: 96, // a real once-a-season event, not the weekly noise this rebalance targets
   hat_trick: 90,
   red_card: 85,
-  race_lead_change: 80,
   player_of_month: 75,
   motm: 70,
-  transfer: 65,
   new_captain: 60,
   free_agent_signing: 58,
   youth_promotion: 55,
   win_streak: 50,
   unbeaten_streak: 48,
+  // Transfers and the mid-season leader-change races used to sit at
+  // 65/80 — high enough to win a story slot almost every single week,
+  // crowding out match-day stories (braces, streaks, milestones) per the
+  // user's "mostly seeing transfer news" feedback (2026-09-15). Dropped
+  // down to the same tier as those match-day events so they compete on
+  // an even footing instead of automatically dominating.
+  transfer: 45,
   brace: 45,
+  race_lead_change: 42,
+  golden_boot_race: 42,
+  playmaker_race: 42,
+  golden_glove_race: 42,
   milestone: 40,
   playstyle_eligible: 40,
   yellow_card_milestone: 38,
@@ -2913,7 +2992,12 @@ const PLAYSTYLE_MILESTONE_RULES = [
 // clear it (that's what the bar is calibrated to), so almost the whole
 // squad would end up suggested for a handful of styles each — nothing
 // like how sparingly PlayStyles are actually spread across real players.
-const PLAYSTYLE_AWARD_CHANCE = 0.5;
+// Lowered 0.5 -> 0.12 per the user's ask (2026-09-15): even capped to
+// once-a-month/3-a-season (see PLAYSTYLE_MONTHLY_CHECK /
+// PLAYSTYLE_MAX_WINS_PER_SEASON below), 50% still meant most eligible
+// players won almost every time they were checked — this should feel
+// like a genuinely rare, special moment, not a near-guarantee.
+const PLAYSTYLE_AWARD_CHANCE = 0.12;
 
 // How much PLAYSTYLE_AWARD_CHANCE shrinks per style a player already has
 // — see computePlaystyleAwardChance. Replaced a flat hard cap
@@ -2948,6 +3032,21 @@ function countActivePlaystyleSuggestions(playerId) {
   const res = db.exec(`SELECT COUNT(*) FROM playstyle_suggestions WHERE player_id = ${playerId} AND status = 'added';`);
   return (res.length > 0 && res[0].values.length > 0) ? res[0].values[0][0] : 0;
 }
+
+// Pacing for how often a player can even be RE-ROLLED, separate from
+// PLAYSTYLE_AWARD_CHANCE (the odds of winning once rolled) — per the
+// user's ask (2026-09-15): a genuinely exceptional player can earn up to
+// PLAYSTYLE_MAX_WINS_PER_SEASON styles in one season, but checkPlaystyleEligibility
+// itself only actually rolls for a player once every in-game calendar
+// month (see the last_checked_month gate in player_playstyle_check_state),
+// not every sync — syncing every ~60s during a play session was giving a
+// well-rounded player dozens of rolls in a single real-world day, which
+// is what let 2-3 wins pile up at once and feel cheap. Once a season, at
+// most a handful of monthly rolls (a real football season is ~10 months)
+// each at PLAYSTYLE_AWARD_CHANCE's now-much-lower odds — most players
+// will get zero or one; three in a season should be a rare, standout
+// career.
+const PLAYSTYLE_MAX_WINS_PER_SEASON = 3;
 
 // Which PLAYSTYLE_MILESTONE_RULES entry belongs to which of index.html's
 // PLAYSTYLE_CATALOG categories, purely for grouping getPlaystyleRulesFor
@@ -3048,7 +3147,15 @@ function meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, bar) {
 // Checks one player's current overall/position/attributes/career stats
 // against PLAYSTYLE_MILESTONE_RULES and, at most, resolves ONE newly-
 // eligible style per call — deliberately does NOT roll every rule the
-// player happens to clear in the same sync. Concretely: collects every
+// player happens to clear in the same sync. Two additional pacing gates
+// (both added 2026-09-15 per the user's feedback that players were
+// picking up 2-3 PlayStyles in a single day and it felt overpowered):
+// this function now only actually evaluates a player once per in-game
+// CALENDAR MONTH (see the player_playstyle_check_state gate below) — not
+// every sync, which during a play session could mean dozens of rolls in
+// one real-world sitting — and a player who's already won
+// PLAYSTYLE_MAX_WINS_PER_SEASON styles this season is skipped outright.
+// Concretely: collects every
 // rule whose bar is newly met (cleared AND no playstyle_suggestions row
 // yet — that row is what prevents ever re-considering the same pair
 // again, win, lose, or simply not picked this time), picks ONE at
@@ -3066,9 +3173,33 @@ function meetsPlaystyleBar(overall, attrs, careerStats, skillMoves, bar) {
 // check, not a delta, and a missed sync shouldn't cost a player their
 // shot at a suggestion they qualify for.
 function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, positionId, overall, attrs, eventDate, skillMoves) {
-  if (!db || !saveId || !playerId) return;
+  if (!db || !saveId || !playerId || !seasonId) return;
   const group = POSITION_GROUP_BY_ID[Number(positionId)];
   if (!group) return;
+
+  // Season cap — a player who's already won PLAYSTYLE_MAX_WINS_PER_SEASON
+  // styles this season is done for the season, no need to even check the
+  // monthly gate below.
+  const seasonWinCountRes = db.exec(`SELECT COUNT(*) FROM playstyle_suggestions WHERE player_id = ${playerId} AND season_id = ${seasonId} AND status = 'added';`);
+  const seasonWinCount = (seasonWinCountRes.length > 0 && seasonWinCountRes[0].values.length > 0) ? seasonWinCountRes[0].values[0][0] : 0;
+  if (seasonWinCount >= PLAYSTYLE_MAX_WINS_PER_SEASON) return;
+
+  // Monthly gate — at most one roll ATTEMPT per player per in-game
+  // calendar month, win or miss, so a real-world play session's dozens
+  // of syncs can't all roll the same month away. Marks this month as
+  // checked immediately (before candidates/the roll even happen) so a
+  // miss — or simply no eligible candidate this month — still costs the
+  // month, exactly like a real one would.
+  const monthKey = normalizeDateForCompare(eventDate).slice(0, 6); // YYYYMM
+  if (monthKey.length !== 6) return; // no usable in-game date this sync — nothing to gate on
+  const lastCheckedRes = db.exec(`SELECT last_checked_month FROM player_playstyle_check_state WHERE player_id = ${playerId};`);
+  const lastCheckedMonth = (lastCheckedRes.length > 0 && lastCheckedRes[0].values.length > 0) ? lastCheckedRes[0].values[0][0] : null;
+  if (lastCheckedMonth === monthKey) return; // already rolled (or had nothing to roll) this in-game month
+  db.run(`
+    INSERT INTO player_playstyle_check_state (player_id, last_checked_month)
+    VALUES (?, ?)
+    ON CONFLICT(player_id) DO UPDATE SET last_checked_month = excluded.last_checked_month;
+  `, [playerId, monthKey]);
 
   const alreadyConsideredRes = db.exec(`SELECT playstyle_name FROM playstyle_suggestions WHERE player_id = ${playerId};`);
   const alreadyConsidered = new Set(alreadyConsideredRes.length > 0 ? alreadyConsideredRes[0].values.map(r => r[0]) : []);
@@ -3089,10 +3220,10 @@ function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, posit
   const picked = candidates[Math.floor(Math.random() * candidates.length)];
   const won = Math.random() < computePlaystyleAwardChance(countActivePlaystyleSuggestions(playerId));
   db.run(`
-    INSERT INTO playstyle_suggestions (player_id, playstyle_name, tier, status)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO playstyle_suggestions (player_id, playstyle_name, tier, status, season_id)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(player_id, playstyle_name) DO NOTHING;
-  `, [playerId, picked.name, picked.tier, won ? 'added' : 'missed']);
+  `, [playerId, picked.name, picked.tier, won ? 'added' : 'missed', seasonId]);
   if (!won) return; // rolled and lost — row above just prevents ever reconsidering this pair
 
   // Won the roll — recorded straight into player_manual_playstyles (same
@@ -3105,7 +3236,7 @@ function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, posit
   const currentManual = getManualPlayStyles(playerId);
   if (!currentManual.some(ps => ps.name === picked.name)) {
     currentManual.push({ name: picked.name, plus: picked.tier === 'plus' });
-    setManualPlayStyles(playerId, currentManual);
+    setManualPlayStylesInDb(playerId, currentManual);
   }
 
   recordNewsItem(saveId, {
@@ -3125,7 +3256,7 @@ function checkPlaystyleEligibility(saveId, seasonId, playerId, playerName, posit
 function checkRaceLeaderChanges(saveId, seasonId, leaguePlayers, ourClubName, eventDate) {
   if (!db || !saveId || !seasonId || !Array.isArray(leaguePlayers) || leaguePlayers.length === 0) return;
 
-  function announceIfChanged(category, label, emoji, playerId, playerName, teamName, statValue, statLabel) {
+  function announceIfChanged(category, newsType, label, emoji, playerId, playerName, teamName, statValue, statLabel) {
     if (!playerId || !(statValue > 0)) return;
     const prevRes = db.exec(`SELECT player_id FROM news_race_leaders WHERE season_id = ${seasonId} AND category = '${category}';`);
     const prevPlayerId = (prevRes.length > 0 && prevRes[0].values.length > 0) ? prevRes[0].values[0][0] : null;
@@ -3148,22 +3279,27 @@ function checkRaceLeaderChanges(saveId, seasonId, leaguePlayers, ourClubName, ev
       : `${emoji} ${playerName} (${teamName || 'Rival'}) takes the ${label} lead with ${statValue} ${statLabel}.`;
 
     recordNewsItem(saveId, {
-      seasonId, newsType: 'race_lead_change', headline, playerId, teamName, eventDate,
-      dedupeKey: `race_lead_change:${seasonId}:${category}:${playerId}:${statValue}`
+      seasonId, newsType, headline, playerId, teamName, eventDate,
+      dedupeKey: `${newsType}:${seasonId}:${playerId}:${statValue}`
     });
   }
 
+  // Each award now has its own dedicated news_type (and matching
+  // assets/news/<type>/ folder — golden boot/playmaker/golden glove art
+  // added 2026-09-15) instead of sharing 'race_lead_change', since a
+  // random pick out of one shared folder was showing e.g. a Golden Glove
+  // graphic for a Playmaker lead change.
   const categories = [
-    { key: 'goals', category: 'golden_boot', label: 'Golden Boot', emoji: '👢' },
-    { key: 'assists', category: 'playmaker', label: 'Playmaker award', emoji: '🎯' },
-    { key: 'clean_sheets', category: 'golden_glove', label: 'Golden Glove', emoji: '🧤', positionFilter: 0 } // GK only
+    { key: 'goals', category: 'golden_boot', newsType: 'golden_boot_race', label: 'Golden Boot', emoji: '👢' },
+    { key: 'assists', category: 'playmaker', newsType: 'playmaker_race', label: 'Playmaker award', emoji: '🎯' },
+    { key: 'clean_sheets', category: 'golden_glove', newsType: 'golden_glove_race', label: 'Golden Glove', emoji: '🧤', positionFilter: 0 } // GK only
   ];
-  categories.forEach(({ key, category, label, emoji, positionFilter }) => {
+  categories.forEach(({ key, category, newsType, label, emoji, positionFilter }) => {
     const pool = leaguePlayers.filter(p => positionFilter === undefined || p.position_id === positionFilter);
     if (pool.length === 0) return;
     const top = [...pool].sort((a, b) => (b[key] || 0) - (a[key] || 0))[0];
     if (!top) return;
-    announceIfChanged(category, label, emoji, top.player_id, top.name, top.team_name, top[key], key === 'clean_sheets' ? 'clean sheets' : key);
+    announceIfChanged(category, newsType, label, emoji, top.player_id, top.name, top.team_name, top[key], key === 'clean_sheets' ? 'clean sheets' : key);
   });
 
   // Player of the Year race news is gated to the business end of the
@@ -3178,7 +3314,7 @@ function checkRaceLeaderChanges(saveId, seasonId, leaguePlayers, ourClubName, ev
     const poty = computeSeasonPotyWinner(leaguePlayers);
     if (poty) {
       const potyPlayer = leaguePlayers.find(p => p.player_id === poty.player_id);
-      announceIfChanged('poty', 'Player of the Year race', '🏅', poty.player_id,
+      announceIfChanged('poty', 'race_lead_change', 'Player of the Year race', '🏅', poty.player_id,
         potyPlayer ? potyPlayer.name : 'Unknown', potyPlayer ? potyPlayer.team_name : null, Math.round(poty.score), 'pts');
     }
   }
@@ -3188,11 +3324,27 @@ function checkRaceLeaderChanges(saveId, seasonId, leaguePlayers, ourClubName, ev
 // highest ever recorded (a genuine marquee move), or ANY deal at all
 // involving our own club, fee or not, since those matter regardless of
 // size. See persistTransferFees for the call site.
+//
+// Recency-gated to the last 2 weeks of in-game time (per the user's ask,
+// 2026-09-15): persistTransferFees re-scans the transfer manager's
+// negotiation-storage snapshot every sync, which can still be holding a
+// deal from well earlier in the window the first time this app happens
+// to see it — without this gate, that stale deal reads as "news" the
+// moment it's first observed, months after it actually happened, and
+// was crowding out the same week's real match/goal stories.
+const NOTABLE_TRANSFER_MAX_AGE_DAYS = 14;
 function checkNotableTransfer(saveId, transfer, ourClubName) {
   if (!db || !saveId || !transfer || !transfer.player_id) return;
   const fee = transfer.fee || 0;
   const involvesUs = !!(ourClubName && (transfer.from_team === ourClubName || transfer.to_team === ourClubName));
   if (fee <= 0 && !involvesUs) return; // a free/loan move not involving us isn't news
+
+  const today = (latestCalendarPayload && latestCalendarPayload.current_date) || new Date().toISOString().slice(0, 10);
+  const ageDays = daysBetweenGameDates(transfer.date, today);
+  // A blank/unparseable deal_date (known issue, see convertNegotiationDate
+  // in export_all.lua) can't be confirmed recent — skip rather than risk
+  // surfacing an old deal as news.
+  if (ageDays === null || ageDays > NOTABLE_TRANSFER_MAX_AGE_DAYS) return;
 
   let isNotable = involvesUs;
   if (!isNotable && fee > 0) {
@@ -3703,7 +3855,7 @@ function computeSeasonPotyWinner(leaguePlayers) {
   return best;
 }
 
-function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
+function generateSeasonAwardsIfNeeded(saveId, endedSeasonId, endedSeasonEventDate) {
   if (!db || !latestLeagueStatsPayload || !Array.isArray(latestLeagueStatsPayload.players)) return;
   const leaguePlayers = latestLeagueStatsPayload.players;
   if (leaguePlayers.length === 0) return;
@@ -3742,6 +3894,21 @@ function generateSeasonAwardsIfNeeded(saveId, endedSeasonId) {
       ON CONFLICT(season_id, award_type) DO NOTHING;
     `, [poty.player_id, endedSeasonId, Math.round(poty.score)]);
     console.log(`[Awards] poty for player ${poty.player_id} in season ${endedSeasonId} (score ${poty.score.toFixed(1)}).`);
+
+    // The real end-of-season Ballon d'Or announcement — distinct from
+    // 'race_lead_change's mid-season (April-June) POTY leader updates,
+    // and only fires for the actual final winner. Uses its own
+    // assets/news/ballon_dor/ artwork (added 2026-09-15) rather than the
+    // shared race-change images.
+    const potyPlayer = leaguePlayers.find(p => p.player_id === poty.player_id);
+    const seasonLabelRes = db.exec(`SELECT year_label FROM seasons WHERE id = ${endedSeasonId};`);
+    const seasonLabel = (seasonLabelRes.length > 0 && seasonLabelRes[0].values.length > 0) ? seasonLabelRes[0].values[0][0] : null;
+    recordNewsItem(saveId, {
+      seasonId: endedSeasonId, newsType: 'ballon_dor',
+      headline: `🏅 ${potyPlayer ? potyPlayer.name : 'Unknown'} wins the Ballon d'Or${seasonLabel ? ` for ${seasonLabel}` : ''}!`,
+      playerId: poty.player_id, eventDate: endedSeasonEventDate || null,
+      dedupeKey: `ballon_dor:${endedSeasonId}:${poty.player_id}`
+    });
   }
 
   saveDatabaseToDisk();
@@ -3910,7 +4077,7 @@ function resolveActiveSave(uid, managerName, clubName, dateForSeasonLabel) {
   // a different save mid-sync — should trigger a season-end review/awards.
   if (previousSaveId === saveId && previousSeasonId && previousSeasonId !== currentSeasonId) {
     generateSeasonEndReviewIfNeeded(saveId, previousSeasonId);
-    generateSeasonAwardsIfNeeded(saveId, previousSeasonId);
+    generateSeasonAwardsIfNeeded(saveId, previousSeasonId, dateForSeasonLabel);
   }
 
   db.run('UPDATE seasons SET is_current = 1 WHERE id = ?;', [currentSeasonId]);
@@ -4457,12 +4624,31 @@ function importFifaData(jsonPayload) {
       }
     }
 
+    // Deferred to AFTER every other prepared statement below is freed and
+    // the transaction committed (see the goalDeltas block above for what
+    // this re-checks and why) — calling it earlier, while playerStmt/
+    // statsStmt/etc. were still open, made sql.js invalidate those other
+    // Statement objects out from under their later .free() calls, which
+    // surfaced as "Statement closed" crashing the whole sync on refresh
+    // (2026-09-15). Its own DB work doesn't need to share this
+    // transaction — recordNewsItem's dedupe_key makes it safe to run as
+    // its own separate write afterward.
+    const shouldCheckMatchGoalNews = !!(liveFixture && goalDeltas.length > 0 && activeSaveId && liveFixture.played);
+
     injuryOpenStmt.free();
     injuryCloseStmt.free();
     contractStateUpsertStmt.free();
     playerStmt.free();
     statsStmt.free();
     db.run('COMMIT;');
+
+    if (shouldCheckMatchGoalNews) {
+      try {
+        detectMatchGoalNews(activeSaveId, currentSeasonId, liveFixture.date || syncInGameDate, liveFixture.competition || '', liveFixture.opponent || '');
+      } catch (newsErr) {
+        console.error('[DB] Failed to check for match hat-trick/brace news:', newsErr);
+      }
+    }
 
     // Youth Mode potential-reveal: lock each new-to-us player's reveal
     // tier to whichever league the club is in RIGHT NOW, the first time
@@ -4480,8 +4666,17 @@ function importFifaData(jsonPayload) {
     saveDatabaseToDisk();
     console.log(`[DB] Synced ${jsonPayload.players.length} players into season ${currentSeasonId} (history preserved).`);
   } catch (err) {
-    db.run('ROLLBACK;');
-    console.error('[DB] Transaction failed, rolled back changes:', err);
+    // Log the real error FIRST — ROLLBACK itself can throw ("cannot
+    // rollback - no transaction is active") if COMMIT already succeeded
+    // and something AFTER it threw (e.g. saveDatabaseToDisk), which used
+    // to replace this error with that confusing secondary one before it
+    // ever got logged (2026-09-15).
+    console.error('[DB] Transaction failed:', err);
+    try {
+      db.run('ROLLBACK;');
+    } catch (rollbackErr) {
+      console.error('[DB] Rollback also failed — transaction was likely already committed:', rollbackErr);
+    }
   }
 }
 
