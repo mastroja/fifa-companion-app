@@ -449,6 +449,51 @@ CREATE TABLE IF NOT EXISTS player_manual_playstyles (
     FOREIGN KEY(player_id) REFERENCES players(player_id)
 );
 
+-- Auto-detected, auto-AWARDED PlayStyle history — see
+-- PLAYSTYLE_MILESTONE_RULES and checkPlaystyleEligibility in main.js. The
+-- game never grants brand-new PlayStyles as a player develops (only
+-- upgrades an existing one to PlayStyle+), so this fills that gap on the
+-- companion-app side: every sync, a player's current overall/position/
+-- attributes/career stats are checked against a curated rule per
+-- PlayStyle, and the FIRST rule newly met (per the one-pick-at-a-time +
+-- PLAYSTYLE_AWARD_CHANCE selection in checkPlaystyleEligibility) gets a
+-- row here. A win (status 'added') is merged into player_manual_
+-- playstyles immediately, per the user's ask (2026-09-14) — no manual
+-- "Add" step. This table still exists alongside that one because
+-- player_manual_playstyles has no per-style timestamp (it stores the
+-- whole list as one JSON blob) — detected_at here is what lets the
+-- player profile tag a recent win "NEW" for PLAYSTYLE_NEW_FLAG_DAYS, and
+-- what the Home dashboard's development-alert banner reads to remind the
+-- user to go set it manually in Live Editor (there's no confirmed write
+-- path to grant a real PlayStyle in the live save). Keyed like
+-- player_manual_playstyles (player_id alone, not save-scoped) since
+-- attribute-based eligibility is a property of the real player, not of
+-- any one save. Once a (player_id, playstyle_name) row exists it is
+-- never re-inserted regardless of status — a miss is as final as a win,
+-- never retried on a later sync (removing an auto-added style you don't
+-- want is still just a normal edit in the existing "+ Playstyle" picker,
+-- same as any manually-added one).
+CREATE TABLE IF NOT EXISTS playstyle_suggestions (
+    player_id INTEGER NOT NULL,
+    playstyle_name TEXT NOT NULL,
+    -- Whether the attributes cleared the rule's base or plus bar at the
+    -- moment of detection (see PLAYSTYLE_MILESTONE_RULES) — decides
+    -- whether it was merged into player_manual_playstyles as the base
+    -- style or the PlayStyle+ version.
+    tier TEXT NOT NULL DEFAULT 'base', -- 'base' | 'plus'
+    -- 'added' | 'missed'. 'missed' is set the one time this row is ever
+    -- inserted, when checkPlaystyleEligibility's PLAYSTYLE_AWARD_CHANCE
+    -- roll fails — a player who clears a rule's bar isn't guaranteed the
+    -- style (otherwise nearly every player good enough to clear a bar
+    -- would get it, since that's what the bar is calibrated to). The row
+    -- still exists so the (player_id, playstyle_name) pair is never
+    -- re-rolled.
+    status TEXT NOT NULL DEFAULT 'added',
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (player_id, playstyle_name),
+    FOREIGN KEY(player_id) REFERENCES players(player_id)
+);
+
 -- User-picked override for a player's local headshot photo (see the
 -- "Change Photo" picker on the player profile), for whenever the
 -- automatic age/nationality/skin-tone bucketing (resolveHeadshotPath in
