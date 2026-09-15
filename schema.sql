@@ -490,7 +490,28 @@ CREATE TABLE IF NOT EXISTS playstyle_suggestions (
     -- re-rolled.
     status TEXT NOT NULL DEFAULT 'added',
     detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Which season this roll happened in — checkPlaystyleEligibility
+    -- counts a player's 'added' rows with this season's id against
+    -- PLAYSTYLE_MAX_WINS_PER_SEASON, capping how many new PlayStyles a
+    -- player can win in one season (added 2026-09-15 after players were
+    -- picking up 2-3 in a single day of syncing). NULL on rows inserted
+    -- before this column existed.
+    season_id INTEGER,
     PRIMARY KEY (player_id, playstyle_name),
+    FOREIGN KEY(player_id) REFERENCES players(player_id)
+);
+
+-- Throttles checkPlaystyleEligibility to at most one roll ATTEMPT (win,
+-- miss, or no eligible candidate at all) per player per in-game calendar
+-- month, regardless of how many times a squad sync actually runs that
+-- month — added 2026-09-15 alongside playstyle_suggestions.season_id,
+-- since syncing every ~60s during a play session was letting a player
+-- rack up dozens of rolls (and so several wins) in one real-world
+-- sitting. last_checked_month is "YYYYMM" derived from the sync's own
+-- in-game current_date, not wall-clock time.
+CREATE TABLE IF NOT EXISTS player_playstyle_check_state (
+    player_id INTEGER PRIMARY KEY,
+    last_checked_month TEXT NOT NULL,
     FOREIGN KEY(player_id) REFERENCES players(player_id)
 );
 

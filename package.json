@@ -1,6 +1,6 @@
 {
   "name": "fifa-career-companion",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "FIFA Analytics — analytics companion for EA FC Career Mode",
   "main": "main.js",
   "scripts": {

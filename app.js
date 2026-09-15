@@ -4864,6 +4864,24 @@ let currentCalendar = [];
       return { latest, next };
     }
 
+    // The last content string actually rendered into #home-ticker-track —
+    // lets renderHomeTicker skip rebuilding/restarting when nothing about
+    // the ticker's own content changed (see the early-return below).
+    // renderHomeDashboard (and so this) gets called from 7+ places —
+    // every squad/calendar/transfer update, settings changes, even
+    // expanding a squad table row — most of which have nothing to do
+    // with the ticker. Without this check, EVERY one of those was fully
+    // rebuilding the ticker and snapping its animation back to position 0
+    // (see the reset comment inside), which during an active auto-refresh
+    // session (squad+calendar+league-stats+transfers all landing within
+    // moments of each other) meant several resets per minute — the
+    // ticker kept restarting from the very beginning before it ever got
+    // to cruise through the middle of the list, which is what actually
+    // read as "speeding up", not a real change in scroll rate (verified
+    // 2026-09-15: sampled the real on-screen position across repeated
+    // overlapping renders and the steady-state speed never drifted).
+    let lastTickerContentHtml = null;
+
     // Auto-scrolling ticker at the top of Home: recent results + upcoming
     // fixtures for the user's own team, plus the primary competition's
     // most recently completed round in full and the next round's
@@ -4948,13 +4966,22 @@ let currentCalendar = [];
       if (allItems.length === 0) {
         wrap.style.display = 'none';
         track.innerHTML = '';
+        lastTickerContentHtml = null; // so content reappearing later isn't mistaken for "unchanged"
         return;
       }
 
       const sep = `<span class="home-ticker-sep">•</span>`;
       const onceHtml = allItems.join(sep);
-      track.innerHTML = onceHtml + sep + onceHtml + sep;
       wrap.style.display = '';
+
+      // Nothing about the ticker's own content actually changed since
+      // last render — leave the currently-running animation alone rather
+      // than rebuild the DOM and restart it from position 0 (see
+      // lastTickerContentHtml above).
+      if (onceHtml === lastTickerContentHtml) return;
+      lastTickerContentHtml = onceHtml;
+
+      track.innerHTML = onceHtml + sep + onceHtml + sep;
 
       requestAnimationFrame(() => {
         const oneCopyWidth = track.scrollWidth / 2;
@@ -5333,6 +5360,10 @@ let currentCalendar = [];
       injury_recovery: { emoji: '✅' },
       competition_win: { emoji: '🏆' },
       race_lead_change: { emoji: '🏁' },
+      golden_boot_race: { emoji: '👢' },
+      playmaker_race: { emoji: '🎯' },
+      golden_glove_race: { emoji: '🧤' },
+      ballon_dor: { emoji: '🏅' },
       transfer: { emoji: '💰' },
       league_transfer: { emoji: '💰' },
       free_agent_signing: { emoji: '🆓' },
@@ -8010,6 +8041,24 @@ let currentCalendar = [];
     // re-popping for the same still-pending suggestion on every render.
     const playstyleAlertPopupShownKeys = new Set();
 
+    // Dismissing the banner only clears it for the CURRENT set of pending
+    // alerts — tracked by a signature of exactly which (player, style)
+    // pairs are showing, same pattern as youthWarningDismissedSignature —
+    // so it silently reappears the moment a genuinely new suggestion
+    // comes in, rather than staying hidden forever after one click. Added
+    // 2026-09-15 per the user's ask; this banner used to be deliberately
+    // "unskippable" (no dismiss at all) but that's no longer the design.
+    let playstyleAlertDismissedSignature = null;
+
+    function playstyleAlertSignature(alerts) {
+      return alerts.map(a => `${a.playerId}:${a.styleName}`).sort().join(',');
+    }
+
+    function dismissPlaystyleAlerts(signature) {
+      playstyleAlertDismissedSignature = signature;
+      renderPlaystyleAlerts();
+    }
+
     function showPlaystyleAlertPopup(newAlerts) {
       const body = document.getElementById('playstyle-alert-popup-body');
       if (body) {
@@ -8030,16 +8079,16 @@ let currentCalendar = [];
       if (dialog && dialog.open) dialog.close();
     }
 
-    // Unskippable PlayStyle-development alert banner — see
-    // getPendingPlaystyleAlerts in main.js. Deliberately re-fetched and
-    // re-rendered on every dashboard render (called from
-    // renderHomeDashboard, same as renderYouthModeWarning) rather than
-    // cached, and has no dismiss action of its own: every listed win is
+    // PlayStyle-development alert banner — see getPendingPlaystyleAlerts
+    // in main.js. Deliberately re-fetched and re-rendered on every
+    // dashboard render (called from renderHomeDashboard, same as
+    // renderYouthModeWarning) rather than cached. Every listed win is
     // ALREADY recorded in the companion app (see checkPlaystyleEligibility
     // in main.js — no manual Add step), so this is purely a reminder to
-    // go apply it in Live Editor too. A player drops off once
-    // PLAYSTYLE_NEW_FLAG_DAYS passes, not on any click, which is what
-    // makes it "unskippable" rather than something swept aside unactioned.
+    // go apply it in Live Editor too — dismissing it (see
+    // playstyleAlertDismissedSignature) doesn't undo that, it just clears
+    // the reminder for the CURRENT set of pending alerts; a player drops
+    // off on its own once PLAYSTYLE_NEW_FLAG_DAYS passes regardless.
     async function renderPlaystyleAlerts() {
       const banner = document.getElementById('playstyle-alert-banner');
       if (!banner || !window.api || !window.api.getPendingPlaystyleAlerts) return;
@@ -8063,6 +8112,13 @@ let currentCalendar = [];
         return;
       }
 
+      const signature = playstyleAlertSignature(alerts);
+      if (playstyleAlertDismissedSignature === signature) {
+        banner.style.display = 'none';
+        return;
+      }
+      playstyleAlertDismissedSignature = null; // stale dismissal from a since-changed alert set
+
       banner.style.display = 'flex';
       banner.innerHTML = `
         <div class="playstyle-alert-row">
@@ -8077,6 +8133,7 @@ let currentCalendar = [];
           `).join('')}
         </div>
         <div style="font-weight: 400; font-size: 11px; opacity: 0.85;">Already added to their profile here — you still need to set each one manually in Live Editor's PlayStyle editor to make it real in-game.</div>
+        <button class="playstyle-alert-dismiss-btn" onclick="dismissPlaystyleAlerts('${signature.replace(/'/g, "\\'")}')">Dismiss</button>
       `;
     }
 

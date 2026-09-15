@@ -16,7 +16,11 @@ Add more any time; nothing else needs to change. A type with no folder
 | `injury/` | New injury | ✅ populated |
 | `injury_recovery/` | Back from injury | ✅ populated |
 | `competition_win/` | Won a competition | ✅ populated |
-| `race_lead_change/` | Golden Boot / Playmaker / Golden Glove / POTY race lead change | ✅ populated |
+| `race_lead_change/` | Player of the Year race lead change (mid-season, April-June) | needed |
+| `golden_boot_race/` | Golden Boot race lead change | ✅ populated |
+| `playmaker_race/` | Playmaker race lead change | ✅ populated |
+| `golden_glove_race/` | Golden Glove race lead change | ✅ populated |
+| `ballon_dor/` | Ballon d'Or / Player of the Year — real end-of-season winner only (see generateSeasonAwardsIfNeeded in main.js) | ✅ populated |
 | `transfer/` | Notable transfer | ✅ populated |
 | `win_streak/` | Win streak | ✅ populated |
 | `unbeaten_streak/` | Unbeaten streak | needed |
