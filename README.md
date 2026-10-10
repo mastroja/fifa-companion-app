@@ -12,7 +12,7 @@ This app depends on a specific combination of game version + Live Editor version
 |---|---|
 | EA Sports FC 27 (Steam) | Build `1.0.141.12554` |
 | FC 27 Live Editor | `v27.1.3` |
-| FIFA Analytics | `27.0.3` |
+| FIFA Analytics | `27.0.4` |
 
 
 ## 1. Pin your game version (do this FIRST)

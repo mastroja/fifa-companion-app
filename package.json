@@ -1,6 +1,6 @@
 {
   "name": "fifa-analytics",
-  "version": "27.0.3",
+  "version": "27.0.4",
   "description": "FIFA Analytics — analytics companion for EA FC Career Mode",
   "main": "main.js",
   "scripts": {
