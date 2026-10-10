@@ -7,7 +7,7 @@
 //   3. set SERVER_URL to where tools/license/server.js is hosted (for "Sign in with Patreon") and MEMBERSHIP_URL
 //   4. update BUILD_DATE on every release (keys can say "valid for builds released up to <date>")
 module.exports = {
-  PUBLIC_KEY_PEM: '',
+  PUBLIC_KEY_PEM: 'MCowBQYDK2VwAyEAImcZFkXNuTniMM6DSKU8KOH4ZTzWWJuzNv66FfbsoZw=',
   SERVER_URL: '',        // e.g. https://license.example.com  — no trailing slash
   MEMBERSHIP_URL: '',    // e.g. https://www.patreon.com/yourname
   BUILD_DATE: '2026-10-08',
