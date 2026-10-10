@@ -103,7 +103,7 @@
     const ovrLine = pts.length > 1 ? `<polyline points="${line(pts, 'overall')}" fill="none" style="stroke: var(--accent-color); stroke-width: 2.5;" />` : '';
     const dots = pts.map(p => `
       <circle cx="${x(p.age)}" cy="${y(p.overall)}" r="5" style="fill: var(--accent-color); stroke: var(--card-bg); stroke-width: 1.5;"><title>${esc(p.label || '')} · age ${p.age} · OVR ${p.overall}${Number(p.potential) > 0 ? ' / POT ' + p.potential : ''}</title></circle>
-      <text x="${x(p.age)}" y="${y(p.overall) + 18}" text-anchor="middle" font-size="11" font-weight="700" style="fill: var(--text-color);">${p.overall}</text>`).join('');
+      <text x="${x(p.age) - L < 14 ? x(p.age) + 7 : x(p.age)}" y="${y(p.overall) + 18}" text-anchor="${x(p.age) - L < 14 ? 'start' : 'middle'}" font-size="11" font-weight="700" style="fill: var(--text-color);">${p.overall}</text>`).join(''); // first point: label to the right, clear of the axis numbers
 
     const legend = `
       <div style="display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin-top: 6px;">
@@ -154,6 +154,7 @@
   // points: [{ x, y, color, title, id, r }]; opts: { xLabel, yLabel, xFmt, yFmt, trend: [{x, y}, ...] (polyline), onClick: 'fnName',
   //   bands: [{ x0, x1, label, color, opacity }] (shaded x ranges), yRef / yRefLabel (dashed horizontal reference) }.
   // Points with a non-finite x/y are skipped. onClick is a global function name called with the point's id.
+  let scatterClipSeq = 0; // unique clipPath ids, several scatters can share a page
   function scatterSvg(points, opts) {
     opts = opts || {};
     const pts = (points || []).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
@@ -178,13 +179,14 @@
     const bands = (opts.bands || []).filter(b => Number.isFinite(b.x0) && Number.isFinite(b.x1)).map(b => {
       const a = X(Math.max(b.x0, x0)), z = X(Math.min(b.x1, x1));
       return z > a ? `<rect x="${a}" y="${T}" width="${z - a}" height="${B - T}" style="fill: ${b.color || 'var(--hover-color)'}; opacity: ${b.opacity || 0.5};" />
-        ${b.label ? `<text x="${(a + z) / 2}" y="${T + 12}" text-anchor="middle" font-size="11" style="fill: var(--text-dim);">${esc(b.label)}</text>` : ''}` : '';
+        ${b.label ? `<text x="${(a + z) / 2}" y="${B - 6}" text-anchor="middle" font-size="11" style="fill: var(--text-dim);">${esc(b.label)}</text>` : ''}` : '';
     }).join('');
     const yRef = Number.isFinite(opts.yRef) && opts.yRef >= y0 && opts.yRef <= y1
       ? `<line x1="${L}" y1="${Y(opts.yRef)}" x2="${Rr}" y2="${Y(opts.yRef)}" style="stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 4;" />${opts.yRefLabel ? `<text x="${Rr - 4}" y="${Y(opts.yRef) - 5}" text-anchor="end" font-size="11" style="fill: var(--text-dim);">${esc(opts.yRefLabel)}</text>` : ''}` : '';
     const trendPts = (opts.trend || []).filter(t => Number.isFinite(t.x) && Number.isFinite(t.y));
+    const clipId = `sc-clip-${++scatterClipSeq}`;
     const trend = trendPts.length >= 2
-      ? `<polyline points="${trendPts.map(t => `${X(t.x)},${Y(t.y)}`).join(' ')}" fill="none" style="stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4;" />` : '';
+      ? `<defs><clipPath id="${clipId}"><rect x="${L}" y="${T}" width="${Rr - L}" height="${B - T}" /></clipPath></defs><polyline clip-path="url(#${clipId})" points="${trendPts.map(t => `${X(t.x)},${Y(t.y)}`).join(' ')}" fill="none" style="stroke: var(--text-dim); stroke-width: 1.5; stroke-dasharray: 5 4;" />` : '';
     const dots = pts.map(p => {
       const click = opts.onClick && p.id != null ? ` onclick="${esc(opts.onClick)}('${esc(p.id)}')" style="cursor: pointer;"` : '';
       return `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="${p.r || 5.5}" fill="${p.color || 'var(--accent-color)'}" fill-opacity="0.85" stroke="var(--card-bg)" stroke-width="1.5"${click}><title>${esc(p.title || '')}</title></circle>`;

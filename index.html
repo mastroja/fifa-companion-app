@@ -311,6 +311,21 @@
 
     /* News tab flash — an unread edition (see setNewsTabUnread) pulses
        the button until the user actually opens News and views it. */
+    /* Insights > Squad balance heatmap: names wrap inside their cell (see insights_squad.js balanceCard). */
+    .insights-balance td,
+    .insights-balance th {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+
+    .insights-balance td:first-child,
+    .insights-balance th:first-child {
+      white-space: nowrap;
+      overflow-wrap: normal;
+    }
+
     /* Weekly edition archive arrows above the news story (renderNewsStory). */
     .news-edition-nav {
       display: flex;

@@ -124,7 +124,9 @@
     }).join('');
     const key = [['good', 'at/above best-11 avg'], ['ok', 'within 4'], ['weak', 'within 8'], ['poor', 'further below'], ['empty', 'nobody']]
       .map(([t, l]) => `<span><span style="display: inline-block; width: 12px; height: 12px; border-radius: 2px; background: ${TONE_BG[t]}; vertical-align: -1px;"></span> ${l}</span>`).join(' ');
-    return `<table class="sub-table"><thead><tr><th>Role</th><th>1st</th><th>2nd</th><th>3rd</th><th title="Best player listed at this role as an alternative position">Cover</th><th>Flags</th></tr></thead><tbody>${body}</tbody></table>
+    // fixed layout so long names wrap inside their cell instead of pushing the table past the card
+    return `<table class="sub-table insights-balance" style="width: 100%; table-layout: fixed;"><colgroup><col style="width: 11%"><col style="width: 17.5%"><col style="width: 17.5%"><col style="width: 17.5%"><col style="width: 17.5%"><col style="width: 19%"></colgroup>
+      <thead><tr><th>Role</th><th>1st</th><th>2nd</th><th>3rd</th><th title="Best player listed at this role as an alternative position">Cover</th><th>Flags</th></tr></thead><tbody>${body}</tbody></table>
       <div style="display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin-top: 8px;">${key}<span>· flags: <span style="color: #f85149;">red</span> = a real hole, <span style="color: #d29922;">amber</span> = worth watching</span></div>`;
   }
 

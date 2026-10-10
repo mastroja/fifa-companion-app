@@ -71,5 +71,11 @@ assert(xs[0] >= 136, 'clipped bar starts at the plot edge (label width 130 + 6),
 let sc = C.scatterSvg([{ x: 20, y: 70 }, { x: 30, y: 80 }], { bands: [{ x0: 24, x1: 29, label: 'Peak' }], yRef: 75, yRefLabel: 'XI' });
 assert(sc.includes('Peak') && sc.includes('>XI<'), 'band + ref drawn');
 assert(!C.scatterSvg([{ x: 20, y: 70 }, { x: 30, y: 80 }], { yRef: 999, yRefLabel: 'XI' }).includes('>XI<'), 'ref outside the axis skipped');
+// the trend line is clipped to the plot area, with ids unique per chart
+const s1 = C.scatterSvg([{ x: 60, y: 1000 }, { x: 80, y: 20000 }], { trend: [{ x: 60, y: 1000 }, { x: 90, y: 90000 }] });
+const s2 = C.scatterSvg([{ x: 60, y: 1000 }, { x: 80, y: 20000 }], { trend: [{ x: 60, y: 1000 }, { x: 90, y: 90000 }] });
+const idOf = svg => svg.match(/clipPath id="([^"]+)"/)[1];
+assert(/<polyline clip-path="url\(#/.test(s1), 'trend uses the clip');
+assert.notStrictEqual(idOf(s1), idOf(s2), 'clip ids unique');
 
 console.log('charts tests passed');

@@ -2659,7 +2659,7 @@ function listNewsImages(newsType) {
   if (!newsType || !/^[a-z_]+$/.test(newsType)) return [];
   const dir = path.join(__dirname, 'assets', 'news', newsType);
   try {
-    return fs.readdirSync(dir).filter(f => /\.(png|jpe?g|webp|gif)$/i.test(f));
+    return fs.readdirSync(dir).filter(f => /\.(png|jpe?g|jfif|webp|gif)$/i.test(f)); // .jfif is a JPEG (Chromium shows it)
   } catch (e) {
     return [];
   }
